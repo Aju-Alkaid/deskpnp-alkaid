@@ -1,0 +1,77 @@
+﻿# ====== Build Outputs ======
+build/
+Debug/
+Release/
+*/Debug/
+*/Release/
+*.o
+*.obj
+*.lst
+*.hex
+*.bin
+*.elf
+*.out
+*.map
+*.d
+*.crf
+*.dep
+*.depend
+*.iex
+*.axf
+*.lnp
+*.htm
+*.sct
+*.scvd
+*.build_log.htm
+*.tra
+
+# Keil MDK-ARM
+MDK-ARM/DebugConfig/
+MDK-ARM/pnp_1/
+MDK-ARM/RTE/
+MDK-ARM/*.uvguix.*
+MDK-ARM/*.uvoptx
+MDK-ARM/JLinkLog.txt
+MDK-ARM/JLinkSettings.ini
+
+# ====== CubeMX ======
+mx.scratch
+.mxproject
+
+# ====== TouchGFX ======
+TouchGFX/build/
+TouchGFX/generated/
+TouchGFX/simulator/build/
+
+# ====== IDE / Editor ======
+.vscode/
+.settings/
+*.swp
+*.swo
+*~
+.idea/
+*.cproject
+*.project
+settings.json
+
+# ====== Misc Tooling ======
+.clangd/
+.clang-tidy
+.clang-format
+
+# ====== Bundle/IDE Store ======
+bundles-lock.store.json
+bundles.store.json
+ide.store.json
+
+# ====== OS Files ======
+Thumbs.db
+Desktop.ini
+.DS_Store
+*.tmp
+*.bak
+*~
+
+# ====== Backup Files ======
+*.bak
+*_backup.*

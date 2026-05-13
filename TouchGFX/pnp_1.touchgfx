@@ -1,0 +1,511 @@
+{
+  "Application": {
+    "Screens": [
+      {
+        "Name": "Screen_HOME",
+        "CanvasBufferSize": 6000,
+        "Components": [
+          {
+            "Type": "Box",
+            "Name": "box1",
+            "X": 59,
+            "Width": 340,
+            "Height": 300,
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            }
+          },
+          {
+            "Type": "TextArea",
+            "Name": "HOME",
+            "X": 60,
+            "Width": 66,
+            "Height": 31,
+            "TextId": "__SingleUse_G70R",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "CustomContainerInstance",
+            "Name": "pageTable",
+            "Width": 153,
+            "Height": 300,
+            "CustomContainerDefinitionName": "PageTable"
+          },
+          {
+            "Type": "Button",
+            "Name": "open",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Pressed": "simple_left.png",
+            "Released": "simple_right.png"
+          }
+        ],
+        "Interactions": [
+          {
+            "InteractionName": "Interaction1",
+            "Trigger": {
+              "Type": "TriggerPhysicalButtonClicked",
+              "ButtonKey": 9
+            },
+            "Action": {
+              "Type": "ActionGotoScreen",
+              "ScreenTransitionType": "ScreenTransitionNone",
+              "ActionComponent": "Screen_IMPORT"
+            }
+          },
+          {
+            "InteractionName": "Interaction2",
+            "Trigger": {
+              "Type": "TriggerPhysicalButtonClicked",
+              "ButtonKey": 10
+            },
+            "Action": {
+              "Type": "ActionGotoScreen",
+              "ScreenTransitionType": "ScreenTransitionNone",
+              "ActionComponent": "Screen_LOG"
+            }
+          },
+          {
+            "InteractionName": "Interaction3",
+            "Trigger": {
+              "Type": "TriggerPhysicalButtonClicked",
+              "ButtonKey": 11
+            },
+            "Action": {
+              "Type": "ActionGotoScreen",
+              "ScreenTransitionType": "ScreenTransitionNone",
+              "ActionComponent": "Screen_REFRE"
+            }
+          }
+        ]
+      },
+      {
+        "Name": "Screen_IMPORT",
+        "CanvasBufferSize": 6000,
+        "Components": [
+          {
+            "Type": "Box",
+            "Name": "box1",
+            "X": 59,
+            "Width": 340,
+            "Height": 300,
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            }
+          },
+          {
+            "Type": "TextArea",
+            "Name": "IMPORT",
+            "X": 60,
+            "Width": 82,
+            "Height": 31,
+            "TextId": "__SingleUse_C4NX",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "CustomContainerInstance",
+            "Name": "pageTable",
+            "Width": 153,
+            "Height": 300,
+            "CustomContainerDefinitionName": "PageTable"
+          },
+          {
+            "Type": "Button",
+            "Name": "open",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Pressed": "simple_left.png",
+            "Released": "simple_right.png"
+          }
+        ],
+        "Interactions": []
+      },
+      {
+        "Name": "Screen_LOG",
+        "CanvasBufferSize": 6000,
+        "Components": [
+          {
+            "Type": "Box",
+            "Name": "box1",
+            "X": 59,
+            "Width": 342,
+            "Height": 300,
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            }
+          },
+          {
+            "Type": "TextArea",
+            "Name": "LOG",
+            "X": 60,
+            "Width": 43,
+            "Height": 31,
+            "TextId": "__SingleUse_3E0M",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "CustomContainerInstance",
+            "Name": "pageTable",
+            "Width": 153,
+            "Height": 300,
+            "CustomContainerDefinitionName": "PageTable"
+          },
+          {
+            "Type": "Button",
+            "Name": "open",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Pressed": "simple_left.png",
+            "Released": "simple_right.png"
+          }
+        ],
+        "Interactions": []
+      },
+      {
+        "Name": "Screen_REFRE",
+        "CanvasBufferSize": 6000,
+        "Components": [
+          {
+            "Type": "Box",
+            "Name": "box1",
+            "X": 59,
+            "Width": 342,
+            "Height": 300,
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            }
+          },
+          {
+            "Type": "TextArea",
+            "Name": "caution",
+            "X": 68,
+            "Y": 21,
+            "Width": 325,
+            "Height": 62,
+            "TextId": "__SingleUse_3GH9",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "CustomContainerInstance",
+            "Name": "pageTable",
+            "Width": 153,
+            "Height": 300,
+            "CustomContainerDefinitionName": "PageTable"
+          },
+          {
+            "Type": "Button",
+            "Name": "open",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Pressed": "simple_left.png",
+            "Released": "simple_right.png"
+          }
+        ],
+        "Interactions": [
+          {
+            "InteractionName": "Interaction1",
+            "Trigger": {
+              "Type": "TriggerPhysicalButtonClicked"
+            },
+            "Action": {
+              "Type": "ActionCustom",
+              "FunctionName": "refresh_all_motors"
+            }
+          }
+        ],
+        "CustomActions": [
+          {
+            "Name": "refresh_motors"
+          }
+        ]
+      }
+    ],
+    "CustomContainerDefinitions": [
+      {
+        "Name": "detail",
+        "Y": 51,
+        "Width": 97,
+        "Height": 300,
+        "Components": [
+          {
+            "Type": "Box",
+            "Name": "box1",
+            "Width": 97,
+            "Height": 300,
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            }
+          },
+          {
+            "Type": "Line",
+            "Name": "line1",
+            "X": 94,
+            "Width": 3,
+            "Height": 300,
+            "EndY": 300.0,
+            "LineWidth": 10.0,
+            "LineEndingStyle": "Square"
+          },
+          {
+            "Type": "TextArea",
+            "Name": "home",
+            "Y": 14,
+            "Width": 60,
+            "Height": 35,
+            "TextId": "__SingleUse_QTOZ",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "download",
+            "Y": 64,
+            "Width": 76,
+            "Height": 35,
+            "TextId": "__SingleUse_XWGZ",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "refresh",
+            "Y": 114,
+            "Width": 91,
+            "Height": 35,
+            "TextId": "__SingleUse_13NH",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "message",
+            "Y": 164,
+            "Width": 33,
+            "Height": 35,
+            "TextId": "__SingleUse_SXYA",
+            "TextRotation": "0",
+            "AutoSize": true
+          },
+          {
+            "Type": "TextArea",
+            "Name": "menu",
+            "Y": 214,
+            "Width": 59,
+            "Height": 35,
+            "TextId": "__SingleUse_JZ26",
+            "TextRotation": "0",
+            "AutoSize": true
+          }
+        ],
+        "Interactions": [
+          {
+            "InteractionName": "Interaction1",
+            "Trigger": {
+              "Type": "TriggerNone"
+            },
+            "Action": {
+              "Type": "ActionCustom",
+              "FunctionName": "function1"
+            }
+          }
+        ]
+      },
+      {
+        "Name": "PageTable",
+        "X": -50,
+        "Y": 50,
+        "Width": 153,
+        "Height": 300,
+        "Components": [
+          {
+            "Type": "Box",
+            "Name": "box1",
+            "Width": 59,
+            "Height": 300,
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            }
+          },
+          {
+            "Type": "Line",
+            "Name": "line1_1",
+            "X": 56,
+            "Width": 3,
+            "Height": 300,
+            "EndY": 300.0,
+            "LineWidth": 10.0,
+            "LineEndingStyle": "Square"
+          },
+          {
+            "Type": "CustomContainerInstance",
+            "Name": "detail1",
+            "X": 56,
+            "Width": 97,
+            "Height": 300,
+            "Visible": false,
+            "CustomContainerDefinitionName": "detail"
+          },
+          {
+            "Type": "Image",
+            "Name": "refre",
+            "X": 6,
+            "Y": 156,
+            "Width": 44,
+            "Height": 44,
+            "RelativeFilename": "refre.png"
+          },
+          {
+            "Type": "Image",
+            "Name": "home",
+            "X": 6,
+            "Y": 6,
+            "Width": 45,
+            "Height": 44,
+            "RelativeFilename": "home.PNG"
+          },
+          {
+            "Type": "Image",
+            "Name": "import",
+            "X": 6,
+            "Y": 56,
+            "Width": 44,
+            "Height": 44,
+            "RelativeFilename": "download.png"
+          },
+          {
+            "Type": "Image",
+            "Name": "log",
+            "X": 6,
+            "Y": 106,
+            "Width": 44,
+            "Height": 44,
+            "RelativeFilename": "message.png"
+          },
+          {
+            "Type": "Image",
+            "Name": "refre_selc",
+            "X": 6,
+            "Y": 156,
+            "Width": 44,
+            "Height": 44,
+            "Visible": false,
+            "RelativeFilename": "refre_selected.png"
+          },
+          {
+            "Type": "Image",
+            "Name": "home_selc",
+            "X": 6,
+            "Y": 6,
+            "Width": 45,
+            "Height": 44,
+            "Visible": false,
+            "RelativeFilename": "home_selected.PNG"
+          },
+          {
+            "Type": "Image",
+            "Name": "import_selc",
+            "X": 6,
+            "Y": 56,
+            "Width": 44,
+            "Height": 44,
+            "Visible": false,
+            "RelativeFilename": "download_selected.png"
+          },
+          {
+            "Type": "Image",
+            "Name": "log_selc",
+            "X": 6,
+            "Y": 106,
+            "Width": 44,
+            "Height": 44,
+            "Visible": false,
+            "RelativeFilename": "message_selected.png"
+          }
+        ],
+        "Interactions": [
+          {
+            "InteractionName": "Interaction1",
+            "Trigger": {
+              "Type": "TriggerNone"
+            },
+            "Action": {
+              "Type": "ActionCustom",
+              "FunctionName": "function3"
+            }
+          }
+        ]
+      }
+    ],
+    "Name": "pnp_1",
+    "Resolution": {
+      "Width": 300,
+      "Height": 400
+    },
+    "SelectedColorDepth": 1,
+    "StartupScreenName": "Screen_HOME",
+    "SelectedStartupLanguage": "GB",
+    "TouchGfxPath": "../Middlewares/ST/touchgfx",
+    "UIPath": ".",
+    "AvailableColorDepths": [
+      1
+    ],
+    "AvailableLCDs": {
+      "16": "LCD16bpp",
+      "1": "LCD1bpp"
+    },
+    "AvailableSections": [
+      "ExtFlashSection",
+      "IntFlashSection"
+    ],
+    "AvailableResolutions": [
+      {
+        "Width": 300,
+        "Height": 400
+      }
+    ],
+    "PhysicalButtons": [],
+    "GenerateAssetsCommand": "make -f simulator/gcc/Makefile assets -j8",
+    "PostGenerateCommand": "touchgfx update_project --project-file=simulator/msvs/Application.vcxproj",
+    "PostGenerateTargetCommand": "touchgfx update_project",
+    "CompileSimulatorCommand": "make -f simulator/gcc/Makefile -j8",
+    "RunSimulatorCommand": "build\\bin\\simulator.exe",
+    "LandscapeSkinX": 0,
+    "LandscapeSkinY": 0,
+    "PortraitSkinX": 0,
+    "PortraitSkinY": 0,
+    "DisplayOrientation": "Landscape",
+    "Family": "STM32G4",
+    "SubFamily": "STM32G4x4",
+    "Toolchain": "MDK-ARM V5.32",
+    "Platform": "m4",
+    "ProjectFile": "../pnp_1.ioc",
+    "OptionalComponentsRoot": "../Middlewares/ST/touchgfx_components",
+    "OptionalComponents": [],
+    "AdditionalFeatures": []
+  },
+  "Version": "4.22.1"
+}
