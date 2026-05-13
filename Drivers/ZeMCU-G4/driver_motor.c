@@ -58,7 +58,7 @@ void Motor_Init(void) {
     // 1. 设置总线 FOC 模式 (广播或逐个)
     setWorkMode(0x01, SR_vFOC);  // X1
     setWorkMode(0x02, SR_vFOC);  // X2
-//    setWorkMode(0x03, SR_vFOC);  // Y
+    setWorkMode(0x03, SR_vFOC);  // Y
     osDelay(50);                 // 等待生效
 
     // 2. 使能所有电机
@@ -326,7 +326,7 @@ uint8_t motor_send_move_cmd(MotorController_t *motor,
 	  // 如果需要手动加 CRC，长度是 8；如果由 CAN 驱动处理数据域，长度传 7
     // 这里只负责发送，不关心结果
 	uint8_t result;
-	result = CAN_Transmit_Data(&hfdcan1, slave_addr, txBuffer, 8);
+	result = CAN_Transmit_Data(&hfdcan1, slave_addr, txBuffer, 7); // 7 字节数据，CRC 由函数自动计算添加
 
 if (result == 0) {
     // 发送成功，进入等待状态

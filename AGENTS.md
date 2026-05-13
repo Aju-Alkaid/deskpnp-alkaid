@@ -1,6 +1,279 @@
-我正在为STM32G474VETx微控制器开发一款桌面级的贴片机pnp。该工程用STM32CubeMX工具生成，采用HAL库进行底层硬件驱动，并计划集成FreeRTOS实时操作系统以实现多任务调度。
-本设备电路硬件方面由主控板、双目视觉模块、加热台副板构成。
-物理设施方面，X、Y轴由三个2020铝型材架构、42步进电机驱动的同步带滑台组成，与控制部分一并固定在铝板上；Z轴由MG995舵机、连接杆与固定在直线导轨滑块上的20中空旋转电机JUKI吸嘴套件组成。舵机驱动吸嘴套件上下运动，20中空电机驱动吸嘴R轴旋转。
-软件方面包括上位机软件和嵌入式软件。上位机软件包含有传输坐标文件和控制微调、校准贴片系统等功能。嵌入式软件包括底层驱动，BSP板级支持包，Free RTOS实时操作系统，AI驱动的视觉识别系统与通讯机制，基于Touch GFX的GUI用户图形化操作系统等。
-主控板通过预留外接接口连接其他模块电路板，负责电源供给分配与总体控制。在上位机端传输坐标文件到本设备后，主控计算解析坐标内容，双目视觉系统智能识别元件丝印与封装，结合CAN总线协同控制四轴（X轴、Y轴、Z轴、R轴）高精度运动系统与吸嘴系统，完成自动贴装；之后加热台副板根据回流焊原理和PID闭环温控技术，驱动加热板自动加热焊接元件，达到贴装焊接一体化的效果。此外还有集成有云端互联功能，实时上传贴装数据，便于远程监控。用户可通过多个物理按键与屏幕交互，来完成数据文件导入、运动控制、系统复位、查看日志、云端联网等动作。
-我是负责软件开发工作，视觉、硬件、GUI用户图形化有其他人负责。使用语言为C语言。
+# PnP 贴片机嵌入式固件 — 开发指南
+
+## 一、项目概述
+
+桌面级贴片机，主控 STM32G474VETx（170MHz Cortex-M4F），STM32CubeMX 生成 HAL 库工程，FreeRTOS 多任务调度。负责：接收上位机坐标文件 → 双目视觉定位元件 → CAN 总线控制四轴运动 → 吸嘴拾放 → 加热台回流焊。
+
+**负责人分工：** 本仓库为嵌入式软件（C 语言），视觉 / 硬件 / GUI（TouchGFX）由其他人负责。
+
+## 二、硬件平台
+
+| 资源 | 配置 |
+|------|------|
+| MCU | STM32G474VETx, HSE 16MHz → PLL 170MHz |
+| 调试接口 | SWD (NRST=PG10) |
+| 串口1 (UART1) | PE0(TX) / PE1(RX), 115200, DMA, 连接上位机 |
+| 串口2 (UART2) | PD5(TX) / PD6(RX), 115200, DMA, 连接 MaixCam 摄像头 |
+| 串口3 (UART3) | PB9(TX) / PB11(RX), 115200, DMA, 连接 TMC2209(R轴) |
+| LPUART1 | PC1(TX) / PC0(RX), 115200, 半双工, 调试预留 |
+| CAN (FDCAN1) | PA12(TX) / PA11(RX), 连接 3 台总线伺服电机(X1/X2/Y) |
+| SPI2 | PB13(SCK) / PB15(MOSI), CS=PD10, DC/RS=PD9, RST=PD8, 连接 LCD(ST7306) |
+| SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, 连接 W25Q64 Flash |
+| SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, 连接 ESP32 无线模块 |
+| TIM2 | CH3(PB10) PWM 输出→12V_C1 控制线, CH1(PA0) PWM |
+| TIM5 | CH3(PE8) PWM 输出→12V_C2→MG995舵机(50Hz), CH1(PB2) PWM |
+| TIM6 | HAL 系统时基 |
+| CRC | 硬件 CRC 校验 |
+| GPIO 按键 | KEY1(PC6) / KEY2(PC7) / CW(PA8) / CCW(PC8) / PUSH(PC9) |
+| DRV8803×2 | U12(12V): PE9/PE10/PE11~14/PE15; U13(24V): PA4/PA5/PA6/PA7/PB0/PB1/PB2/PC4/PC5 |
+| TMC2209 使能 | PD15(TMC1_EN) / PD14(TMC2_EN) |
+| 加热台 | CAN ID 0x10/0x11, 外接副板 |
+
+## 三、目录结构
+
+```
+pnp_1/
+├── Core/                        # CubeMX 生成的核心代码
+│   ├── Inc/                     # 头文件（main.h, usart.h, gpio.h...）
+│   └── Src/                     # 源文件（main.c, usart.c, stm32g4xx_it.c, app_freertos.c）
+├── Drivers/
+│   ├── STM32G4xx_HAL_Driver/    # HAL 库（勿修改）
+│   ├── CMSIS/                   # CMSIS 核心（勿修改）
+│   └── ZeMCU-G4/                # ★ 自定义驱动层
+│       ├── driver_uart.c/h      # UART DMA+空闲中断 收发驱动
+│       ├── driver_can.c/h       # FDCAN 收发 + 滤波器 + 队列
+│       ├── driver_motor.c/h     # CAN 总线伺服电机控制
+│       ├── driver_tmc2209.c/h   # TMC2209 UART 寄存器读写
+│       ├── driver_servo.c/h     # MG995 舵机 PWM 驱动
+│       ├── driver_drv8803.c/h   # DRV8803 双芯片 8通道负载驱动
+│       ├── driver_heater.c/h    # 加热台 CAN 通信
+│       ├── driver_timer.c/h     # 定时器工具
+│       ├── driver_spiflash_w25q64.c/h  # SPI Flash 驱动
+│       ├── tmc_protocol.c/h     # TMC2209 协议层(空壳)
+│       ├── pid.c/h              # 通用 PID 控制器
+│       ├── motor.c/h            # 32步进电机抽象层(PID+TMC2209)
+│       ├── ringbuf.c/h          # 环形缓冲区
+│       ├── key.c/h              # 5键扫描（消抖+事件）
+│       ├── timestamp.c/h        # 32位定时器时间戳(含 overflow_count)
+│       └── driver_CH340.c/h     # CH340 转串口驱动(空)
+├── Task/                        # ★ FreeRTOS 应用任务层
+│   ├── Task_Init.c/h            # 任务创建框架(预留)
+│   ├── app_motion.c/h           # 运动控制任务 + CAN 事件处理 + 信号量
+│   ├── app_test.c/h             # 测试任务(UART回环/Motor/DRV8803/Servo/CAN)
+│   ├── app_uart_parser.c/h      # 上位机行文本协议解析器
+│   ├── app_host.c/h             # 上位机通信调度(下载/调试/视觉协调)
+│   └── app_vision.c/h           # 摄像头 0x7E/0x7F 协议解析
+├── TouchGFX/                    # GUI（他人负责）
+├── Middlewares/                  # FreeRTOS + TouchGFX 中间件
+├── st7306/                      # LCD 驱动
+├── MDK-ARM/                     # Keil MDK 工程文件
+└── build/                       # CMake 构建输出
+```
+
+## 四、编码与文件规范
+
+- **文件编码：GBK**（所有 .c/.h 源文件必须使用 GBK 编码，中文注释）
+- **行尾：CRLF**（Windows 风格）
+- **缩进：Tab**（与 CubeMX 生成代码一致）
+- **注释语言：中文**
+- **命名风格：** 驱动层用 `Module_Function`，任务层用 `Module_Task`
+- **禁止命令：** 严禁 `rm -rf` / `Remove-Item -Recurse` / `del /s` 等批量删除
+
+## 五、通信架构
+
+### 5.1 UART 驱动层（driver_uart）
+
+- **方案：DMA + 空闲中断（HAL_UARTEx_ReceiveToIdle_DMA）**
+- **4个通道：** UART_CH1(huart1) / UART_CH2(huart2) / UART_CH3(huart3/TMC2209) / UART_CH4(hlpuart1)
+- **接收流程：** `HAL_UARTEx_RxEventCallback` → 调用对应回调 → 解析器消费
+- **回调绑定：** UART1→`Host_UartRecvCallback` / UART2→`CamUart_RecvCallback` / UART3→(TMC专用，不走回调)
+- **发送：** `UART_SendData`(DMA非阻塞) / `UART_TMC_Send`(阻塞半双工) / `UART_SendString`
+- **数据处理：** `UART_Driver_Process()` 在 Host_Task 中通过回调间接执行，不单独轮询
+
+### 5.2 上位机协议（UART1, 115200, UTF-8）
+
+**帧格式：** 行文本，以 `\n` (LF) 结尾
+
+**G4 → 上位机：**
+| 命令 | 说明 |
+|------|------|
+| `DOWNLOAD_READY\n` | 就绪，通知上位机可发送文件 |
+| `DEBUG_MODE\n` | 进入调试模式 |
+| `EXIT_DEBUG_MODE\n` | 退出调试模式 |
+
+**上位机 → G4：**
+| 类别 | 命令格式 | 说明 |
+|------|----------|------|
+| 调试单步 | `MOVE_UP/DOWN/LEFT/RIGHT <步长mm>\n` | 增量移动 |
+| 调试连续 | `MOVE_*_START <速度mm/s>\n` / `MOVE_STOP\n` | 连续移动 |
+| 坐标系 | `SET_ORIGIN\n` | 设当前点为原点 |
+| 退出调试 | `EXIT_DEBUG_MODE\n` | 退出调试态 |
+| 文件下载 | 原始 CSV 行内容（逐行，20ms/行） | 上位机不做预处理 |
+
+**文件下载：**
+- G4 收到首行 → 进入 `HOST_DOWNLOADING` 状态
+- 首行作为表头，自动识别 X/Y/Rotation/SMD 列号
+- 后续行解析为 `Component_t[]`，过滤 SMD=0 的行
+- **下载结束检测：** 超时 300ms 无新行则自动结束
+- 下载完成后 → Mark点对齐(process2) → 逐元件拾放(process1/process3)
+
+### 5.3 摄像头协议（UART2, 115200, UTF-8）
+
+**帧格式：** `0x7E <字段> 0x7F`，字段为 UTF-8 字符串数字
+
+**G4 → 摄像头（纯字符串，无帧头尾）：**
+| 命令 | 说明 |
+|------|------|
+| `process1` | 上位摄像头检测元件信息 |
+| `process2` | 上位摄像头检测 Mark 点 |
+| `process3` | 下位摄像头检测元件偏移 |
+
+**摄像头 → G4（0x7E/0x7F 帧）：**
+| 响应 | 字段序列 |
+|------|----------|
+| process1 成功 | `begin, x偏移, y偏移, 元件信息, end` |
+| process1 失败 | `err1` |
+| process2 成功 | `begin, 圆1X, 圆1Y, 圆2X, 圆2Y, end` |
+| process2 失败 | `err2` |
+| process3 成功 | `begin, X偏移, Y偏移, end` |
+| process3 失败 | `err3` |
+
+### 5.4 CAN 总线（FDCAN1, 1Mbps）
+
+连接 3 台总线伺服电机（ID=0x01 X1轴, ID=0x02 X2轴, ID=0x03 Y轴），功能码：
+- `0xF5` 绝对位置运动 → 回复 Status 0x02(到位) / 0x03(限位)
+- `0xF3` 使能/失能
+- `0x82` 工作模式（总线FOC=0x05）
+- `0x92` 设零点
+- `0x4A` 同步使能（广播）
+- `0x4B` 同步触发（广播）
+
+**CRC：** `SUM8(ID + Data[0..n-1])`，附在数据末字节
+
+### 5.5 通信数据流全景
+
+```
+上位机(UART1) → LineParser → HostMsg_t → host_pkt_queue → Host_Task
+                                                                │
+                                              ┌─ CSV行 → 解析存储 → 下载完毕
+                                              │   → 发 process2(Mark) 到摄像头
+                                              │   → 收 CamData_t → 发 process1(找件)
+                                              │   → 收 CamData_t → 发运动指令(PICK)
+                                              │   → 发 process3(偏移) → 收 CamData_t
+                                              │   → 发运动指令(PLACE) → 下个元件
+                                              │
+摄像头(UART2) → CamUart_RecvCallback → CamData_t → host_pkt_queue ─┘
+
+CAN 总线 ←→ CAN_Process_Task (motor_event_queue) → 事件标志组(evtAxesDone)
+                                                      ↓
+                                               MotionTask_Func (motion_cmd_queue)
+```
+
+## 六、FreeRTOS 任务架构
+
+### 6.1 任务列表
+
+| 任务名 | 函数 | 栈 | 优先级 | 功能 |
+|--------|------|-----|--------|------|
+| HostComm | `Host_Task` | 1024 | Normal | 上位机通信 + 视觉协调 + CSV解析 + 调试模式 |
+| CAN_Proc | `CAN_Process_Task` | 512 | Normal | CAN 报文分发→事件标志组 |
+| MKSTest | `vMotorTestTask` | 1024 | Normal | 运动测试(XY三轴联调) |
+| touchGFX | `TouchGFX_Task` | 8192 | Normal | GUI 渲染 |
+
+### 6.2 队列
+
+| 队列 | 元素类型 | 深度 | 用途 |
+|------|----------|------|------|
+| `host_pkt_queue` | `HostMsg_t` (含 `HostParsed_t`/`CamData_t` 联合体) | 64 | 上位机命令 + 摄像头数据 → Host_Task |
+| `motor_event_queue` | `CAN_Rx_Packet_t` | 32 | CAN 报文 → CAN_Process_Task |
+| `motion_cmd_queue` | `MotionCmd_t` | 20 | 运动指令 → MotionTask_Func |
+| `can_rx_queue` | `CAN_Rx_Packet_t` | 10 | CAN 原始报文(备用) |
+
+### 6.3 同步对象
+
+| 对象 | 类型 | 用途 |
+|------|------|------|
+| `semX1Done/semX2Done/semYDone` | 二值信号量 | 三轴到位通知(当前未激活) |
+| `evtAxesDone` | 事件标志组 | X1/X2/Y 到位 + 紧急停止 |
+
+### 6.4 初始化顺序（main.c）
+
+```
+HAL_Init → SystemClock_Config → MX_GPIO/DMA/USART1/LPUART1/USART2/USART3/
+SPI2/SPI3/SPI4/TIM2/CRC/FDCAN1/TIM5/TouchGFX_Init →
+Servo_Init → Motor_Init → osKernelInitialize → MX_FREERTOS_Init:
+    UART_Driver_Init → Semaphore_Init → Event_Init → Vision_Init
+    → 创建队列 → 创建线程 → osKernelStart
+```
+
+## 七、运动控制
+
+### 7.1 坐标系
+
+| 轴 | 驱动方式 | 通信 | ID/通道 |
+|-----|----------|------|---------|
+| X1/X2 | 42步进+CAN总线伺服 | FDCAN1 | ID=0x01/0x02 |
+| Y | 42步进+CAN总线伺服 | FDCAN1 | ID=0x03 |
+| Z | MG995舵机 | TIM5 PWM | CH2 |
+| R | 20中空旋转电机+TMC2209 | UART3 | TMC1 |
+
+### 7.2 运动指令类型（MotionCmdType_t）
+
+```c
+MOTION_CMD_MOVE_TO    // XY 绝对坐标移动
+MOTION_CMD_HOME       // 回零
+MOTION_CMD_STOP       // 急停
+MOTION_CMD_DISABLE    // 松轴
+MOTION_CMD_Z_DOWN/UP  // Z 轴升降
+MOTION_CMD_PICK       // 拾取(Z降→吸嘴开→Z升)
+MOTION_CMD_PLACE      // 放置(Z降→吸嘴关→Z升)
+MOTION_CMD_R_ROTATE   // R 轴旋转
+MOTION_CMD_WAIT       // 延时
+```
+
+### 7.3 脉冲当量
+
+- GT2 皮带 16齿 → 32mm/圈
+- CAN 伺服单圈脉冲数 16384 → **512 脉冲/mm**
+- TMC2209 微步 256，全步 200 → 51200 微步/圈
+
+## 八、关键 GPIO 引脚
+
+| 功能 | 引脚 | 备注 |
+|------|------|------|
+| 吸嘴气泵 | PA12 | GPIO 输出(高有效) |
+| SPI4_CS | PE3 | 软控 |
+| LCD_LED | PD8 | 背光 |
+| LCD_DC_RS | PD9 | 数据/命令 |
+| LCD_RESET | PD10 | 复位 |
+| TMC1_EN | PD15 | R轴电机使能 |
+| TMC2_EN | PD14 | 备用 |
+| 步进脉冲(测试) | PD12(STEP) / PD13(DIR) | 测试用 |
+| BOOT0 | PB8 | 启动选择 |
+| 温度传感 | PF9(TEMP_DAT) / PA3(TEMP_DATA3) | DS18B20 |
+
+## 九、关键数据结构
+
+| 类型 | 定义位置 | 用途 |
+|------|----------|------|
+| `HostMsg_t` | app_host.h | 队列消息(上位机命令/摄像头数据联合体) |
+| `HostParsed_t` | app_uart_parser.h | 上位机解析结果(命令+参数) |
+| `CamData_t` | app_vision.h | 摄像头返回数据(偏移/坐标/元件信息) |
+| `Component_t` | app_host.h | 贴装元件(id/坐标/角度/料号/已贴) |
+| `MotionCmd_t` | app_motion.h | 运动指令(类型+目标+速度) |
+| `CAN_Rx_Packet_t` | driver_can.h | CAN 数据包(ID+功能码+状态+数据) |
+| `RingBuf_t` | ringbuf.h | 环形缓冲区(头尾指针) |
+| `PID_Controller_t` | pid.h | PID 控制器(参数+状态+互斥锁) |
+| `UART_Channel_t` | driver_uart.c | UART 通道控制块(内部) |
+
+## 十、已知问题与注意事项
+
+1. **编码一致性：** 所有源文件必须保持 GBK 编码，用 `WriteAllText($f, $c, [Text.Encoding]::GetEncoding('GBK'))` 写入
+2. **MotionTask_Func 未激活：** 主运动控制任务(`PnP_Motion_Task`)创建代码被注释，目前运动指令由测试任务 `vMotorTestTask` 直接执行。上线前需激活
+3. **MOTION_CMD_PICK/PLACE 仅处理 Z+吸嘴：** 不含 XY 移动到拾取/贴装位的逻辑，Host_Task 目前通过 `target_x/y` 参数间接传递位置
+4. **连续移动(MOVE_*_START)仅打印日志：** 实际电机控制逻辑待实现，需增加定时器驱动的速度环
+5. **下载无显式结束标记：** 依赖 300ms 超时检测，若上位机发间隔 >300ms 会误触发
+6. **TMC2209 UART 与主 UART3 共用：** UART3 未启用 DMA 空闲接收(init 中跳过 UART_CH3)
+7. **LPUART1 已配置但未使用：** `hdmarx = NULL`，后续可作为调试串口
+8. **TouchGFX Thread 为空循环：** `osDelay(1)` 无限循环，GUI 由他人实现
+9. **driver_uart.overflow_count 需要在外部声明 `extern` 才能跨文件访问**

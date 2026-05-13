@@ -4,58 +4,51 @@
 #include <stdint.h>
 #include <stdbool.h>
 
-/* 协议帧最大长度 */
-#define PARSER_FRAME_MAX    256
+/* 行缓冲区最大长度 */
+#define LINE_BUF_MAX    512
 
-/* 命令类型枚举 */
+/* 上位机命令类型 */
 typedef enum {
-    PKT_NONE = 0,
-    /* 上位机 -> G4 */
-    PKT_BOARD,          /* BOARD,w,h           板子尺寸 */
-    PKT_COMP,           /* COMP,id,x,y,ang,feeder  元件坐标 */
-    PKT_END,            /* END                传输结束 */
-    /* G4 -> 上位机 */
-    PKT_READY,          /* READY              G4就绪 */
-    PKT_ACK,            /* ACK,id             贴装完成 */
-    PKT_ERR,            /* ERR,id,code        错误报告 */
-    PKT_DONE,           /* DONE               整板完成 */
-    /* 摄像头 -> G4 */
-    PKT_CAM_OK,         /* OK,id,x,y,angle    找到元件 */
-    PKT_CAM_ERR,        /* ERR,id             未找到 */
-    PKT_UNKNOWN         /* 未知命令 */
-} PktType_t;
+    HCMD_NONE = 0,
+    /* 调试单步移动 */
+    HCMD_MOVE_UP,       HCMD_MOVE_DOWN,
+    HCMD_MOVE_LEFT,     HCMD_MOVE_RIGHT,
+    /* 调试连续移动 */
+    HCMD_MOVE_UP_START,    HCMD_MOVE_DOWN_START,
+    HCMD_MOVE_LEFT_START,  HCMD_MOVE_RIGHT_START,
+    HCMD_MOVE_STOP,
+    /* 坐标系 */
+    HCMD_SET_ORIGIN,
+    /* 退出调试 */
+    HCMD_EXIT_DEBUG,
+    /* 文件下载 - 原始行 */
+    HCMD_RAW_LINE,
+    /* 未知命令 */
+    HCMD_UNKNOWN
+} HostCmd_t;
 
-/* 解析后的数据包 */
+/* 解析后的上位机命令 */
 typedef struct {
-    PktType_t type;
-    uint16_t comp_id;       /* 元件ID */
-    float x;                /* X坐标(mm) */
-    float y;                /* Y坐标(mm) */
-    float angle;            /* 角度(deg) */
-    uint8_t feeder_id;      /* 供料器编号 */
-    float board_w;          /* 板宽 */
-    float board_h;          /* 板高 */
-    uint8_t err_code;       /* 错误码 */
-} ParsedPacket_t;
+    HostCmd_t cmd;
+    float param;            /* 步长(mm)或速度(mm/s) */
+    char  raw[LINE_BUF_MAX]; /* 原始行内容(文件下载时使用) */
+    uint16_t raw_len;
+} HostParsed_t;
 
-/* 协议解析器状态机 */
+/* 行解析器状态机 */
 typedef struct {
-    uint8_t buf[PARSER_FRAME_MAX];
+    char    buf[LINE_BUF_MAX];
     uint16_t idx;
-    bool in_frame;          /* 已收到 '$' 起始符 */
-} UartParser_t;
+    bool    complete;       /* 已收到完整一行 */
+} LineParser_t;
 
 /* ---- API ---- */
-void Parser_Init(UartParser_t *p);
+void LineParser_Init(LineParser_t *p);
 
-/* 喂入一个字节，返回 true 表示解析出完整一帧(结果写入 out) */
-bool Parser_Feed(UartParser_t *p, uint8_t byte, ParsedPacket_t *out);
+/* 喂入一个字节，返回 true 表示收到完整一行(结果写入 out) */
+bool LineParser_Feed(LineParser_t *p, uint8_t byte, HostParsed_t *out);
 
-/* 将数据包格式化为发送帧(写入 buf，返回帧长度，不含结尾 '\0') */
-uint16_t Parser_BuildFrame(PktType_t type, uint16_t comp_id,
-                           float x, float y, float angle,
-                           uint8_t feeder_id, uint8_t err_code,
-                           float bw, float bh,
-                           char *buf, uint16_t buf_size);
+/* 构建单片机→上位机消息(返回长度，不含结尾 \0) */
+uint16_t LineParser_BuildMsg(const char *msg, char *buf, uint16_t buf_size);
 
 #endif
