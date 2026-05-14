@@ -33,8 +33,8 @@ osEventFlagsId_t evtAxesDone = NULL;   // 用于三轴到位同步
 #define ANGLE_DOWN   60.0f    // 吸嘴下降角度
 
 // 吸嘴气泵 GPIO (根据你的硬件修改)
-#define NOZZLE_GPIO_PORT   GPIOA
-#define NOZZLE_GPIO_PIN    GPIO_PIN_12
+#define NOZZLE_GPIO_PORT   GPIOE
+#define NOZZLE_GPIO_PIN    GPIO_PIN_11
 
 // R 轴参数（需根据实测调整）
 #define R_MICROSTEPS    256

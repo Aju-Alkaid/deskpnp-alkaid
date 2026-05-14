@@ -1,4 +1,4 @@
-﻿# ====== Build Outputs ======
+# ====== Build Outputs ======
 build/
 Debug/
 Release/
@@ -72,6 +72,12 @@ Desktop.ini
 *.bak
 *~
 
-# ====== Backup Files ======
-*.bak
+# ====== Backup & Merge ======
 *_backup.*
+*.orig
+
+# ====== Python ======
+__pycache__/
+
+# ====== Codex / Agents ======
+.agents/
