@@ -19,6 +19,10 @@ typedef struct {
 void StartDefaultTask(void *argument);   // 由CubeMX生成的任务入口
 void vMotorTestTask(void *pvParameters); // 测试任务
 
+void StartHostCommTestTask(void *argument); // 上位机通讯测试任务
+void StartHostMotionTestTask(void *argument);
+extern const osThreadAttr_t hostMotionTestTask_attributes;
+
 
 /*信号量*/
 extern osSemaphoreId_t semX1Done, semX2Done, semYDone;//三轴独立信号量

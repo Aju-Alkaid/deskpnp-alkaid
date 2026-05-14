@@ -11,6 +11,7 @@
 #include "driver_can.h"
 #include "app_motion.h"
 #include <math.h>   // 解决 fabsf 未声明
+#include "app_uart_parser.h"
 
 // 简单的步进脉冲生成函数 (需根据你的GPIO定义修改)
 #define STEP_GPIO_PORT GPIOD
@@ -24,6 +25,14 @@
 #define SERVO_TEST_CH            2            // PE8 → TIM5_CH3 → 通道索引 2
 #define SERVO_SWING_STEP_DEG     0.5f         // 每步角度增量
 #define SERVO_SWING_PERIOD_MS    10           // 每步延时(ms)，决定运动速度
+
+
+/* ---- 上位机运动测试 常量 ---- */
+#define STEPS_PER_MM     3276.8f
+#define JOG_MAX_STEPS    8388607
+#define X1_ADDR          0x01
+#define X2_ADDR          0x02
+#define Y_ADDR           0x03
 
 
 /* 外部变量：CAN接收队列（已在 driver_can.c 中定义） */
@@ -411,4 +420,303 @@ void vMotorTestTask(void *pvParameters)   {
 
     PrintDebug("=== XY 3?Axis Test Passed ===\r\n");
     vTaskSuspend(NULL);
+}
+
+/**
+ * @brief 上位机通讯测试任务
+ * @note  独立于 Host_Task，用于手动测试 UART1 链路和行协议解析。
+ *        收到命令后打印解析结果并回显给上位机。
+ */
+void StartHostCommTestTask(void *argument)
+{
+    LineParser_t parser;
+    HostParsed_t parsed;
+    LineParser_Init(&parser);
+
+    UART_SendString(UART_CH1, "[G4] HostComm Test Task Started\r\n");
+    PrintDebug("[HOST_TEST] Task started. Waiting for commands...\r\n");
+
+    for (;;)
+    {
+        /* 1. 驱动处理：将 DMA 数据搬运到应用缓冲区 */
+        UART_Driver_Process();
+
+        /* 2. 检查 UART_CH1（上位机）是否有新数据 */
+        const uint8_t *rx_data = NULL;
+        uint16_t rx_len = 0;
+        if (UART_PeekData(UART_CH1, &rx_data, &rx_len))
+        {
+            /* 3. 逐字节喂入行解析器 */
+            for (uint16_t i = 0; i < rx_len; i++)
+            {
+                if (LineParser_Feed(&parser, rx_data[i], &parsed))
+                {
+                    /* 收到完整一行，打印解析结果 */
+                    switch (parsed.cmd)
+                    {
+                    case HCMD_MOVE_UP:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_UP, step=%.2f mm\r\n", parsed.param);
+                        break;
+                    case HCMD_MOVE_DOWN:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_DOWN, step=%.2f mm\r\n", parsed.param);
+                        break;
+                    case HCMD_MOVE_LEFT:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_LEFT, step=%.2f mm\r\n", parsed.param);
+                        break;
+                    case HCMD_MOVE_RIGHT:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_RIGHT, step=%.2f mm\r\n", parsed.param);
+                        break;
+                    case HCMD_MOVE_UP_START:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_UP_START, speed=%.2f mm/s\r\n", parsed.param);
+                        break;
+                    case HCMD_MOVE_DOWN_START:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_DOWN_START, speed=%.2f mm/s\r\n", parsed.param);
+                        break;
+                    case HCMD_MOVE_LEFT_START:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_LEFT_START, speed=%.2f mm/s\r\n", parsed.param);
+                        break;
+                    case HCMD_MOVE_RIGHT_START:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_RIGHT_START, speed=%.2f mm/s\r\n", parsed.param);
+                        break;
+                    case HCMD_MOVE_STOP:
+                        PrintDebug("[HOST_TEST] CMD: MOVE_STOP\r\n");
+                        break;
+                    case HCMD_SET_ORIGIN:
+                        PrintDebug("[HOST_TEST] CMD: SET_ORIGIN\r\n");
+                        break;
+                    case HCMD_EXIT_DEBUG:
+                        PrintDebug("[HOST_TEST] CMD: EXIT_DEBUG_MODE\r\n");
+                        break;
+                    case HCMD_RAW_LINE:
+                        PrintDebug("[HOST_TEST] CSV: %.*s\r\n",
+                                   (int)(parsed.raw_len > 40 ? 40 : parsed.raw_len), parsed.raw);
+                        break;
+                    default:
+                        PrintDebug("[HOST_TEST] UNKNOWN CMD\r\n");
+                        break;
+                    }
+                }
+            }
+            /* 4. 清除就绪标志，释放缓冲区 */
+            UART_ClearData(UART_CH1);
+        }
+
+        /* 5. 10ms 轮询周期 */
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+}
+
+/**
+ * @brief 发送急停指令到指定电机轴
+ * @param addr 电机 CAN ID (0x01/0x02/0x03)
+ */
+static void axis_stop(int32_t addr)
+{
+    uint8_t tx[8] = {0};
+    tx[0] = 0xF5;
+    tx[3] = 0x00;
+    CAN_Transmit_Data(&hfdcan1, addr, tx, 7);
+}
+
+/**
+ * @brief XY 相对移动（阻塞式，等待到位事件）
+ * @param dx     X 轴相对位移 (步数)
+ * @param dy     Y 轴相对位移 (步数)
+ * @param speed  速度
+ * @param acc    加速度
+ * @param cur_x  当前 X 绝对坐标 (输入输出)
+ * @param cur_y  当前 Y 绝对坐标 (输入输出)
+ * @return 0 成功, -1 超时, -2 异常
+ */
+static int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
+                             int32_t *cur_x, int32_t *cur_y)
+{
+    int32_t target_x = *cur_x + dx;
+    int32_t target_y = *cur_y + dy;
+
+    if (target_x >  8388607) target_x =  8388607;
+    if (target_x < -8388607) target_x = -8388607;
+    if (target_y >  8388607) target_y =  8388607;
+    if (target_y < -8388607) target_y = -8388607;
+
+    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
+
+    positionMode3Run(X1_ADDR, speed, acc, target_x);
+    positionMode3Run(X2_ADDR, speed, acc, target_x);
+    positionMode3Run(Y_ADDR,  speed, acc, target_y);
+    motorSyncTrigger(0);
+
+    uint32_t flags = osEventFlagsWait(evtAxesDone,
+                                       EVENT_ALL_AXES | EVENT_ANY_ERROR,
+                                       osFlagsWaitAny, 500);
+    if (flags & EVENT_ANY_ERROR) {
+        axis_stop(X1_ADDR);
+        axis_stop(X2_ADDR);
+        axis_stop(Y_ADDR);
+        return -2;
+    }
+    if ((flags & EVENT_ALL_AXES) == EVENT_ALL_AXES) {
+        *cur_x = target_x;
+        *cur_y = target_y;
+        return 0;
+    }
+    axis_stop(X1_ADDR);
+    axis_stop(X2_ADDR);
+    axis_stop(Y_ADDR);
+    return -1;
+}
+
+/* 上位机通讯 + XY 运动控制测试任务 属性 */
+//const osThreadAttr_t hostMotionTestTask_attributes = {
+//    .name = "HostMotion",
+//    .stack_size = 1024,
+//    .priority = osPriorityNormal
+//};
+
+/**
+ * @brief 上位机通讯 + XY 运动控制测试任务
+ * @note  启动时发送 DEBUG_MODE\n 触发上位机进入 debug 模式。
+ *        接收上位机指令，解析后执行对应电机动作并回显。
+ */
+void StartHostMotionTestTask(void *argument)
+{
+    LineParser_t parser;
+    HostParsed_t parsed;
+    LineParser_Init(&parser);
+
+    int32_t cur_x = 0;
+    int32_t cur_y = 0;
+    bool jog_active = false;
+
+    const uint16_t speed = 300;
+    const uint8_t  acc   = 10;
+
+    /* 电机初始化: 配置工作模式+使能+归零 */
+		CAN_Init(&hfdcan1, NULL);
+    Motor_Init();
+    osDelay(200);
+
+    /* 启动握手 */
+    UART_SendString(UART_CH1, "DEBUG_MODE\n");
+    PrintDebug("[HostMotion] Task started, DEBUG_MODE sent.\r\n");
+
+    for (;;)
+    {
+        UART_Driver_Process();
+
+        const uint8_t *rx_data = NULL;
+        uint16_t rx_len = 0;
+        if (UART_PeekData(UART_CH1, &rx_data, &rx_len))
+        {
+            for (uint16_t i = 0; i < rx_len; i++)
+            {
+                if (LineParser_Feed(&parser, rx_data[i], &parsed))
+                {
+                    int32_t steps;
+                    int result;
+
+                    switch (parsed.cmd)
+                    {
+                    case HCMD_MOVE_UP:
+                        steps = (int32_t)(parsed.param * STEPS_PER_MM);
+                        PrintDebug("[HostMotion] MOVE_UP %.2fmm -> %ld steps\r\n", parsed.param, steps);
+                        result = move_xy_relative(steps, 0, speed, acc, &cur_x, &cur_y);
+                        PrintDebug("[HostMotion] MOVE_UP done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        jog_active = false;
+                        break;
+
+                    case HCMD_MOVE_DOWN:
+                        steps = (int32_t)(-parsed.param * STEPS_PER_MM);
+                        PrintDebug("[HostMotion] MOVE_DOWN %.2fmm -> %ld steps\r\n", parsed.param, steps);
+                        result = move_xy_relative(steps, 0, speed, acc, &cur_x, &cur_y);
+                        PrintDebug("[HostMotion] MOVE_DOWN done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        jog_active = false;
+                        break;
+
+                    case HCMD_MOVE_LEFT:
+                        steps = (int32_t)(parsed.param * STEPS_PER_MM);
+                        PrintDebug("[HostMotion] MOVE_LEFT %.2fmm -> %ld steps\r\n", parsed.param, steps);
+                        result = move_xy_relative(0, steps, speed, acc, &cur_x, &cur_y);
+                        PrintDebug("[HostMotion] MOVE_LEFT done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        jog_active = false;
+                        break;
+
+                    case HCMD_MOVE_RIGHT:
+                        steps = (int32_t)(-parsed.param * STEPS_PER_MM);
+                        PrintDebug("[HostMotion] MOVE_RIGHT %.2fmm -> %ld steps\r\n", parsed.param, steps);
+                        result = move_xy_relative(0, steps, speed, acc, &cur_x, &cur_y);
+                        PrintDebug("[HostMotion] MOVE_RIGHT done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        jog_active = false;
+                        break;
+
+                    case HCMD_MOVE_UP_START:
+                        PrintDebug("[HostMotion] JOG UP speed=%.2f\r\n", parsed.param);
+                        jog_active = true;
+                        positionMode3Run(X1_ADDR, (uint16_t)parsed.param, acc, JOG_MAX_STEPS);
+                        positionMode3Run(X2_ADDR, (uint16_t)parsed.param, acc, JOG_MAX_STEPS);
+                        motorSyncTrigger(0);
+                        break;
+
+                    case HCMD_MOVE_DOWN_START:
+                        PrintDebug("[HostMotion] JOG DOWN speed=%.2f\r\n", parsed.param);
+                        jog_active = true;
+                        positionMode3Run(X1_ADDR, (uint16_t)parsed.param, acc, -JOG_MAX_STEPS);
+                        positionMode3Run(X2_ADDR, (uint16_t)parsed.param, acc, -JOG_MAX_STEPS);
+                        motorSyncTrigger(0);
+                        break;
+
+                    case HCMD_MOVE_LEFT_START:
+                        PrintDebug("[HostMotion] JOG LEFT speed=%.2f\r\n", parsed.param);
+                        jog_active = true;
+                        positionMode3Run(Y_ADDR, (uint16_t)parsed.param, acc, JOG_MAX_STEPS);
+                        motorSyncTrigger(0);
+                        break;
+
+                    case HCMD_MOVE_RIGHT_START:
+                        PrintDebug("[HostMotion] JOG RIGHT speed=%.2f\r\n", parsed.param);
+                        jog_active = true;
+                        positionMode3Run(Y_ADDR, (uint16_t)parsed.param, acc, -JOG_MAX_STEPS);
+                        motorSyncTrigger(0);
+                        break;
+
+                    case HCMD_MOVE_STOP:
+                        PrintDebug("[HostMotion] STOP\r\n");
+                        axis_stop(X1_ADDR);
+                        axis_stop(X2_ADDR);
+                        axis_stop(Y_ADDR);
+												motorSyncTrigger(0); 
+                        jog_active = false;
+                        break;
+
+                    case HCMD_SET_ORIGIN:
+                        PrintDebug("[HostMotion] SET_ORIGIN\r\n");
+                        motorSetZero(X1_ADDR);
+                        motorSetZero(X2_ADDR);
+                        motorSetZero(Y_ADDR);
+                        cur_x = 0;
+                        cur_y = 0;
+                        osDelay(100);
+                        break;
+
+                    case HCMD_EXIT_DEBUG:
+                        PrintDebug("[HostMotion] EXIT_DEBUG_MODE, task suspended.\r\n");
+                        vTaskSuspend(NULL);
+                        break;
+
+                    case HCMD_RAW_LINE:
+                        PrintDebug("[HostMotion] CSV: %.*s\r\n",
+                                   (int)(parsed.raw_len > 40 ? 40 : parsed.raw_len), parsed.raw);
+                        break;
+
+                    default:
+                        PrintDebug("[HostMotion] UNKNOWN CMD\r\n");
+                        break;
+                    }
+                }
+            }
+            UART_ClearData(UART_CH1);
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
 }

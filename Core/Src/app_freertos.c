@@ -94,7 +94,7 @@ const osThreadAttr_t MKSTestTask_attributes = {
     .priority = osPriorityNormal,
 };
 
-//å¤„ç† CAN æŠ¥æ–‡çš„ç‹¬ç«‹ä»»åŠ¡
+//å¤„ç† CAN æŠ¥æ–‡çš„ç‹¬ç«‹ä»»åŠ?
 const osThreadAttr_t hostTask_attributes = {
     .name = "HostComm",
     .stack_size = 1024,
@@ -105,6 +105,21 @@ const osThreadAttr_t canProcTask_attr = {
     .name = "CAN_Proc", 
     .stack_size = 512, 
     .priority = osPriorityNormal 
+};
+
+
+// ÉÏÎ»»úÍ¨Ñ¶²âÊÔÈÎÎñ
+const osThreadAttr_t hostTestTask_attributes = {
+    .name = "HostTest",
+    .stack_size = 512,
+    .priority = osPriorityNormal
+};
+
+/* ÉÏÎ»»úÍ¨Ñ¶ + XY ÔË¶¯¿ØÖÆ²âÊÔÈÎÎñ ÊôĞÔ */
+const osThreadAttr_t hostMotionTestTask_attributes = {
+    .name = "HostMotion",
+    .stack_size = 2048,
+    .priority = osPriorityNormal
 };
 
 /* USER CODE END Variables */
@@ -126,6 +141,8 @@ void StartServoTestTask(void *argument);
 void vMotorTestTask(void *pvParameters) ;
 void CAN_Process_Task(void *argument);
 void Host_Task(void *argument);
+void StartHostCommTestTask(void *argument);
+void StartHostMotionTestTask(void *argument);
 /* USER CODE END FunctionPrototypes */
 
 void TouchGFX_Task(void *argument);
@@ -187,9 +204,13 @@ void MX_FREERTOS_Init(void) {
 
 	osThreadNew(CAN_Process_Task, NULL, &canProcTask_attr);
 
-    osThreadNew(Host_Task, NULL, &hostTask_attributes);
+//    osThreadNew(Host_Task, NULL, &hostTask_attributes);
 
-	mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
+//    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
+
+    // ÉÏÎ»»úÍ¨Ñ¶+ÔË¶¯²âÊÔÈÎÎñ
+  osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
+
 
   /* USER CODE END RTOS_THREADS */
 
