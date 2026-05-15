@@ -1,26 +1,26 @@
-#include "cmsis_os2.h"
+ï»¿#include "cmsis_os2.h"
 
-// ÈÎÎñ¾ä±ú
+// ä»»åŠ¡å¥æŸ„
 osThreadId_t MotionTaskHandle;
 osThreadId_t VisionTaskHandle;
 // ...
 
-osMessageQueueId_t MotionCmdQueue;   // ÔË¶¯Ö¸Áî¶ÓÁĞ
-osMutexId_t SystemStateMutex;        // ±£»¤È«¾Ö×´Ì¬
+osMessageQueueId_t MotionCmdQueue;   // è¿åŠ¨æŒ‡ä»¤é˜Ÿåˆ—
+osMutexId_t SystemStateMutex;        // ä¿æŠ¤å…¨å±€çŠ¶æ€
 
 extern void MotionTask_Func(void *argument);
 
 
 void Tasks_Create(void) {
-    // ÔË¶¯ÈÎÎñ
+    // è¿åŠ¨ä»»åŠ¡
     const osThreadAttr_t motion_attr = {
         .name = "MotionTask",
-        .stack_size = 512,  // ¸ù¾İÊµ¼Êµ÷ÓÃÇé¿öÔö´ó
+        .stack_size = 512,  // æ ¹æ®å®é™…è°ƒç”¨æƒ…å†µå¢å¤§
         .priority = osPriorityHigh
     };
     MotionTaskHandle = osThreadNew(MotionTask_Func, NULL, &motion_attr);
 
-    // ÊÓ¾õÈÎÎñ
+    // è§†è§‰ä»»åŠ¡
     const osThreadAttr_t vision_attr = {
         .name = "VisionTask",
         .stack_size = 512,
@@ -28,7 +28,7 @@ void Tasks_Create(void) {
     };
 //    VisionTaskHandle = osThreadNew(VisionTask_Func, NULL, &vision_attr);
 
-    // ... Í¬Àí´´½¨ CommuTask, HeatTask, GUITask, SystemTask
+    // ... åŒç†åˆ›å»º CommuTask, HeatTask, GUITask, SystemTask
 }
 
 //void Comm_Init(void) {

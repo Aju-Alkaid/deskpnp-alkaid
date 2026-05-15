@@ -1,11 +1,11 @@
-#ifndef __DRV8803_DUAL_H
+ï»¿#ifndef __DRV8803_DUAL_H
 #define __DRV8803_DUAL_H
 
 #include "main.h"
 #include <stdbool.h>
 #include <stdint.h>
 
-// ±ã½İºê
+// ä¾¿æ·å®
 #define DRV1_SetCh1(state) DRV8803_SetGlobalChannel(CH1, state)
 #define DRV1_SetCh2(state) DRV8803_SetGlobalChannel(CH2, state)
 #define DRV1_SetCh3(state) DRV8803_SetGlobalChannel(CH3, state)
@@ -16,7 +16,7 @@
 #define DRV2_SetCh3(state) DRV8803_SetGlobalChannel(CH7, state)
 #define DRV2_SetCh4(state) DRV8803_SetGlobalChannel(CH8, state)
 
-// ==================== U12: 12V ¸ºÔØĞ¾Æ¬ ====================
+// ==================== U12: 12V è´Ÿè½½èŠ¯ç‰‡ ====================
 #define DRV1_EN_PORT        GPIOE
 #define DRV1_EN_PIN         GPIO_PIN_9      // nENBL1
 
@@ -38,14 +38,14 @@
 #define DRV1_FAULT_PORT     GPIOE
 #define DRV1_FAULT_PIN      GPIO_PIN_15     // nFAULT1
 
-// 12V PWM ¿ØÖÆÏß£¨·Ç DRV8803 Òı½Å£©
+// 12V PWM æ§åˆ¶çº¿ï¼ˆé DRV8803 å¼•è„šï¼‰
 #define PWM_12V_C1_PORT     GPIOB
 #define PWM_12V_C1_PIN      GPIO_PIN_10     // 12V_C1
 
 //#define PWM_12V_C2_PORT     GPIOE
 //#define PWM_12V_C2_PIN      GPIO_PIN_8      // 12V_C2
 
-// ==================== U13: 24V ¸ºÔØĞ¾Æ¬ ====================
+// ==================== U13: 24V è´Ÿè½½èŠ¯ç‰‡ ====================
 #define DRV2_EN_PORT        GPIOA
 #define DRV2_EN_PIN         GPIO_PIN_4      // nENBL2
 
@@ -53,28 +53,28 @@
 #define DRV2_RESET_PIN      GPIO_PIN_0      // RESET2
 
 #define DRV2_IN1_PORT       GPIOA
-#define DRV2_IN1_PIN        GPIO_PIN_6      // IN5 (¶ÔÓ¦ OUT5)
+#define DRV2_IN1_PIN        GPIO_PIN_6      // IN5 (å¯¹åº” OUT5)
 
 #define DRV2_IN2_PORT       GPIOA
-#define DRV2_IN2_PIN        GPIO_PIN_7      // IN6 (¶ÔÓ¦ OUT6)
+#define DRV2_IN2_PIN        GPIO_PIN_7      // IN6 (å¯¹åº” OUT6)
 
 #define DRV2_IN3_PORT       GPIOC
-#define DRV2_IN3_PIN        GPIO_PIN_4      // IN7 (¶ÔÓ¦ OUT7)
+#define DRV2_IN3_PIN        GPIO_PIN_4      // IN7 (å¯¹åº” OUT7)
 
 #define DRV2_IN4_PORT       GPIOC
-#define DRV2_IN4_PIN        GPIO_PIN_5      // IN8 (¶ÔÓ¦ OUT8)
+#define DRV2_IN4_PIN        GPIO_PIN_5      // IN8 (å¯¹åº” OUT8)
 
 #define DRV2_FAULT_PORT     GPIOA
 #define DRV2_FAULT_PIN      GPIO_PIN_5      // nFAULT2
 
-// 24V PWM ¿ØÖÆÏß
+// 24V PWM æ§åˆ¶çº¿
 #define PWM_24V_C1_PORT     GPIOB
 #define PWM_24V_C1_PIN      GPIO_PIN_2      // 24V_C1
 
 #define PWM_24V_C2_PORT     GPIOB
 #define PWM_24V_C2_PIN      GPIO_PIN_1      // 24V_C2
 
-// Í¨µÀÃ¶¾Ù (È«¾ÖÍ³Ò»±àºÅ 0-7)
+// é€šé“æšä¸¾ (å…¨å±€ç»Ÿä¸€ç¼–å· 0-7)
 typedef enum {
     CH1 = 0,  // U12 OUT1
     CH2 = 1,  // U12 OUT2
@@ -86,25 +86,25 @@ typedef enum {
     CH8 = 7   // U13 OUT8
 } GlobalChannel_t;
 
-// ³õÊ¼»¯º¯Êı£¨½öÅäÖÃ³õÊ¼µçÆ½£¬²»ĞŞ¸Ä GPIO Ä£Ê½£©
+// åˆå§‹åŒ–å‡½æ•°ï¼ˆä»…é…ç½®åˆå§‹ç”µå¹³ï¼Œä¸ä¿®æ”¹ GPIO æ¨¡å¼ï¼‰
 HAL_StatusTypeDef DRV8803_Dual_Config(void);
 
-// È«¾ÖÊ¹ÄÜ/½ûÓÃµ¥¸öĞ¾Æ¬
+// å…¨å±€ä½¿èƒ½/ç¦ç”¨å•ä¸ªèŠ¯ç‰‡
 void DRV8803_EnableChip(uint8_t chip_id, bool enable);
 
-// ÉèÖÃµ¥¸öÍ¨µÀ×´Ì¬ (È«¾ÖÍ¨µÀºÅ 0-7)
+// è®¾ç½®å•ä¸ªé€šé“çŠ¶æ€ (å…¨å±€é€šé“å· 0-7)
 void DRV8803_SetGlobalChannel(GlobalChannel_t ch, bool state);
 
-// ÅúÁ¿ÉèÖÃÄ³Ğ¾Æ¬µÄËùÓĞÍ¨µÀ
+// æ‰¹é‡è®¾ç½®æŸèŠ¯ç‰‡çš„æ‰€æœ‰é€šé“
 void DRV8803_SetChipChannels(uint8_t chip_id, uint8_t channel_mask);
 
-// ¶ÁÈ¡µ¥¸öĞ¾Æ¬¹ÊÕÏ×´Ì¬
+// è¯»å–å•ä¸ªèŠ¯ç‰‡æ•…éšœçŠ¶æ€
 bool DRV8803_IsChipFault(uint8_t chip_id);
 
-// ´¥·¢µ¥¸öĞ¾Æ¬Ó²¼ş¸´Î»
+// è§¦å‘å•ä¸ªèŠ¯ç‰‡ç¡¬ä»¶å¤ä½
 void DRV8803_TriggerChipReset(uint8_t chip_id);
 
-// ¹ÊÕÏ»Ö¸´£¨ÊÊÓÃÓÚ FreeRTOS ÈÎÎñ£¬·Ç×èÈû£©
+// æ•…éšœæ¢å¤ï¼ˆé€‚ç”¨äº FreeRTOS ä»»åŠ¡ï¼Œéé˜»å¡ï¼‰
 void DRV8803_HandleFault_RTOS(uint8_t chip_id);
 
 

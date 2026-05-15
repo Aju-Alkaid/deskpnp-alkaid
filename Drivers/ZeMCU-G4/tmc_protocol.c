@@ -1,4 +1,4 @@
-#include "tmc_protocol.h"
+ï»¿#include "tmc_protocol.h"
 #include "string.h"
-#include "cmsis_os.h" // ÓÃÓÚÊ±¼ä´Á£¬Èç¹û²»ÓÃ¿É»»Îª HAL_GetTick
+#include "cmsis_os.h" // ç”¨äºæ—¶é—´æˆ³ï¼Œå¦‚æœä¸ç”¨å¯æ¢ä¸º HAL_GetTick
 

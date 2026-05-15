@@ -45,7 +45,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-bool init_finished = false;
+bool init_finished = false;
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -203,7 +204,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
     if (htim->Instance == TIM2) {
-        // Ã¿´ÎÒç³ö£¬¼ÆÊýÆ÷¼Ó1
+        // Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½1
         overflow_count++;
     }
   /* USER CODE END Callback 0 */

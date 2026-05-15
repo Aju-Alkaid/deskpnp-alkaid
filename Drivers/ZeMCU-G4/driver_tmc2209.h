@@ -1,4 +1,4 @@
-#ifndef __DRIVER_TMC2209_H
+ï»¿#ifndef __DRIVER_TMC2209_H
 #define __DRIVER_TMC2209_H
 
 #include "driver_uart.h"
@@ -11,22 +11,22 @@
 extern "C" {
 #endif
 
-/* ========== ÓÃ»§ÅäÖÃÇø ========== */
-#define TMC_UART_ID           UART_CH3    // Ê¹ÓÃµÄ UART Í¨µÀ£¨huart3£©
+/* ========== ç”¨æˆ·é…ç½®åŒº ========== */
+#define TMC_UART_ID           UART_CH3    // ä½¿ç”¨çš„ UART é€šé“ï¼ˆhuart3ï¼‰
 #define TMC_EN_PORT           GPIOD
 #define TMC2_EN_PIN           GPIO_PIN_14
 #define TMC1_EN_PIN           GPIO_PIN_15
 
-#define TMC2209_RSENSE_MOHM   110         // ¼ìÁ÷µç×è m¦¸
-#define TMC2209_VSENSE        0           // 0: µÍÁéÃô¶È(0.325V), 1: ¸ßÁéÃô¶È(0.180V)
-#define TMC2209_MICROSTEPS    256         // Î¢²½·Ö±æÂÊ
-#define TMC2209_F_CLK         12000000UL  // ÄÚ²¿Ê±ÖÓ 12MHz
+#define TMC2209_RSENSE_MOHM   110         // æ£€æµç”µé˜» mÎ©
+#define TMC2209_VSENSE        0           // 0: ä½çµæ•åº¦(0.325V), 1: é«˜çµæ•åº¦(0.180V)
+#define TMC2209_MICROSTEPS    256         // å¾®æ­¥åˆ†è¾¨ç‡
+#define TMC2209_F_CLK         12000000UL  // å†…éƒ¨æ—¶é’Ÿ 12MHz
 
-/* µçÁ÷²ÎÊı */
+/* ç”µæµå‚æ•° */
 #define TMC2209_MOTOR_HOLD_CURRENT    200   // mA
 #define TMC2209_MOTOR_RUN_CURRENT     800   // mA
 
-/* ========== ¼Ä´æÆ÷µØÖ· ========== */
+/* ========== å¯„å­˜å™¨åœ°å€ ========== */
 typedef enum {
     TMC_REG_GCONF         = 0x00,
     TMC_REG_GSTAT         = 0x01,
@@ -53,7 +53,7 @@ typedef enum {
     TMC_REG_PWM_AUTO      = 0x72
 } TMC_RegAddr_t;
 
-/* ========== Î»¶¨Òå ========== */
+/* ========== ä½å®šä¹‰ ========== */
 /* GCONF */
 #define GCONF_I_SCALE_ANALOG   (1<<0)
 #define GCONF_INTERNAL_RSENSE  (1<<1)
@@ -76,7 +76,7 @@ typedef enum {
 #define CHOPCONF_HSTRT_SHIFT   4
 #define CHOPCONF_TOFF_SHIFT    0
 
-/* Í¨ĞÅ³£Á¿ */
+/* é€šä¿¡å¸¸é‡ */
 #define TMC_SYNC_BYTE          0x05
 #define TMC_SLAVE_ADDR         0x00        // MS1=0, MS2=0
 #define TMC_WRITE_FLAG         0x80
@@ -84,11 +84,11 @@ typedef enum {
 #define TMC_DATAGRAM_LEN       8
 #define TMC_READ_REQUEST_LEN   4
 
-/* ³¬Ê±/ÖØÊÔ */
+/* è¶…æ—¶/é‡è¯• */
 #define TMC_UART_TIMEOUT       50          // ms
 #define TMC_MUTEX_WAIT_TIME    100         // ms
 
-/* ========== ´íÎóÂë ========== */
+/* ========== é”™è¯¯ç  ========== */
 typedef enum {
     TMC_ERR_NONE = 0,
     TMC_ERR_CRC_FAIL,
@@ -98,7 +98,7 @@ typedef enum {
     TMC_ERR_INVALID_PARAM
 } TMC_Error_t;
 
-/* ========== API ÉùÃ÷ ========== */
+/* ========== API å£°æ˜ ========== */
 bool            TMC_Init(void);
 TMC_Error_t     TMC_WriteReg(uint8_t reg_addr, uint32_t data);
 TMC_Error_t     TMC_ReadReg(uint8_t reg_addr, uint32_t *value);

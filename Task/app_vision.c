@@ -1,4 +1,4 @@
-#include "app_vision.h"
+ï»¿#include "app_vision.h"
 #include "app_host.h"
 #include "app_test.h"
 #include "driver_uart.h"
@@ -6,18 +6,18 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-/* ---- ÉãÏñÍ·Ö¡Ğ­Òé³£Á¿ ---- */
+/* ---- æ‘„åƒå¤´å¸§åè®®å¸¸é‡ ---- */
 #define CAM_FRAME_HEADER  0x7E
 #define CAM_FRAME_FOOTER  0x7F
 #define CAM_FIELD_MAX     32
 
-/* ---- Ö¡½âÎö×´Ì¬»ú ---- */
+/* ---- å¸§è§£æçŠ¶æ€æœº ---- */
 typedef enum {
     CAM_IDLE,
     CAM_IN_FIELD,
 } CamParserState_t;
 
-/* ---- È«¾Ö×´Ì¬ ---- */
+/* ---- å…¨å±€çŠ¶æ€ ---- */
 static CamParserState_t g_ps = CAM_IDLE;
 static uint8_t  g_field_buf[CAM_FIELD_MAX];
 static uint16_t g_field_idx = 0;
@@ -27,7 +27,7 @@ static uint8_t  g_data_count = 0;
 static CamData_t g_cam_data;
 static CamCmd_t  g_pending_cmd = CAM_CMD_PROC1;
 
-/* ---- ÄÚ²¿¸¨Öú ---- */
+/* ---- å†…éƒ¨è¾…åŠ© ---- */
 
 static void reset_parser(void) {
     g_ps = CAM_IDLE;
@@ -51,7 +51,7 @@ static bool field_is(const char *s) {
     return (memcmp(g_field_buf, s, len) == 0);
 }
 
-/* ½«µ±Ç°½á¹ûÍÆÈë¶ÓÁĞ */
+/* å°†å½“å‰ç»“æœæ¨å…¥é˜Ÿåˆ— */
 static void push_result(void) {
     if (host_pkt_queue == NULL || g_cam_data.result == CAM_NONE) return;
     HostMsg_t msg;
@@ -107,7 +107,7 @@ static void process_field(void) {
         return;
     }
 
-    /* Êı¾İ×Ö¶Î */
+    /* æ•°æ®å­—æ®µ */
     if (g_in_response) {
         int32_t val = parse_field_int();
         switch (g_pending_cmd) {
@@ -131,7 +131,7 @@ static void process_field(void) {
     }
 }
 
-/* ---- ¹«¹² API ---- */
+/* ---- å…¬å…± API ---- */
 
 void Vision_Init(void) {
     reset_parser();

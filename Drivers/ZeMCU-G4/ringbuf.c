@@ -1,4 +1,4 @@
-#include "ringbuf.h"
+﻿#include "ringbuf.h"
 #include <string.h>
 
 void RingBuf_Init(RingBuf_t *rb, uint8_t *buf, uint16_t size) {

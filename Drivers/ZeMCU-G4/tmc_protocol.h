@@ -1,4 +1,4 @@
-#ifndef __TMC_PROTOCOL_H
+ï»¿#ifndef __TMC_PROTOCOL_H
 #define __TMC_PROTOCOL_H
 
 #include <stdint.h>
@@ -6,7 +6,7 @@
 #include "FreeRTOS.h"
 #include "queue.h"
 #include <string.h>
-#include "driver_tmc2209.h" // ÒıÈë TMC2209 ¼Ä´æÆ÷¶¨ÒåºÍÅäÖÃ
+#include "driver_tmc2209.h" // å¼•å…¥ TMC2209 å¯„å­˜å™¨å®šä¹‰å’Œé…ç½®
 
 
 
