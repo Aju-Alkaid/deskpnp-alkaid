@@ -6,8 +6,9 @@
 /* ---- 内部辅助 ---- */
 
 /* 匹配命令关键字，返回命令类型和参数 */
-static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param) {
+static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *param2) {
     *param = 0.0f;
+    *param2 = 0.0f;
     if (len == 0) return HCMD_NONE;
 
     /* 找到第一个空格(分隔命令和参数) */
@@ -52,6 +53,14 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param) {
     if (MATCH("MOVE_STOP")) {
         return HCMD_MOVE_STOP;
     }
+    if (MATCH("MOVE_TO")) {
+        if (space) {
+            char *p = (char*)(space + 1);
+            *param  = strtof(p, &p);
+            *param2 = strtof(p, NULL);
+        }
+        return HCMD_MOVE_TO;
+    }
     if (MATCH("SET_ORIGIN")) {
         return HCMD_SET_ORIGIN;
     }
@@ -82,7 +91,7 @@ bool LineParser_Feed(LineParser_t *p, uint8_t byte, HostParsed_t *out) {
 
         /* 解析命令 */
         memset(out, 0, sizeof(*out));
-        out->cmd = parse_cmd(p->buf, p->idx, &out->param);
+        out->cmd = parse_cmd(p->buf, p->idx, &out->param, &out->param2);
 
         /* 非命令 → 作为原始行(文件下载数据) */
         if (out->cmd == HCMD_UNKNOWN || out->cmd == HCMD_NONE) {

@@ -1,10 +1,10 @@
-﻿#ifndef __DRIVER_UART_H
+#ifndef __DRIVER_UART_H
 #define __DRIVER_UART_H
 
 #include <stdint.h>
 #include <stdbool.h>
 #include "usart.h" // 包含 HAL 定义
-#include "stm32g4xx_hal.h" // 根据实际芯片型号调整，STM32G474 对应此头文件
+#include "stm32g4xx_hal.h" 
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,7 +37,8 @@ typedef enum {
     UART_ERROR_TIMEOUT      = 0x03, // 超时
     UART_ERROR_TRANSMIT_FAILED = 0x04, // 发送失败
     UART_ERROR_RECEIVE_FAILED  = 0x05, // 接收失败/CRC错误
-    UART_ERROR_UNKNOWN      = 0xFF
+    UART_ERROR_UNKNOWN      = 0xFF,
+    UART_ERROR_RING_FULL     = 0x06  // 发送环形缓冲区满
 } UART_Status_t;
 
 
@@ -70,6 +71,8 @@ UART_Status_t UART_SendData(Uart_Id_t id, uint8_t *data, uint16_t size);
  * @return UART_Status_t 状态码
  */
 UART_Status_t UART_SendString(Uart_Id_t id, const char *str);
+
+UART_Status_t UART_Write_DMA(Uart_Id_t id, const uint8_t *data, uint16_t size);
 
 /**
  * @brief 驱动数据处理函数

@@ -42,43 +42,81 @@ extern UART_HandleTypeDef huart3;
 extern TIM_HandleTypeDef htim5;
 static char s_debug_buf[128]; 
 
-/* 测试点位（仅 X 轴坐标，一圈 = 16384） */
-static const int32_t x_test_points[] = {
-    0,              // 原点
-    16384 * 5,      // 正向 5 圈
-    16384 * 10,     // 正向 10 圈
-    16384 * 5,      // 返回 5 圈
-    0               // 回原点
-};
 
+/**
+ * @brief 轻量格式化核心，替代 vsnprintf，栈占用约 80 字节
+ * @note  支持: %d %ld %u %.1f %.2f %02X %s %.*s 及纯文本（含 UTF-8 中文）
+ */
+static int dbg_vformat(char* buf, int sz, const char* fmt, va_list args) {
+    static const int pow10[] = {1, 10, 100, 1000, 10000, 100000, 1000000};
+    int pos = 0;
+    char ch;
 
-// 定义一个任务句柄（可选，用于调试）
-TaskHandle_t UartTestTaskHandle = NULL;
+    while ((ch = *fmt++) && pos < sz - 1) {
+        if (ch != (char)0x25) { buf[pos++] = ch; continue; }  /* 0x25='%' */
 
-// 任务函数声明
-void PrintDebug(const char* fmt, ...);
-void StartUartTestTask(void *argument);
-void StartMotorTestTask(void *argument);
-// 调试函数：在串口上打印调试信息
-void PrintDebug(const char* fmt, ...){
+        ch = *fmt++;
+        int zero = 0, prec = -1;
+
+        if (ch == '0') { zero = 1; ch = *fmt++; }
+        if (ch >= '0' && ch <= '9') { ch = *fmt++; }  /* 跳过宽度位 (如 %02X 的 2) */
+        if (ch == '.') {
+            ch = *fmt++;
+            if (ch == '*') { prec = va_arg(args, int); ch = *fmt++; }
+            else { prec = 0; while (ch >= '0' && ch <= '9') { prec = prec * 10 + (ch - '0'); ch = *fmt++; } }
+        }
+        if (ch == 'l') { ch = *fmt++; }
+
+        if (ch == 'd' || ch == 'u') {
+            int v = va_arg(args, int);
+            if (v < 0 && ch == 'd') { buf[pos++] = '-'; v = -v; }
+            char tmp[12]; int t = 0;
+            do { tmp[t++] = (char)('0' + (v % 10)); v /= 10; } while (v);
+            while (t--) buf[pos++] = tmp[t];
+        }
+        else if (ch == 's') {
+            const char* s = va_arg(args, const char*);
+            if (s) {
+                int n = (prec >= 0) ? prec : (sz - pos - 1);
+                while (n-- && *s && pos < sz - 1) buf[pos++] = *s++;
+            }
+        }
+        else if (ch == 'X') {
+            unsigned int v = va_arg(args, unsigned int) & 0xFF;
+            if (zero) { buf[pos++] = "0123456789ABCDEF"[(v >> 4) & 0xF]; }
+            buf[pos++] = "0123456789ABCDEF"[v & 0xF];
+        }
+        else if (ch == 'f') {
+            double fv = va_arg(args, double);
+            int p = (prec < 0) ? 1 : prec;
+            if (p > 6) p = 6;
+            if (fv < 0.0) { buf[pos++] = '-'; fv = -fv; }
+            int ip = (int)fv;
+            int fp = (int)((fv - (double)ip) * (double)pow10[p] + 0.5);
+            if (fp >= pow10[p]) { ip++; fp -= pow10[p]; }
+            char tmp[12]; int t = 0;
+            do { tmp[t++] = (char)('0' + (ip % 10)); ip /= 10; } while (ip);
+            while (t--) buf[pos++] = tmp[t];
+            buf[pos++] = '.';
+            for (int i = p - 1; i >= 0; i--) buf[pos++] = (char)('0' + ((fp / pow10[i]) % 10));
+        }
+        else if (ch == '\0') { break; }
+        else { buf[pos++] = '%'; buf[pos++] = ch; }
+    }
+    buf[pos] = '\0';
+    return pos;
+}
+
+void PrintDebug(const char* fmt, ...) {
     va_list args;
     va_start(args, fmt);
-    
-    // 1. 格式化字符串到缓冲区
-    // 使用 vsnprintf 确保不会写出 s_debug_buf 的边界
-    int len = vsnprintf(s_debug_buf, sizeof(s_debug_buf), fmt, args);
-    
+    int len = dbg_vformat(s_debug_buf, sizeof(s_debug_buf), fmt, args);
     va_end(args);
-
-    // 2. 发送串口
     if (len > 0) {
-        // 注意：HAL_UART_Transmit 是阻塞的。
-        // 如果你的打印频率非常高，建议改用 DMA 发送或串口空闲中断，
-        // 否则可能会影响电机控制的实时性。
-        // 这里为了简单，保持阻塞方式，但加了超时保护。
-        HAL_UART_Transmit(&huart1, (uint8_t*)s_debug_buf, len, 50); 
+        UART_Write_DMA(UART_CH1, (uint8_t*)s_debug_buf, len);
     }
 }
+void StartMotorTestTask(void *argument);
 
 
 /**
@@ -180,42 +218,30 @@ static void SimplePWM(GPIO_TypeDef* port, uint16_t pin,
  */
 void StartDrv8803TestTask(void *argument)
 {
-     PrintDebug("--- IN2 Always ON Test ---\r\n");
+     PrintDebug("--- 真空泵测试 (IN4/PE11) ---\r\n");
 
-    // 1. 配置所有芯片初始电平（GPIO 模式已在 CubeMX 配置）
     DRV8803_Dual_Config();
 
-    // 2. 仅使能 U12 (12V)，U13 保持禁用
-    DRV8803_EnableChip(1, true);   // U12 使能 (nENBL1 低)
-    DRV8803_EnableChip(2, false);  // U13 禁用 (nENBL2 高)
+    DRV8803_EnableChip(1, true);
+    DRV8803_EnableChip(2, false);
 
-    // 3. 清零所有通道（可选，确保初始状态正确）
     DRV8803_SetChipChannels(1, 0x00);
     DRV8803_SetChipChannels(2, 0x00);
 
-    // 4. 打开 IN2 (对应全局通道 CH2)
-    DRV8803_SetGlobalChannel(CH2, true);
-    PrintDebug("IN2 (PE13) is now HIGH, 12V output enabled.\r\n");
+    DRV8803_SetGlobalChannel(CH4, true);
+    PrintDebug("IN4 (PE11) 真空泵已开启.\r\n");
 
-    // 5. 主循环：仅维持 IN2 常开，并监控故障
-    const TickType_t faultCheckPeriod = pdMS_TO_TICKS(100); // 100ms 检查一次
+    const TickType_t faultCheckPeriod = pdMS_TO_TICKS(100);
     for (;;)
     {
-        // 检查 U12 故障
         if (DRV8803_IsChipFault(1))
-        {	
-						
+        {
             PrintDebug("[FAULT] U12 fault! Attempt recovery...\r\n");
-            
-            // 故障恢复流程（禁用 → 延时 → 复位 → 重检）
             DRV8803_HandleFault_RTOS(1);
-
-            // 恢复后重新使能并打开 IN2
             DRV8803_EnableChip(1, true);
-            DRV8803_SetGlobalChannel(CH2, true);
-            PrintDebug("U12 re-enabled, IN2 restored.\r\n");
+            DRV8803_SetGlobalChannel(CH4, true);
+            PrintDebug("U12 re-enabled, CH4 vacuum pump restored.\r\n");
         }
-
         vTaskDelay(faultCheckPeriod);
     }
 }
@@ -517,6 +543,22 @@ static void axis_stop(int32_t addr)
     tx[3] = 0x00;
     CAN_Transmit_Data(&hfdcan1, addr, tx, 7);
 }
+/**
+ * @brief 强制急停三轴（同步模式下缓存急停 + 触发执行）
+ * @note  不切换同步模式，直接用 0xF5 速度=0 + 0x4B 触发。
+ *        电机运行期间缓存可被新 0xF5 覆盖，0x4B 触发后中止当前运动。
+ */
+static void disable_sync_stop(void)
+{
+    axis_stop(X1_ADDR);
+    axis_stop(X2_ADDR);
+    axis_stop(Y_ADDR);
+    osDelay(5);
+    motorSyncTrigger(0);
+    osDelay(10);
+    motorSyncEnable(1);
+    osDelay(10);
+}
 
 /**
  * @brief XY 相对移动（阻塞式，等待到位事件）
@@ -528,6 +570,9 @@ static void axis_stop(int32_t addr)
  * @param cur_y  当前 Y 绝对坐标 (输入输出)
  * @return 0 成功, -1 超时, -2 异常
  */
+/* 运动中断标志 */
+static volatile bool s_cmd_interrupted = false;
+
 static int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
                              int32_t *cur_x, int32_t *cur_y)
 {
@@ -539,30 +584,62 @@ static int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
     if (target_y >  8388607) target_y =  8388607;
     if (target_y < -8388607) target_y = -8388607;
 
-    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-
-    positionMode3Run(X1_ADDR, speed, acc, target_x);
-    positionMode3Run(X2_ADDR, speed, acc, target_x);
-    positionMode3Run(Y_ADDR,  speed, acc, target_y);
-    motorSyncTrigger(0);
-
-    uint32_t flags = osEventFlagsWait(evtAxesDone,
-                                       EVENT_ALL_AXES | EVENT_ANY_ERROR,
-                                       osFlagsWaitAny, 500);
-    if (flags & EVENT_ANY_ERROR) {
-        axis_stop(X1_ADDR);
-        axis_stop(X2_ADDR);
-        axis_stop(Y_ADDR);
-        return -2;
-    }
-    if ((flags & EVENT_ALL_AXES) == EVENT_ALL_AXES) {
-        *cur_x = target_x;
-        *cur_y = target_y;
+    if (dx == 0 && dy == 0) {
         return 0;
     }
-    axis_stop(X1_ADDR);
-    axis_stop(X2_ADDR);
-    axis_stop(Y_ADDR);
+
+    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
+
+    if (dx != 0) {
+        positionMode3Run(X1_ADDR, speed, acc, target_x);
+        osDelay(2);
+        positionMode3Run(X2_ADDR, speed, acc, target_x);
+        osDelay(2);
+    }
+    if (dy != 0) {
+        positionMode3Run(Y_ADDR,  speed, acc, target_y);
+        osDelay(2);
+    }
+
+    motorSyncTrigger(0);
+
+    uint32_t done_mask = 0;
+    if (dx != 0) done_mask |= (EVENT_X1_DONE | EVENT_X2_DONE);
+    if (dy != 0) done_mask |= EVENT_Y_DONE;
+    uint32_t wait_mask = done_mask | EVENT_ANY_ERROR;
+
+    uint32_t elapsed = 0;
+    const uint32_t poll_ms = 10;
+    const uint32_t total_timeout = 10000;
+
+    while (elapsed < total_timeout) {
+        uint32_t flags = osEventFlagsWait(evtAxesDone,
+                                           wait_mask,
+                                           osFlagsWaitAny, poll_ms);
+
+        if ((int32_t)flags < 0) {
+        } else if (flags & EVENT_ANY_ERROR) {
+            disable_sync_stop();
+            return -2;
+        } else if ((flags & done_mask) == done_mask) {
+            *cur_x = target_x;
+            *cur_y = target_y;
+            return 0;
+        }
+
+        UART_Driver_Process();
+        const uint8_t *rx = NULL;
+        uint16_t rx_len = 0;
+        if (UART_PeekData(UART_CH1, &rx, &rx_len)) {
+            disable_sync_stop();
+            s_cmd_interrupted = true;
+            return -3;
+        }
+
+        elapsed += poll_ms;
+    }
+
+    disable_sync_stop();
     return -1;
 }
 
@@ -588,8 +665,8 @@ void StartHostMotionTestTask(void *argument)
     int32_t cur_y = 0;
     bool jog_active = false;
 
-    const uint16_t speed = 300;
-    const uint8_t  acc   = 10;
+    const uint16_t speed = 600;
+    const uint8_t  acc   = 70;
 
     /* 电机初始化: 配置工作模式+使能+归零 */
 		CAN_Init(&hfdcan1, NULL);
@@ -651,6 +728,7 @@ void StartHostMotionTestTask(void *argument)
 
                     case HCMD_MOVE_UP_START:
                         PrintDebug("[HostMotion] JOG UP speed=%.2f\r\n", parsed.param);
+                        if (jog_active) { disable_sync_stop(); }
                         jog_active = true;
                         positionMode3Run(X1_ADDR, (uint16_t)parsed.param, acc, JOG_MAX_STEPS);
                         positionMode3Run(X2_ADDR, (uint16_t)parsed.param, acc, JOG_MAX_STEPS);
@@ -659,6 +737,7 @@ void StartHostMotionTestTask(void *argument)
 
                     case HCMD_MOVE_DOWN_START:
                         PrintDebug("[HostMotion] JOG DOWN speed=%.2f\r\n", parsed.param);
+                        if (jog_active) { disable_sync_stop(); }
                         jog_active = true;
                         positionMode3Run(X1_ADDR, (uint16_t)parsed.param, acc, -JOG_MAX_STEPS);
                         positionMode3Run(X2_ADDR, (uint16_t)parsed.param, acc, -JOG_MAX_STEPS);
@@ -667,6 +746,7 @@ void StartHostMotionTestTask(void *argument)
 
                     case HCMD_MOVE_LEFT_START:
                         PrintDebug("[HostMotion] JOG LEFT speed=%.2f\r\n", parsed.param);
+                        if (jog_active) { disable_sync_stop(); }
                         jog_active = true;
                         positionMode3Run(Y_ADDR, (uint16_t)parsed.param, acc, JOG_MAX_STEPS);
                         motorSyncTrigger(0);
@@ -674,6 +754,7 @@ void StartHostMotionTestTask(void *argument)
 
                     case HCMD_MOVE_RIGHT_START:
                         PrintDebug("[HostMotion] JOG RIGHT speed=%.2f\r\n", parsed.param);
+                        if (jog_active) { disable_sync_stop(); }
                         jog_active = true;
                         positionMode3Run(Y_ADDR, (uint16_t)parsed.param, acc, -JOG_MAX_STEPS);
                         motorSyncTrigger(0);
@@ -681,13 +762,24 @@ void StartHostMotionTestTask(void *argument)
 
                     case HCMD_MOVE_STOP:
                         PrintDebug("[HostMotion] STOP\r\n");
-                        axis_stop(X1_ADDR);
-                        axis_stop(X2_ADDR);
-                        axis_stop(Y_ADDR);
-												motorSyncTrigger(0); 
+                        disable_sync_stop();
                         jog_active = false;
                         break;
 
+
+                    case HCMD_MOVE_TO:
+                    {
+                        int32_t target_x = (int32_t)(parsed.param  * STEPS_PER_MM);
+                        int32_t target_y = (int32_t)(parsed.param2 * STEPS_PER_MM);
+                        PrintDebug("[HostMotion] MOVE_TO (%.2f, %.2f)mm -> (%ld, %ld) steps\r\n",
+                                   parsed.param, parsed.param2, target_x, target_y);
+                        if (jog_active) { axis_stop(X1_ADDR); axis_stop(X2_ADDR); axis_stop(Y_ADDR); jog_active = false; }
+                        int32_t dx = target_x - cur_x;
+                        int32_t dy = target_y - cur_y;
+                        int result = move_xy_relative(dx, dy, speed, acc, &cur_x, &cur_y);
+                        PrintDebug("[HostMotion] MOVE_TO done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        break;
+                    }
                     case HCMD_SET_ORIGIN:
                         PrintDebug("[HostMotion] SET_ORIGIN\r\n");
                         motorSetZero(X1_ADDR);
@@ -713,6 +805,10 @@ void StartHostMotionTestTask(void *argument)
                         break;
                     }
                 }
+            }
+            if (s_cmd_interrupted) {
+                s_cmd_interrupted = false;
+                continue;
             }
             UART_ClearData(UART_CH1);
         }

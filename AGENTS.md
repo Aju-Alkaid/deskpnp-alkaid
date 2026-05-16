@@ -308,7 +308,7 @@ pnp_1/
 
 4. **速度单位：** `positionMode3Run` 的 speed 参数是 MKS 的 RPM 值，不是 mm/s。JOG 命令从上位机收到的 speed 参数（mm/s）不能直接透传，需要缩放。当前代码直接 `(uint16_t)parsed.param`，应在 `MOVE_*_START` case 中加转换系数。
 
-5. **栈要求：** `StartHostMotionTestTask` 含 `vsnprintf` 和 CAN TX 打印，栈至少 2048 字节（当前 1024 可能不够，已验证会导致启动消息不打印）。
+5. **栈要求：** `StartHostMotionTestTask` 栈已扩至 **4096** 字节（`app_freertos.c`），同时 `PrintDebug` 内部的 `vsnprintf` 已替换为自实现的 `dbg_vformat`（栈占用约 80 字节，远低于标准库的 ~800 字节）。连续 CAN 发送之间插入 `osDelay(2)` 释放栈帧，防崩溃。
 
 ### 11.3 位机通讯协议要点
 
@@ -321,20 +321,87 @@ pnp_1/
 
 ### 11.4 已知坑点
 
-| 问题 | 现象 | 解决 |
-|------|------|------|
-| 没调 `CAN_Init` | CAN TX 有打印但电机不动 | 在任务开头加 `CAN_Init(&hfdcan1, NULL)` |
-| 没调 `HAL_FDCAN_ActivateNotification` | 每次点动后阻塞 10 秒才响应下一条 | 激活 RX FIFO 中断 |
-| 栈太小 | 启动消息不打印，任务静默挂掉 | 栈改为 2048+ |
-| JOG speed=10 RPM 太低 | 电机只震不转 | 上位机发 speed≥300 |
-| 同步模式急停不执行 | 收到 MOVE_STOP 但电机继续跑 | 急停后跟 `motorSyncTrigger(0)` |
-
+| 问题 | 现象 | 根因 | 解决 |
+|------|------|------|------|
+| 没调 CAN_Init | CAN TX 有打印但电机不动 | CAN 外设未启动 | CAN_Init(&hfdcan1, NULL) |
+| 没调 HAL_FDCAN_ActivateNotification | 点动后阻塞 10 秒 | CAN RX 中断未激活 | 激活 RX FIFO 中断 |
+| 栈太小 | 启动消息不打印/崩溃 | vsnprintf 栈深约800B | 栈扩至4096，vsnprintf替换为dbg_vformat |
+| JOG speed太低于300 | 电机只震不转 | RPM太低 | 上位机发speed至少300 |
+| 同步模式急停不执行 | MOVE_STOP后电机继续跑 | 急停被缓存未触发 | axis_stop后跟motorSyncTrigger(0) |
+| CMSIS错误码与EVENT_ANY_ERROR冲突 | 单步移动全返回-2 | osFlagsErrorParameter=0x80000008的bit3与EVENT_ANY_ERROR重合 | 先用(int32_t)flags小于0过滤错误码 |
+| 同步触发后状态被消耗 | 下次单步X1X2直接执行不走同步 | motorSyncTrigger后同步标志被清除 | disable_sync_stop末尾补motorSyncEnable(1) |
+| JOG切换方向电机不动 | UP_START后点DOWN_START停住不反走 | 运行中缓存被锁 | disable_sync_stop先行急停再发新方向 |
+| MOVE_TO被当作CSV | 坐标运动命令不识别 | app_uart_parser.c中MOVE_TO错嵌套在SET_ORIGIN内 | 移出嵌套平级处理 |
+| 连续CAN发送崩溃 | 日志在TX ID=2处截断 | PrintDebug到vsnprintf栈叠加超限 | osDelay(2)间隔发送释放栈帧 |
+| dbg_vformat输出百分号2X | CAN日志显示格式串原文 | 百分号02X的宽度位2未被跳过 | 加数字位跳过逻辑 |
 ### 11.5 本任务涉及的文件
 
 | 文件 | 角色 |
 |------|------|
-| `Task/app_test.c` | `StartHostMotionTestTask` 主函数 + `move_xy_relative` + `axis_stop` |
-| `Task/app_test.h` | 函数声明 + `extern hostMotionTestTask_attributes` |
-| `Core/Src/app_freertos.c` | RTOS 线程创建（`Variables`/`FunctionPrototypes`/`RTOS_THREADS` 均在 USER CODE 内） |
-| `Drivers/ZeMCU-G4/driver_motor.c` | `positionMode3Run`、`Motor_Init`、`motorSyncTrigger` 等底层 API（不修改，只调用） |
-| `Drivers/ZeMCU-G4/driver_can.c` | `CAN_Init`、`CAN_Transmit_Data`（CRC 含 CAN ID） |
+| Task/app_test.c | StartHostMotionTestTask + move_xy_relative + axis_stop + disable_sync_stop + dbg_vformat + PrintDebug |
+| Task/app_test.h | 函数声明 + extern hostMotionTestTask_attributes |
+| Task/app_uart_parser.c | 上位机行协议解析器（MOVE_TO/SET_ORIGIN 括号已修复） |
+| Core/Src/app_freertos.c | RTOS 线程创建 + hostMotionTestTask_attributes（栈 4096） |
+| Drivers/ZeMCU-G4/driver_motor.c | positionMode3Run、Motor_Init、motorSyncTrigger、motorSyncEnable 等 API |
+| Drivers/ZeMCU-G4/driver_can.c | CAN_Init、CAN_Transmit_Data（CRC 含 CAN ID）+ PrintDebug 调用 |
+
+### 11.6 MKS 同步模式深度解析
+
+MKS SERVO42D 同步模式流程：
+
+1. `motorSyncEnable(1)` 广播 → 电机进入同步模式（此后 0xF5 被缓存，状态码 0x05）
+2. 发送 `0xF5` 位置指令到各轴 → 电机缓存指令（状态码 0x05）
+3. `motorSyncTrigger(0)` 广播 → 所有电机**同时**执行缓存指令（状态码 0x01→0x02）
+
+**关键坑点**：
+- **运行期间缓存被锁**：电机执行中（0x01）不接受新 0xF5 缓存覆盖。切换方向/停止需先用 `disable_sync_stop` 中止
+- **同步触发消耗状态**：`motorSyncTrigger(0)` 执行后同步标志被清除，必须重新 `motorSyncEnable(1)` 才能继续缓存
+- **syncEnable 可能被电机忽略**：日志证明 Y 轴运行时无视 `motorSyncEnable(0)` 广播，故不切换同步模式、直接用缓存+触发更可靠
+- **三轴状态不一致**：一个 disable_sync_stop 周期后可能 X1/X2 在非同步而 Y 在同步，需末尾 `motorSyncEnable(1)` 统一
+
+### 11.7 disable_sync_stop 函数设计
+
+最终版本（`Task/app_test.c` 第 523-533 行）：
+```c
+static void disable_sync_stop(void) {
+    axis_stop(X1_ADDR);    // 缓存急停（0xF5 速度=0）
+    axis_stop(X2_ADDR);
+    axis_stop(Y_ADDR);
+    osDelay(5);
+    motorSyncTrigger(0);   // 触发执行 → 中止当前运动
+    osDelay(10);
+    motorSyncEnable(1);    // 恢复同步模式（触发后状态被消耗）
+    osDelay(10);
+}
+```
+
+设计演进（3 版）：
+1. 初版：`motorSyncEnable(0)` 退出同步 → `axis_stop` → `motorSyncEnable(1)` 重开。问题：Y 轴无视 syncEnable 广播
+2. 二版：去掉同步切换，纯缓存+触发。问题：触发后同步状态丢失，下次单步 X1/X2 直接执行不走同步
+3. **终版**：缓存急停 + 触发 + 恢复同步。兼顾可靠停止与状态一致性
+
+### 11.8 move_xy_relative 优化要点
+
+（`Task/app_test.c` 第 548-616 行）
+
+1. **按需发指令**：仅向 dx!=0 或 dy!=0 的轴发送 positionMode3Run，避免向静止轴发冗余命令
+2. **按需等待**：`done_mask` 只包含需要运动的轴完成标志，不等静止轴
+3. **osDelay(2) 防崩溃**：连续 CAN 发送间插入 2ms 延时，释放 PrintDebug→vsnprintf（现为 dbg_vformat）栈帧
+4. **CMSIS 错误码过滤**：`if ((int32_t)flags < 0)` 先判断是否为错误码再检查事件标志
+5. **中断响应**：轮询期间处理 UART 新命令，支持运动中取消
+
+### 11.9 dbg_vformat 轻量格式化
+
+（`Task/app_test.c` 第 50-107 行）
+
+自实现格式化引擎，替代 `<stdio.h>` 的 `vsnprintf`：
+
+| 特性 | vsnprintf | dbg_vformat |
+|------|-----------|-------------|
+| 栈占用 | ~800 字节 | ~80 字节 |
+| 支持格式 | printf 全部 | 项目实际 7 种：%d %ld %u %.1f %.2f %02X %s %.*s |
+| 中文/UTF-8 | 支持 | 支持（逐字节透传，0x25 才触发格式解析） |
+| 依赖 | stdio.h | 无外部依赖 |
+
+**格式位解析顺序**：旗标(0)→宽度→精度(.2/.1/.*)→长度(l)→类型符(d/u/s/X/f)。
+**坑**：宽度位（如 %02X 的 2）必须在进入类型符前跳过，否则被当作普通字符输出。

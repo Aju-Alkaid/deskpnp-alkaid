@@ -19,6 +19,7 @@ typedef enum {
     HCMD_MOVE_STOP,
     /* 坐标系 */
     HCMD_SET_ORIGIN,
+    HCMD_MOVE_TO,       // 运动至指定坐标
     /* 退出调试 */
     HCMD_EXIT_DEBUG,
     /* 文件下载 - 原始行 */
@@ -31,6 +32,7 @@ typedef enum {
 typedef struct {
     HostCmd_t cmd;
     float param;            /* 步长(mm)或速度(mm/s) */
+    float param2;           // Y 坐标(mm) (MOVE_TO 使用)
     char  raw[LINE_BUF_MAX]; /* 原始行内容(文件下载时使用) */
     uint16_t raw_len;
 } HostParsed_t;

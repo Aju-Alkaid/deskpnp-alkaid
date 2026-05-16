@@ -16,7 +16,7 @@ HAL_StatusTypeDef DRV8803_Dual_Config(void)
 {
     // U12 (12V) 初始状态
     HAL_GPIO_WritePin(DRV1_EN_PORT, DRV1_EN_PIN, GPIO_PIN_SET);      // 禁用
-    HAL_GPIO_WritePin(DRV1_RESET_PORT, DRV1_RESET_PIN, GPIO_PIN_SET); // 正常工作时必须 将 RESET 拉高，只有需要复位才拉低。
+    HAL_GPIO_WritePin(DRV1_RESET_PORT, DRV1_RESET_PIN, GPIO_PIN_RESET); // RESET = LOW 正常工作（参考裸机驱动验证）
     HAL_GPIO_WritePin(DRV1_IN1_PORT, DRV1_IN1_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(DRV1_IN2_PORT, DRV1_IN2_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(DRV1_IN3_PORT, DRV1_IN3_PIN, GPIO_PIN_RESET);
@@ -24,7 +24,7 @@ HAL_StatusTypeDef DRV8803_Dual_Config(void)
 
     // U13 (24V) 初始状态
     HAL_GPIO_WritePin(DRV2_EN_PORT, DRV2_EN_PIN, GPIO_PIN_SET);      // 禁用
-    HAL_GPIO_WritePin(DRV2_RESET_PORT, DRV2_RESET_PIN, GPIO_PIN_SET); // 正常工作时必须 将 RESET 拉高，只有需要复位才拉低。
+    HAL_GPIO_WritePin(DRV2_RESET_PORT, DRV2_RESET_PIN, GPIO_PIN_RESET); // RESET = LOW 正常工作
     HAL_GPIO_WritePin(DRV2_IN1_PORT, DRV2_IN1_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(DRV2_IN2_PORT, DRV2_IN2_PIN, GPIO_PIN_RESET);
     HAL_GPIO_WritePin(DRV2_IN3_PORT, DRV2_IN3_PIN, GPIO_PIN_RESET);
@@ -106,9 +106,9 @@ void DRV8803_TriggerChipReset(uint8_t chip_id)
     }
 
     // 复位时序：高脉冲 >20us
-    HAL_GPIO_WritePin(resetPort, resetPin, GPIO_PIN_RESET);
+    HAL_GPIO_WritePin(resetPort, resetPin, GPIO_PIN_SET);   // 进入复位
     HAL_Delay(1);   // 1ms，远大于 20us
-    HAL_GPIO_WritePin(resetPort, resetPin, GPIO_PIN_SET);
+    HAL_GPIO_WritePin(resetPort, resetPin, GPIO_PIN_RESET); // 退出复位
     HAL_Delay(1);   // 稳定等待
 }
 

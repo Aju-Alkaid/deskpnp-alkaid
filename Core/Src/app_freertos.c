@@ -1,4 +1,4 @@
-﻿/* USER CODE BEGIN Header */
+/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * File Name          : app_freertos.c
@@ -54,7 +54,7 @@ osMessageQueueId_t motion_cmd_queue;
 
 /* Private variables ---------------------------------------------------------*/
 /* USER CODE BEGIN Variables */
-osThreadId_t PnPMotionTaskHandle; // 閿熸枻鎷烽敓鏂ゆ嫹閿熸枻????
+osThreadId_t PnPMotionTaskHandle; 
 osThreadId_t motorTestTaskHandle;
 osThreadId_t drv8803TestTaskHandle;
 osThreadId_t servoTestTaskHandle;
@@ -62,39 +62,39 @@ osThreadId_t mksHandle;
 
 const osThreadAttr_t PnP_Motion_Task_attributes = { 
   .name = "PnPMotion",
-  .stack_size = 256 * 4,  // 鏍堥敓鏂ゆ嫹灏忛敓鏂ゆ嫹閿熻鑺傦綇????
-  .priority = (osPriority_t)osPriorityNormal, // 閿熸枻鎷烽敓楗虹》????
+  .stack_size = 256 * 4,  
+  .priority = (osPriority_t)osPriorityNormal, 
 };
 
-//鐢垫満娴嬭瘯浠诲姟
+
 const osThreadAttr_t motorTestTask_attributes = {
   .name = "MotorTest",
-  .stack_size = 512,          // 鍫嗘爤缁欏ぇ涓€鐐癸紝鍥犱负鐢ㄤ簡 printf
+  .stack_size = 512,          
   .priority = (osPriority_t) osPriorityNormal,
 };
 
-//8803娴嬭瘯浠诲姟
+
 const osThreadAttr_t drv8803TestTask_attributes = {
   .name = "DRV8803_Test",
-  .stack_size = 512,           // ??????小
-  .priority = osPriorityNormal  // ?????????
+  .stack_size = 1024,           
+  .priority = osPriorityNormal  
 };
 
-//鑸垫満娴嬭瘯浠诲姟
+
 const osThreadAttr_t servoTestTask_attributes = {
     .name = "ServoTest",
-    .stack_size = 514,                // ????
+    .stack_size = 514,                
     .priority = osPriorityNormal,
 };
 
-//MKS娴嬭瘯浠诲姟
+
 const osThreadAttr_t MKSTestTask_attributes = {
     .name = "MKSTest",
     .stack_size = 1024,                // MKS motor
     .priority = osPriorityNormal,
 };
 
-//澶勭悊 CAN 鎶ユ枃鐨勭嫭绔嬩换锟?
+
 const osThreadAttr_t hostTask_attributes = {
     .name = "HostComm",
     .stack_size = 1024,
@@ -108,14 +108,14 @@ const osThreadAttr_t canProcTask_attr = {
 };
 
 
-// 锟斤拷位锟斤拷通讯锟斤拷锟斤拷锟斤拷锟斤拷
+
 const osThreadAttr_t hostTestTask_attributes = {
     .name = "HostTest",
     .stack_size = 512,
     .priority = osPriorityNormal
 };
 
-/* 锟斤拷位锟斤拷通讯 + XY 锟剿讹拷锟斤拷锟狡诧拷锟斤拷锟斤拷锟斤拷 锟斤拷锟斤拷 */
+
 const osThreadAttr_t hostMotionTestTask_attributes = {
     .name = "HostMotion",
     .stack_size = 2048,
@@ -133,9 +133,9 @@ const osThreadAttr_t touchGFX_attributes = {
 
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
-void StartUartTestTask(void *argument); // 闁跨喐鏋婚幏鐑芥晸閺傘倖瀚圭紓鍝勩亼闁跨喍鑼庨悮瀛樺闁跨喐鏋婚敓????
-void StartMotorTestTask(void *argument); // 闁跨喐鏋婚幏鐑芥晸閺傘倖瀚圭紓鍝勩亼闁跨喍鑼庨悮瀛樺闁跨喐鏋婚敓????
-void PnP_Motion_Task(void *argument);    // 闁跨喐鏋婚幏鐑芥晸閺傘倖瀚圭紓鍝勩亼闁跨喍鑼庨悮瀛樺闁跨喐鏋婚敓????
+void StartUartTestTask(void *argument);   
+void StartMotorTestTask(void *argument); 
+void PnP_Motion_Task(void *argument);    
 void StartDrv8803TestTask(void *argument); 
 void StartServoTestTask(void *argument);   
 void vMotorTestTask(void *pvParameters) ;
@@ -196,9 +196,9 @@ void MX_FREERTOS_Init(void) {
 
 //	osThreadNew(PnP_Motion_Task, NULL, &PnP_Motion_Task_attributes);
 
-//	drv8803TestTaskHandle = osThreadNew(StartDrv8803TestTask, NULL, &drv8803TestTask_attributes);
+	drv8803TestTaskHandle = osThreadNew(StartDrv8803TestTask, NULL, &drv8803TestTask_attributes);
   
-//	motorTestTaskHandle = osThreadNew(StartMotorTestTask, NULL, &motorTestTask_attributes);
+	motorTestTaskHandle = osThreadNew(StartMotorTestTask, NULL, &motorTestTask_attributes);
 
 //  servoTestTaskHandle = osThreadNew(StartServoTestTask, NULL, &servoTestTask_attributes);
 
@@ -208,7 +208,7 @@ void MX_FREERTOS_Init(void) {
 
 //    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
 
-    // 锟斤拷位锟斤拷通讯+锟剿讹拷锟斤拷锟斤拷锟斤拷锟斤拷
+  
   osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
 
 
