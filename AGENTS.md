@@ -212,7 +212,7 @@ pnp_1/
 9. **LPUART1 未配置 DMA 接收：** `hdmarx = NULL`，仅用作 TMC2209 半双工阻塞通信。如果该通道用于其他用途需重新配置。
 
 ### 9.4 代码质量
-10. **`app_freertos.c` 中文注释乱码：** 部分注释在 GBK→UTF-8 转换后显示为乱码（如 "閿熸枻鎷烽敓鏂ゆ嫹"），原文件 GBK 编码正常。
+10. 暂无
 11. **`driver_motor.c runFail/runOK` 死循环：** 两个函数都是 `while(1){}` 空循环，无实际错误处理逻辑。
 12. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`CAN_ID`、`realTimeLocation` 等，部分来自早期代码残留。
 13. **`app_test.h` 与 `app_motion.h` 重复声明：** `semX1Done`, `evtAxesDone` 等信号量/事件组在两处均有 `extern` 声明。
