@@ -135,8 +135,10 @@ void Key_Task(void *argument)
 {
     KeyEvent_t evt;
     
+    uint32_t wake_time = osKernelGetTickCount();
     for (;;) {
-        osDelay(10);  // 10ms 扫描周期
+        wake_time += 10;
+        osDelayUntil(wake_time);
         
         Key_Scan();
         
