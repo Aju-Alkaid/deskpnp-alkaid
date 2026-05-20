@@ -72,8 +72,8 @@ pnp_1/
 │   ├── app_motion.c/h           # 运动控制函数 + CAN_Process_Task + MotionTask_Func
 │   ├── app_test.c/h             # 测试任务 (vMotorTestTask) + PrintDebug 函数
 │   └── Task_Init.c/h            # 任务创建框架（Tasks_Create，当前未激活）
-├── TouchGFX/                    # GUI 图形界面（待实现）
-├── Middlewares/                  # FreeRTOS + TouchGFX 中间件
+├── TouchGFX/                    # GUI 图形界面（已移植，FreeRTOS 任务驱动）
+├── Middlewares/                  # FreeRTOS + TouchGFX 中间件（系统生成，禁止修改）
 ├── MDK-ARM/                     # Keil MDK 工程文件
 ├── build/                       # CMake 构建输出
 ├── CMakeLists.txt               # CMake 构建配置
@@ -139,7 +139,8 @@ pnp_1/
 | `Host_Task` | 1024 | Normal | 上位机通信 + CSV解析 + 视觉协调 |
 | `CAN_Process_Task` | 512 | Normal | 从 motor_event_queue 取 CAN 报文，设事件组标志 |
 | `vMotorTestTask` | 1024 | Normal | 电机测试任务（当前活跃的生产任务） |
-| `TouchGFX_Task` | 8192 | Normal | GUI 图形界面（空循环，待实现） |
+| `TouchGFX_Task` | 8192 | Normal | GUI 图形界面渲染 + VSYNC + 按键处理 |
+| `Key_Task` | 256 | Normal | 硬件按键扫描（10ms）+ 消抖 → keyEventQueue |
 | `PnP_Motion_Task` | 1024 | Normal | 正式运动任务（已注释，未激活） |
 
 **任务间通信：**
@@ -147,6 +148,10 @@ pnp_1/
 - `motion_cmd_queue` (20深度) — Host_Task → MotionTask_Func
 - `host_pkt_queue` — 视觉回调/串口解析 → Host_Task
 - `evtAxesDone` 事件组 — CAN_Process_Task 通知到位
+- `keyEventQueue` (16深) — Key_Task → KeyController → TouchGFX 按键事件
+- `dataTransferQueue` (16深) — 主系统 Task → Model::processQueue() → UI 数据同步
+- `vsync_queue` (1深) — TIM7 ISR → TouchGFX 渲染循环
+- `frame_buffer_sem` — TouchGFX 帧缓冲互斥锁
 - `semX1Done/semX2Done/semYDone` 信号量 — 三轴独立到位信号
 
 ## 六、关键数据流
@@ -200,8 +205,8 @@ pnp_1/
 1. 暂无
 
 ### 9.2 警告问题（建议修复）
-2. **CAN ISR 中调用 PrintDebug：** `HAL_FDCAN_RxFifo0Callback` 中每个包都调用 `PrintDebug`（内部使用阻塞式 `HAL_UART_Transmit`），在 ISR 中这是不允许的。高频 CAN 通信时会导致严重延迟。
-3. **`CAN_Transmit_Data` 中调试打印：** 每次 CAN 发送都打印 TX 日志，同样使用阻塞式 UART。生产环境应移除或改为条件编译。
+2. **CAN ISR 中调用 PrintDebug（已修复，见 §9.6-2）：** `HAL_FDCAN_RxFifo0Callback` 中 PrintDebug 调用已用 `#ifdef DEBUG_CAN_ISR` 包裹。
+3. **`CAN_Transmit_Data` 中调试打印（已修复，见 §9.6-2）：** 每次 CAN 发送的 TX 日志同样用 `#ifdef DEBUG_CAN_ISR` 包裹。
 4. **`motor_send_move_cmd` 函数体冗余：** 该函数的 buffer 填充逻辑与 `positionMode3Run` 重复，实际调用也是转发到后者。建议移除冗余逻辑或直接废弃此函数。
 
 ### 9.3 功能性问题（待完善）
@@ -214,16 +219,23 @@ pnp_1/
 ### 9.4 代码质量
 10. 暂无
 11. **`driver_motor.c runFail/runOK` 死循环：** 两个函数都是 `while(1){}` 空循环，无实际错误处理逻辑。
-12. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`CAN_ID`、`realTimeLocation` 等，部分来自早期代码残留。
-13. **`app_test.h` 与 `app_motion.h` 重复声明：** `semX1Done`, `evtAxesDone` 等信号量/事件组在两处均有 `extern` 声明。
-
+12. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`CAN_ID`、`realTimeLocation` 等，部分来自早期代码残留。`can_rx_queue` 已删除。
+13. **`app_test.h` 与 `app_motion.h` 重复声明（已修复，见 §9.6-5）：** 重复的 `semX1Done`、`evtAxesDone` 等 extern 声明已从 `app_test.h` 移除。
 ### 9.5 编译与构建
 14. **Keil MDK 工程：** 主要使用 MDK-ARM 目录下的 Keil 工程编译。CMakeLists.txt 也可用于构建。
 15. **`overflow_count` 唯一声明在 `timestamp.c`：** `timestamp.h` 有 `extern volatile`，`main.c` 通过包含 `timestamp.h` 使用，不得在 main.c 中重复定义。
 
+### 9.6 已完成的架构改进（2026-05）
+1. **已创建 `host_pkt_queue`：** 16 深度 `HostMsg_t` 队列，UART 空闲中断回调 → 队列 → Host_Task。修复了原先队列未创建导致 NULL 写入的运行时 Bug。
+2. **已添加 `g_debug_mutex` + `DEBUG_CAN_ISR` 条件编译：** 互斥锁保护任务上下文 `PrintDebug` 的静态 `s_debug_buf`，解决多任务并发日志交错。ISR 中 PrintDebug 由 `DEBUG_CAN_ISR` 宏控制（默认关闭），彻底消除 ISR 阻塞 UART 问题。
+3. **`StartHostMotionTestTask` 已改为事件驱动：** 原主循环 `vTaskDelay(10ms)` 轮询改为 `osThreadFlagsWait` 阻塞等待。UART 空闲中断通过 `osThreadFlagsSet(hostMotionTaskHandle, ...)` 唤醒任务，延迟从 ≤10ms 降至 <1ms。
+4. **`Key_Task` 已改用 `osDelayUntil`：** 原 `osDelay(10)` 改为 `osDelayUntil`，消除任务执行时间导致的周期漂移，保证精确 10ms 扫描间隔。
+5. **已删除未使用的 FreeRTOS 对象：** `semX1Done`、`semX2Done`、`semYDone`、`semEmergency`（信号量）和 `can_rx_queue`（队列）已从源码中移除。到位通知统一使用 `evtAxesDone` 事件组。
+
+
 ## 十、快速参考
 
-### 常用 GPIO 引脚速查
+### 10.1 常用 GPIO 引脚速查
 | 功能 | 引脚 | 备注 |
 |------|------|------|
 | USART1_TX/RX | PE0/PE1 | 上位机通信 |
@@ -252,7 +264,7 @@ pnp_1/
 | LCD_LED | PD8 | LCD 背光 |
 | DRV1_IN4_PIN | PE11 | 控制真空泵使能失能 |
 
-### 电机 CAN 指令速查
+### 10.2 电机 CAN 指令速查
 | 功能码 | 功能 | 数据长度 |
 |--------|------|----------|
 | 0xF5 | 坐标绝对运动 | 7 字节 |
@@ -269,7 +281,7 @@ pnp_1/
 | 0x3D | 解除堵转保护 | 1 字节 |
 | 0x85 | EN 引脚配置 | 2 字节 |
 
-### C 文件编码说明
+### 10.3 C 文件编码说明
 - `Drivers/ZeMCU-G4/` 与 `Task/` 目录使用 **UTF-8（带 BOM）编码**
 - `Core/` 目录（CubeMX 生成）仍为 **GBK（CP936）编码**
 - CubeMX 生成的 CubeMX User Code 起始/结束标记：`/* USER CODE BEGIN ... */` / `/* USER CODE END ... */`
@@ -311,7 +323,7 @@ pnp_1/
 
 5. **栈要求：** `StartHostMotionTestTask` 栈已扩至 **4096** 字节（`app_freertos.c`），同时 `PrintDebug` 内部的 `vsnprintf` 已替换为自实现的 `dbg_vformat`（栈占用约 80 字节，远低于标准库的 ~800 字节）。连续 CAN 发送之间插入 `osDelay(2)` 释放栈帧，防崩溃。
 
-### 11.3 位机通讯协议要点
+### 11.3 上位机通讯协议要点
 
 上位机（SerialTool.exe）协议见 `E:/聊天记录/上位机串口通讯协议.txt`：
 - 格式：`COMMAND arg\n`，UTF-8 编码
@@ -406,3 +418,171 @@ static void disable_sync_stop(void) {
 
 **格式位解析顺序**：旗标(0)→宽度→精度(.2/.1/.*)→长度(l)→类型符(d/u/s/X/f)。
 **坑**：宽度位（如 %02X 的 2）必须在进入类型符前跳过，否则被当作普通字符输出。
+
+## 十二、TouchGFX + FreeRTOS 移植日志（2026-05）
+
+### 12.1 移植概述
+
+| 项目 | 移植前状态 | 移植后状态 |
+|------|-----------|-----------|
+| TouchGFX | 裸机 main() while(1) 轮询 | 独立 TouchGFX_Task（栈 8192B） |
+| VSYNC 信号 | 未实现 | TIM7 硬件定时器 30Hz 模拟 VSYNC |
+| LCD 驱动 | HAL_Delay 依赖 Systick | BusyDelay 忙等替代，移除 HAL_Delay |
+| 按键驱动 | 裸机轮询 | FreeRTOS Key_Task（10ms 周期） + 消息队列 |
+| 主系统↔GUI 通信 | 全局变量轮询 | FreeRTOS 消息队列（Data_Transfer） |
+| 系统时基 | Systick | TIM6（HAL 系统时基） |
+
+### 12.2 新增文件清单
+
+| 文件 | 说明 |
+|------|------|
+| `TouchGFX/target/KeyController.cpp` | 按键控制器，消费 keyEventQueue，松开触发 |
+| `TouchGFX/target/KeyController.hpp` | KeyController 头文件，继承 ButtonController |
+| `TouchGFX/gui/src/model/Data_Transfer.c` | 主系统↔GUI 消息队列模块 |
+| `TouchGFX/gui/include/gui/model/Data_Transfer.h` | Data_Transfer 头文件 |
+| `TouchGFX/gui/src/containers/circleProgress.cpp` | 圆形进度条容器 |
+| `TouchGFX/gui/include/gui/containers/circleProgress.hpp` | 圆形进度条头文件 |
+| `Task/app_motor.c/h` | 电机应用层任务（待实现） |
+| `startup_stm32g474xx.s` | 启动汇编文件 |
+| `.gitignore` | Git 忽略规则（Keil 构建产物） |
+
+### 12.3 新增 FreeRTOS 任务
+
+| 任务名 | 入口函数 | 栈大小 | 优先级 | 周期/触发 | 功能 |
+|--------|---------|--------|--------|----------|------|
+| `TouchGFX_Task` | `TouchGFX_Task` | 8192 | Normal | VSYNC 驱动 | GUI 渲染（ST7306_Init → touchgfx_taskEntry） |
+| `Key_Task` | `Key_Task` | 256 | Normal | 10ms | 5键硬件扫描 + 消抖 → keyEventQueue |
+
+### 12.4 新增 FreeRTOS 通信对象
+
+| 对象 | 类型 | 定义位置 | 用途 |
+|------|------|---------|------|
+| `keyEventQueue` | osMessageQueue(16) | app_freertos.c | Key_Task → KeyController → TouchGFX |
+| `dataTransferQueue` | osMessageQueue(16) | app_freertos.c | 主系统 Task → Model::processQueue() → UI 更新 |
+| `frame_buffer_sem` | osSemaphore(1) | OSWrappers.cpp | TouchGFX 帧缓冲互斥 |
+| `vsync_queue` | osMessageQueue(1) | OSWrappers.cpp | TIM7 ISR → TouchGFX 渲染循环 |
+
+### 12.5 TouchGFX 移植详细步骤
+
+#### 12.5.1 CubeMX 配置
+- FreeRTOS: CMSIS_V2, TICK_RATE_HZ=1000, TOTAL_HEAP_SIZE=32768, heap_4
+- TIM6: HAL 系统时基（替代 Systick）
+- TIM7: TouchGFX VSYNC 信号源（Prescaler=169, Period=33333 → 30Hz@170MHz）
+- SPI2: ST7306 LCD 通信
+
+#### 12.5.2 VSYNC 信号链路
+```
+TIM7 (30Hz) → TIM7_DAC_IRQHandler → TouchGFX_VSYNC_IRQCallback()
+  → touchgfxSignalVSync()
+    → HAL::vSync() + OSWrappers::signalVSync()
+      → vsync_queue → TouchGFX 渲染循环唤醒
+```
+
+**关键实现文件：**
+- `Core/Src/stm32g4xx_it.c:415` — `TouchGFX_VSYNC_IRQCallback()` 调用点
+- `TouchGFX/target/TouchGFXHAL.cpp:43-58` — `TouchGFX_VSYNC_TimerInit()` / `TouchGFX_VSYNC_IRQCallback()`
+
+#### 12.5.3 HAL 初始化顺序
+```
+MX_TouchGFX_PreOSInit()  → 空
+MX_TouchGFX_Init()       → touchgfx_components_init() + touchgfx_init()
+  touchgfx_init()        → FrontendHeap::getInstance() → gotoStartScreen() → hal.initialize()
+    HAL::initialize()    → OSWrappers::initialize() (创建 FreeRTOS 信号量/队列)
+    TouchGFXHAL::initialize() → setButtonController(&keyController) + isInited=1
+osKernelStart()
+  TouchGFX_Task:
+    ST7306_Init(&hspi2)
+    touchgfx_taskEntry()
+      enableLCDControllerInterrupt() → TouchGFX_VSYNC_TimerInit() → TIM7 启动
+      backPorchExited() → swapFrameBuffers() + tick() → handlePendingScreenTransition()
+         → gotoScreen_HOMEScreenNoTransition() → 渲染 HOME 界面
+      主循环: waitForVSync() → render → flushFrameBuffer() → ST7306_Refresh()
+```
+
+### 12.6 按键系统架构
+
+#### 12.6.1 事件流
+```
+Key_Task (10ms FreeRTOS 任务)
+  → Key_Scan()                    // 软件消抖（10ms 采样)
+  → keyEventQueue                 // KeyEvent_t {key_id, type: 0=松开 1=按下}
+
+KeyController::sample()           // TouchGFX 框架每帧调用，唯一消费者
+  → 仅处理 type==0（松开/单击）
+  → TouchGFX 框架 → handleKeyEvent(key_id)
+    → Screen_HOMEView::handleKeyEvent()
+      → PageTable::handleKey(key)
+        ├─ KEY_DOWN (2)  → 光标下移 (page_cnt+1)%4
+        ├─ KEY_UP   (3)  → 光标上移 (page_cnt+3)%4
+        ├─ KEY_KEY1 (0)  → 切换详情面板
+        └─ KEY_KEY2 (1)  → 进入选中页面/gotoScreen
+```
+
+#### 12.6.2 按键 ID 映射
+| ID | 宏 | 引脚 | 功能 |
+|----|-----|------|------|
+| 0 | KEY_KEY1 | PC6 | 切换详情 |
+| 1 | KEY_KEY2 | PC7 | 确认/进入 |
+| 2 | KEY_DOWN | PC8 | 光标下移 |
+| 3 | KEY_UP | PA8 | 光标上移 |
+| 4 | KEY_PUSH | PC9 | 按压 |
+
+> ⚠️ CW/CCW 引脚与 AGENTS.md §二 不一致（规格: CW=PA8, CCW=PC8），反映编码器物理安装方向
+
+#### 12.6.3 关键 API
+| 函数 | 文件 | 说明 |
+|------|------|------|
+| `Key_Init()` | key.c | GPIO 初始化（上拉输入，低有效） |
+| `Key_Scan()` | key.c | 消抖扫描（每10ms调用），产生 press/release 事件 |
+| `Key_GetEvent()` | key.c | 读取松开事件（单击） |
+| `Key_GetPressEvent()` | key.c | 读取按下事件 |
+| `Key_IsAnyPressed()` | key.c | 查询实时按键状态（返回首个按下键ID，无按键0xFF） |
+| `KeyController::sample()` | KeyController.cpp | TouchGFX 框架接口，消费 keyEventQueue（松开触发） |
+| `PageTable::handleKey()` | PageTable.cpp | UI 按键路由（HOME/IMPORT/LOG/RESET 切换） |
+
+### 12.7 已修复问题
+
+| 问题 | 现象 | 根因 | 解决方案 |
+|------|------|------|----------|
+| **屏幕不显示** | ST7306_Init 后全黑，touchgfx_taskEntry 无输出 | `stm32g4xx_it.c` 中 `touchgfxSignalVSync()` 被注释，渲染循环死锁 | ISR 改为调用 `TouchGFX_VSYNC_IRQCallback()` |
+| **TIM7 启动失败** | enableLCDControllerInterrupt 后 waitForVSync 阻塞 | TouchGFX_VSYNC_TimerInit 只 Stop+Init，不 Start | TimerInit 末尾增加 `HAL_TIM_Base_Start_IT(&htim7)` |
+| **TIM7 优先级不当** | FreeRTOS API 调用可能失败 | NVIC pri=5 在 configMAX_SYSCALL 边界 | enableLCDControllerInterrupt 中设置 pri=14 |
+| **按键映射混乱** | 按 KEY1 触发 KEY_DOWN | KeyController 与 Model 双路消费 keyEventQueue + 无消抖 GPIO 读取 | KeyController 单路消费队列；Model 移除按键处理 |
+| **按键按下即触发** | 期望松开触发 | Model 处理 type==1（按下事件） | 改为 type==0（松开/单击事件） |
+| **KeyController 不可用** | 编译报错 undefined symbol | KeyController.cpp 未加入 Keil 编译列表 | 添加到 pnp_1.uvprojx |
+| **LCD SPI 死锁** | 卡在 `while (!(hspi->SR & SPI_SR_TXE))` | HAL_Delay 依赖 uwTick，FreeRTOS 启动前 uwTick=0 | `BusyDelay()` 替代 `HAL_Delay()`（__NOP 忙等） |
+| **ST7306_Init 卡死** | HAL_GetTick 返回 0，超时循环死锁 | HAL 时基未初始化 | CubeMX 配置 TIM6 为 HAL 时基（替代 Systick） |
+| **TouchGFXHAL.cpp 编译报错** | TIM7_IRQn / hspi2 / touchgfxSignalVSync 未声明 | 裸机代码直接粘贴，缺少 RTOS 适配 | 重写 HAL 初始化流程 |
+| **Data_Transfer 符号重复** | dataTransferQueue multiply defined | 全局变量在多个 .c/.o 中定义 | 仅在 app_freertos.c 定义，其他文件 extern |
+| **TIM7 ISR 重复定义** | TIM7_DAC_IRQHandler multiply defined | CubeMX 生成 + 自定义 ISR 冲突 | 删除自定义 ISR，复用 stm32g4xx_it.c |
+
+### 12.8 仍存在的问题（⚠️ 待处理）
+
+| 问题 | 位置 | 说明 |
+|------|------|------|
+| **keyEventQueue 被 KeyController 每次只取1条** | KeyController.cpp | `osMessageQueueGet` 零超时只取1条，高频按键可能堆积。可改为 while 循环排空 |
+| **PageTable 未处理 KEY_PUSH** | PageTable.cpp | KEY_PUSH(id=4) 无 case 分支 |
+| **其他屏幕未实现 handleKeyEvent** | IMPORT/LOG/RESET View | 仅 HOME 屏幕有按键处理，切换到其他屏幕后按键无响应 |
+| **Data_Transfer 各 case 未实现** | Model.cpp:processQueue() | DT_SMT_STATUS/DT_TEMP_CHANGE 等 case 体为 TODO 注释 |
+| **MCU 负载未监控** | TouchGFXHAL | 未启用 `MCUInstrumentation`，无帧率/CPU 占用统计 |
+| **TOUCHGFX_Framebuffer 段未在链接脚本定义** | STM32G474XX_FLASH.ld | 帧缓冲使用 `LOCATION_PRAGMA_NOLOAD` 放置，可能未正确对齐 |
+| **KeyController::sample() 未清空按下事件** | KeyController.cpp | 仅消费 type==0（松开），按下事件(type==1)残留在队列中。虽不触发但占用队列空间 |
+
+### 12.9 关键代码路径速查
+
+| 功能 | 入口文件 | 关键函数/行号 |
+|------|---------|-------------|
+| TouchGFX 任务 | `TouchGFX/App/app_touchgfx.c` | `TouchGFX_Task():86-92` |
+| VSYNC ISR | `Core/Src/stm32g4xx_it.c` | `TIM7_DAC_IRQHandler:408-417` |
+| TIM7 初始化 | `TouchGFX/target/TouchGFXHAL.cpp` | `TouchGFX_VSYNC_TimerInit:43-49` |
+| HAL 初始化 | `TouchGFX/target/TouchGFXHAL.cpp` | `TouchGFXHAL::initialize:68-73` |
+| 帧刷新 | `TouchGFX/target/TouchGFXHAL.cpp` | `flushFrameBuffer:96-101` |
+| 按键任务 | `Drivers/ZeMCU-G4/key.c` | `Key_Task:105-127` |
+| 按键扫描 | `Drivers/ZeMCU-G4/key.c` | `Key_Scan:62-101` |
+| 按键控制器 | `TouchGFX/target/KeyController.cpp` | `sample:16-26` |
+| 消息队列处理 | `TouchGFX/gui/src/model/Model.cpp` | `processQueue:27-67` |
+| LCD 初始化 | `st7306/lcd.c` | `ST7306_Init:176-188` |
+| LCD 刷新 | `st7306/lcd.c` | `ST7306_Refresh:209-215` |
+| 1bpp→2×4 转换 | `TouchGFX/target/TouchGFXHAL.cpp` | `convert_1bpp_to_2x4:80-93` |
+| FreeRTOS 任务创建 | `Core/Src/app_freertos.c` | `MX_FREERTOS_Init:165-222` |
+| 任务属性定义 | `Core/Src/app_freertos.c` | `touchGFX_attributes:48-52` `keyTask_attributes:54-58` |
