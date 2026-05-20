@@ -138,6 +138,7 @@ uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t 
     tx_header.FDFormat = FDCAN_CLASSIC_CAN;
     tx_header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_header.MessageMarker = 0;
+#ifdef DEBUG_CAN_ISR
 	     // ---- 调试打印（暂时加入）----
     PrintDebug("TX ID=%d LEN=%d DATA:", can_id, total_len);
     for (int i = 0; i < total_len; i++) {
@@ -145,6 +146,7 @@ uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t 
     }
     PrintDebug("\r\n");
 
+#endif
 	HAL_StatusTypeDef status =  HAL_FDCAN_AddMessageToTxFifoQ(hfdcan, &tx_header,  buf);
 
     // 转换返回值：HAL_OK(0) -> 返回0; 其他错误 -> 返回1
@@ -211,11 +213,13 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 								pkt.Status = 0xFF;          // 无意义
 						}
 						
+#ifdef DEBUG_CAN_ISR
 						 PrintDebug("RX: ID=%d LEN=%d DATA:", header.Identifier, header.DataLength);
             for (int i = 0; i < header.DataLength; i++) {
                 PrintDebug(" %02X", rx_data[i]);
             }
             PrintDebug("\r\n");
+#endif
 						
             osMessageQueuePut(motor_event_queue, &pkt, 0, 0);            
         }    
