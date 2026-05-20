@@ -13,10 +13,6 @@ extern TIM_HandleTypeDef htim5;
 
 
 //信号量
-osSemaphoreId_t semX1Done = NULL;
-osSemaphoreId_t semX2Done = NULL;
-osSemaphoreId_t semYDone  = NULL;
-osSemaphoreId_t semEmergency = NULL;
 
 //事件组
 osEventFlagsId_t evtAxesDone = NULL;   // 用于三轴到位同步
@@ -330,13 +326,6 @@ void MotionTask_Func(void *argument)
     }
 }
 //信号量初始化
-void Semaphore_Init(void) {
-    // 二值信号量：初始计数 0，最大计数 1
-    semX1Done = osSemaphoreNew(1, 0, NULL);
-    semX2Done = osSemaphoreNew(1, 0, NULL);
-    semYDone  = osSemaphoreNew(1, 0, NULL);
-    semEmergency = osSemaphoreNew(1, 0, NULL);
-}
 //事件组初始化
 void Event_Init(void) {
     evtAxesDone = osEventFlagsNew(NULL);

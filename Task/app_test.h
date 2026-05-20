@@ -23,12 +23,4 @@ void StartHostCommTestTask(void *argument); // 上位机通讯测试任务
 void StartHostMotionTestTask(void *argument);
 extern const osThreadAttr_t hostMotionTestTask_attributes;
 
-
-/*信号量*/
-extern osSemaphoreId_t semX1Done, semX2Done, semYDone;//三轴独立信号量
-extern osSemaphoreId_t semEmergency;//紧停信号量
-
-/*事件组*/
-extern osEventFlagsId_t evtAxesDone;   // 用于三轴到位同步
-
 #endif
