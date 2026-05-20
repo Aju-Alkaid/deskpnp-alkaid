@@ -33,6 +33,8 @@
 #include "driver_drv8803.h"
 #include "app_vision.h"
 #include "app_host.h"
+#include "key.h"
+#include "gui/model/Data_Transfer.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -40,6 +42,8 @@
 osMessageQueueId_t motor_event_queue; 
 osMessageQueueId_t can_rx_queue;
 osMessageQueueId_t motion_cmd_queue;
+extern osMessageQueueId_t keyEventQueue;
+extern osMessageQueueId_t dataTransferQueue;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -131,6 +135,12 @@ const osThreadAttr_t touchGFX_attributes = {
   .stack_size = 2048 * 4
 };
 
+const osThreadAttr_t keyTask_attributes = {
+  .name = "KeyTask",
+  .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = 256
+};
+
 /* Private function prototypes -----------------------------------------------*/
 /* USER CODE BEGIN FunctionPrototypes */
 void StartUartTestTask(void *argument);   
@@ -143,6 +153,7 @@ void CAN_Process_Task(void *argument);
 void Host_Task(void *argument);
 void StartHostCommTestTask(void *argument);
 void StartHostMotionTestTask(void *argument);
+void Key_Task(void *argument);
 /* USER CODE END FunctionPrototypes */
 
 void TouchGFX_Task(void *argument);
@@ -160,6 +171,7 @@ void MX_FREERTOS_Init(void) {
 	Semaphore_Init();
 	Event_Init();
 	Vision_Init();
+	Key_Init();
   /* USER CODE END Init */
 
   /* USER CODE BEGIN RTOS_MUTEX */
@@ -180,6 +192,8 @@ void MX_FREERTOS_Init(void) {
   can_rx_queue = osMessageQueueNew(10, sizeof(CAN_Rx_Packet_t), NULL);
 	motor_event_queue = osMessageQueueNew(32, sizeof(CAN_Rx_Packet_t), NULL);
 	motion_cmd_queue = osMessageQueueNew(20, sizeof(MotionCmd_t), NULL);
+	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
+	dataTransferQueue = osMessageQueueNew(16, sizeof(DataTransferMsg_t), NULL);
 	
 	
 	
@@ -210,7 +224,7 @@ void MX_FREERTOS_Init(void) {
 
   
   osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
-
+  osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 
@@ -221,6 +235,7 @@ void MX_FREERTOS_Init(void) {
 }
 
 /* USER CODE BEGIN Header_TouchGFX_Task */
+extern void touchgfx_taskEntry();
 /**
   * @brief  Function implementing the touchGFX thread.
   * @param  argument: Not used
@@ -231,10 +246,7 @@ __weak void TouchGFX_Task(void *argument)
 {
   /* USER CODE BEGIN TouchGFX_Task */
   /* Infinite loop */
-  for(;;)
-  {
-    osDelay(1);
-  }
+  touchgfx_taskEntry();
   /* USER CODE END TouchGFX_Task */
 }
 

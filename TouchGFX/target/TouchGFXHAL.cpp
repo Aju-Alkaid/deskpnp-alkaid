@@ -1,4 +1,4 @@
-/* USER CODE BEGIN Header */
+﻿/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * File Name          : TouchGFXHAL.cpp
@@ -24,56 +24,59 @@
 
 /* USER CODE BEGIN TouchGFXHAL.cpp */
 #include "lcd.h"
+#include "spi.h"
 #include <touchgfx/hal/OSWrappers.hpp>
 #include <string.h> 
 #include <KeyController.hpp>
 
 using namespace touchgfx;
 
+extern "C" void touchgfxSignalVSync(void);
+
 extern "C" {
     uint8_t isInited = 0;
 }
 
-void TouchGFXHAL::initialize()
+// ---- TIM7 VSYNC ----
+extern TIM_HandleTypeDef htim7;
+
+void TouchGFX_VSYNC_TimerInit(void)
 {
-    // Calling parent implementation of initialize().
-    //
-    // To overwrite the generated implementation, omit call to parent function
-    // and implemented needed functionality here.
-    // Please note, HAL::initialize() must be called to initialize the framework.
-
-    TouchGFXGeneratedHAL::initialize(); 
-    isInited = 1;
-
+    HAL_TIM_Base_Stop_IT(&htim7);
+    htim7.Init.Period = 33333 - 1;
+    HAL_TIM_Base_Init(&htim7);
+    HAL_TIM_Base_Start_IT(&htim7);
 }
 
-/**
- * Gets the frame buffer address used by the TFT controller.
- *
- * @return The address of the frame buffer currently being displayed on the TFT.
- */
+extern "C" void TouchGFX_VSYNC_TimerStart(void)
+{
+    HAL_TIM_Base_Start_IT(&htim7);
+}
+
+extern "C" void TouchGFX_VSYNC_IRQCallback(void)
+{
+    if (isInited) {
+        touchgfxSignalVSync();
+    }
+}
+
+static KeyController keyController;
+
+void TouchGFXHAL::initialize()
+{
+    TouchGFXGeneratedHAL::initialize(); 
+    setButtonController(&keyController);
+    keyController.init();
+    isInited = 1;
+}
+
 uint16_t* TouchGFXHAL::getTFTFrameBuffer() const
 {
-    // Calling parent implementation of getTFTFrameBuffer().
-    //
-    // To overwrite the generated implementation, omit call to parent function
-    // and implemented needed functionality here.
-
     return TouchGFXGeneratedHAL::getTFTFrameBuffer();
 }
 
-/**
- * Sets the frame buffer address used by the TFT controller.
- *
- * @param [in] address New frame buffer address.
- */
 void TouchGFXHAL::setTFTFrameBuffer(uint16_t* address)
 {
-    // Calling parent implementation of setTFTFrameBuffer(uint16_t* address).
-    //
-    // To overwrite the generated implementation, omit call to parent function
-    // and implemented needed functionality here.
-
     TouchGFXGeneratedHAL::setTFTFrameBuffer(address);
 }
 
@@ -96,21 +99,12 @@ static void convert_1bpp_to_2x4(const uint8_t* src, uint8_t* dst, uint16_t width
     }
 }
 
-/**
- * This function is called whenever the framework has performed a partial draw.
- *
- * @param rect The area of the screen that has been drawn, expressed in absolute coordinates.
- *
- * @see flushFrameBuffer().
- */
 void TouchGFXHAL::flushFrameBuffer(const touchgfx::Rect& rect) {
     const uint8_t* fb = (const uint8_t*)getClientFrameBuffer();
     if (fb == nullptr) return;
     convert_1bpp_to_2x4(fb, display_buffer, LCD_W, LCD_H);
     ST7306_Refresh();
 }
-
-
 
 extern "C" 
 void touchgfxSignalVSync()
@@ -127,58 +121,26 @@ bool TouchGFXHAL::blockCopy(void* RESTRICT dest, const void* RESTRICT src, uint3
     return TouchGFXGeneratedHAL::blockCopy(dest, src, numBytes);
 }
 
-/**
- * Configures the interrupts relevant for TouchGFX. This primarily entails setting
- * the interrupt priorities for the DMA and LCD interrupts.
- */
 void TouchGFXHAL::configureInterrupts()
 {
-    // Calling parent implementation of configureInterrupts().
-    //
-    // To overwrite the generated implementation, omit call to parent function
-    // and implemented needed functionality here.
-
     TouchGFXGeneratedHAL::configureInterrupts();
 }
 
-/**
- * Used for enabling interrupts set in configureInterrupts()
- */
 void TouchGFXHAL::enableInterrupts()
 {
-    // Calling parent implementation of enableInterrupts().
-    //
-    // To overwrite the generated implementation, omit call to parent function
-    // and implemented needed functionality here.
-
     TouchGFXGeneratedHAL::enableInterrupts();
 }
 
-/**
- * Used for disabling interrupts set in configureInterrupts()
- */
 void TouchGFXHAL::disableInterrupts()
 {
-    // Calling parent implementation of disableInterrupts().
-    //
-    // To overwrite the generated implementation, omit call to parent function
-    // and implemented needed functionality here.
-
     TouchGFXGeneratedHAL::disableInterrupts();
 }
 
-/**
- * Configure the LCD controller to fire interrupts at VSYNC. Called automatically
- * once TouchGFX initialization has completed.
- */
 void TouchGFXHAL::enableLCDControllerInterrupt()
 {
-    // Calling parent implementation of enableLCDControllerInterrupt().
-    //
-    // To overwrite the generated implementation, omit call to parent function
-    // and implemented needed functionality here.
-
-    TouchGFXGeneratedHAL::enableLCDControllerInterrupt();
+    TouchGFX_VSYNC_TimerInit();
+    HAL_NVIC_SetPriority(TIM7_DAC_IRQn, 14, 0);
+    HAL_NVIC_EnableIRQ(TIM7_DAC_IRQn);
 }
 
 bool TouchGFXHAL::beginFrame()
