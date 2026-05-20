@@ -14,6 +14,7 @@
 
 extern void Host_UartRecvCallback(uint8_t *data, int len);
 extern void CamUart_RecvCallback(uint8_t *data, int len);
+extern osThreadId_t hostMotionTaskHandle;
 
  /* @硬件连接 :
  * - UART1: TX=PE0, RX=PE1 
@@ -180,6 +181,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 
         ch->data_len = Size;
         ch->data_ready = true;
+        if (huart == &huart1 && hostMotionTaskHandle != NULL) { osThreadFlagsSet(hostMotionTaskHandle, 0x01); }
 
     }	
 
