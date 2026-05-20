@@ -1,0 +1,1195 @@
+{
+  "Application": {
+    "Screens": [
+      {
+        "Components": [
+          {
+            "Type": "Box",
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "Alpha": 255,
+            "Name": "box1",
+            "X": 0,
+            "Y": 0,
+            "Width": 400,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": true,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId6",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "label_HOME",
+            "X": 60,
+            "Y": 0,
+            "Width": 66,
+            "Height": 31,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Line",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "StartX": 0,
+            "StartY": 0,
+            "EndX": 0,
+            "EndY": 300,
+            "LineWidth": 10,
+            "LineEndingStyle": "Square",
+            "Name": "line_1",
+            "X": 56,
+            "Y": 0,
+            "Width": 3,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "CustomContainerDefinitionName": "detail",
+            "Type": "CustomContainerInstance",
+            "Name": "detail",
+            "X": 56,
+            "Y": 0,
+            "Width": 97,
+            "Height": 300,
+            "Visible": false,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "refre_selected.png",
+            "Released": "refre.png",
+            "Alpha": 255,
+            "Name": "refresh_1",
+            "X": 6,
+            "Y": 106,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "download_selected.png",
+            "Released": "download.png",
+            "Alpha": 255,
+            "Name": "download_1",
+            "X": 6,
+            "Y": 56,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "message_selected.png",
+            "Released": "message.png",
+            "Alpha": 255,
+            "Name": "message_1",
+            "X": 6,
+            "Y": 156,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "menu_selected.PNG",
+            "Released": "menu.PNG",
+            "Alpha": 255,
+            "Name": "menu_1",
+            "X": 6,
+            "Y": 212,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "home_selected.PNG",
+            "Released": "home.PNG",
+            "Alpha": 255,
+            "Name": "home_1",
+            "X": 6,
+            "Y": 6,
+            "Width": 45,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "simple_left.png",
+            "Released": "simple_left.png",
+            "Alpha": 255,
+            "Name": "detail_close",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "simple_right.png",
+            "Released": "simple_right.png",
+            "Alpha": 255,
+            "Name": "detail_expand",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          }
+        ],
+        "Interactions": [
+          {
+            "InteractionName": "show_details1",
+            "HasCompletedTrigger": true,
+            "Trigger": {
+              "Type": "TriggerPhysicalButtonClicked",
+              "ButtonKey": 48
+            },
+            "Action": {
+              "Type": "ActionHide",
+              "ActionComponent": "detail_expand"
+            }
+          },
+          {
+            "InteractionName": "show_details2",
+            "HasCompletedTrigger": false,
+            "Trigger": {
+              "Type": "TriggerInteractionCompleted",
+              "InteractionToTriggerOn": "show_details1"
+            },
+            "Action": {
+              "Type": "ActionShow",
+              "ActionComponent": "detail_close"
+            }
+          },
+          {
+            "InteractionName": "show_details3",
+            "HasCompletedTrigger": false,
+            "Trigger": {
+              "Type": "TriggerInteractionCompleted",
+              "InteractionToTriggerOn": "show_details1"
+            },
+            "Action": {
+              "Type": "ActionShow",
+              "ActionComponent": "detail"
+            }
+          },
+          {
+            "InteractionName": "close_details1",
+            "HasCompletedTrigger": true,
+            "Trigger": {
+              "Type": "TriggerPhysicalButtonClicked",
+              "ButtonKey": 49
+            },
+            "Action": {
+              "Type": "ActionHide",
+              "ActionComponent": "detail_close"
+            }
+          },
+          {
+            "InteractionName": "close_details2",
+            "HasCompletedTrigger": false,
+            "Trigger": {
+              "Type": "TriggerInteractionCompleted",
+              "InteractionToTriggerOn": "close_details1"
+            },
+            "Action": {
+              "Type": "ActionShow",
+              "ActionComponent": "detail_expand"
+            }
+          },
+          {
+            "InteractionName": "close_details3",
+            "HasCompletedTrigger": false,
+            "Trigger": {
+              "Type": "TriggerInteractionCompleted",
+              "InteractionToTriggerOn": "close_details1"
+            },
+            "Action": {
+              "Type": "ActionHide",
+              "ActionComponent": "detail"
+            }
+          }
+        ],
+        "Name": "Screen_HOME",
+        "OverrideDefaultBufferSize": false,
+        "CanvasBufferSize": 6000
+      },
+      {
+        "Components": [
+          {
+            "Type": "Box",
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "Alpha": 255,
+            "Name": "box1",
+            "X": 0,
+            "Y": 0,
+            "Width": 400,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": true,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId7",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "label_DOWNLOAD",
+            "X": 60,
+            "Y": 0,
+            "Width": 129,
+            "Height": 31,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Line",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "StartX": 0,
+            "StartY": 0,
+            "EndX": 0,
+            "EndY": 300,
+            "LineWidth": 10,
+            "LineEndingStyle": "Square",
+            "Name": "line_1",
+            "X": 56,
+            "Y": 0,
+            "Width": 3,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "CustomContainerDefinitionName": "detail",
+            "Type": "CustomContainerInstance",
+            "Name": "detail",
+            "X": 56,
+            "Y": 0,
+            "Width": 97,
+            "Height": 300,
+            "Visible": false,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "refre_selected.png",
+            "Released": "refre.png",
+            "Alpha": 255,
+            "Name": "refresh_1",
+            "X": 6,
+            "Y": 106,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "download_selected.png",
+            "Released": "download.png",
+            "Alpha": 255,
+            "Name": "download_1",
+            "X": 6,
+            "Y": 56,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "message_selected.png",
+            "Released": "message.png",
+            "Alpha": 255,
+            "Name": "message_1",
+            "X": 6,
+            "Y": 156,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "menu_selected.PNG",
+            "Released": "menu.PNG",
+            "Alpha": 255,
+            "Name": "menu_1",
+            "X": 6,
+            "Y": 212,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "home_selected.PNG",
+            "Released": "home.PNG",
+            "Alpha": 255,
+            "Name": "home_1",
+            "X": 6,
+            "Y": 6,
+            "Width": 45,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "simple_left.png",
+            "Released": "simple_left.png",
+            "Alpha": 255,
+            "Name": "detail_close",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "simple_right.png",
+            "Released": "simple_right.png",
+            "Alpha": 255,
+            "Name": "detail_expand",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          }
+        ],
+        "Interactions": [],
+        "Name": "Screen_DOWNLOAD",
+        "OverrideDefaultBufferSize": false,
+        "CanvasBufferSize": 6000
+      },
+      {
+        "Components": [
+          {
+            "Type": "Box",
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "Alpha": 255,
+            "Name": "box1",
+            "X": 0,
+            "Y": 0,
+            "Width": 400,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": true,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId8",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "label_LOG",
+            "X": 60,
+            "Y": 0,
+            "Width": 43,
+            "Height": 31,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Line",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "StartX": 0,
+            "StartY": 0,
+            "EndX": 0,
+            "EndY": 300,
+            "LineWidth": 10,
+            "LineEndingStyle": "Square",
+            "Name": "line_1",
+            "X": 56,
+            "Y": 0,
+            "Width": 3,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "CustomContainerDefinitionName": "detail",
+            "Type": "CustomContainerInstance",
+            "Name": "detail",
+            "X": 56,
+            "Y": 0,
+            "Width": 97,
+            "Height": 300,
+            "Visible": false,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "refre_selected.png",
+            "Released": "refre.png",
+            "Alpha": 255,
+            "Name": "refresh_1",
+            "X": 6,
+            "Y": 106,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "download_selected.png",
+            "Released": "download.png",
+            "Alpha": 255,
+            "Name": "download_1",
+            "X": 6,
+            "Y": 56,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "message_selected.png",
+            "Released": "message.png",
+            "Alpha": 255,
+            "Name": "message_1",
+            "X": 6,
+            "Y": 156,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "menu_selected.PNG",
+            "Released": "menu.PNG",
+            "Alpha": 255,
+            "Name": "menu_1",
+            "X": 6,
+            "Y": 212,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "home_selected.PNG",
+            "Released": "home.PNG",
+            "Alpha": 255,
+            "Name": "home_1",
+            "X": 6,
+            "Y": 6,
+            "Width": 45,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "simple_left.png",
+            "Released": "simple_left.png",
+            "Alpha": 255,
+            "Name": "detail_close",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "simple_right.png",
+            "Released": "simple_right.png",
+            "Alpha": 255,
+            "Name": "detail_expand",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          }
+        ],
+        "Interactions": [],
+        "Name": "Screen_LOG",
+        "OverrideDefaultBufferSize": false,
+        "CanvasBufferSize": 6000
+      },
+      {
+        "Components": [
+          {
+            "Type": "Box",
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "Alpha": 255,
+            "Name": "box1_1",
+            "X": 0,
+            "Y": 0,
+            "Width": 400,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": true,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId9",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "label_MENU",
+            "X": 60,
+            "Y": 0,
+            "Width": 65,
+            "Height": 31,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Line",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "StartX": 0,
+            "StartY": 0,
+            "EndX": 0,
+            "EndY": 300,
+            "LineWidth": 10,
+            "LineEndingStyle": "Square",
+            "Name": "line_1",
+            "X": 56,
+            "Y": 0,
+            "Width": 3,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "CustomContainerDefinitionName": "detail",
+            "Type": "CustomContainerInstance",
+            "Name": "detail",
+            "X": 56,
+            "Y": 0,
+            "Width": 97,
+            "Height": 300,
+            "Visible": false,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "refre_selected.png",
+            "Released": "refre.png",
+            "Alpha": 255,
+            "Name": "refresh_1",
+            "X": 6,
+            "Y": 106,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "download_selected.png",
+            "Released": "download.png",
+            "Alpha": 255,
+            "Name": "download_1",
+            "X": 6,
+            "Y": 56,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "message_selected.png",
+            "Released": "message.png",
+            "Alpha": 255,
+            "Name": "message_1",
+            "X": 6,
+            "Y": 156,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "menu_selected.PNG",
+            "Released": "menu.PNG",
+            "Alpha": 255,
+            "Name": "menu_1",
+            "X": 6,
+            "Y": 212,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "home_selected.PNG",
+            "Released": "home.PNG",
+            "Alpha": 255,
+            "Name": "home_1",
+            "X": 6,
+            "Y": 6,
+            "Width": 45,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "simple_left.png",
+            "Released": "simple_left.png",
+            "Alpha": 255,
+            "Name": "detail_close",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Button",
+            "Pressed": "simple_right.png",
+            "Released": "simple_right.png",
+            "Alpha": 255,
+            "Name": "detail_expand",
+            "X": 6,
+            "Y": 256,
+            "Width": 44,
+            "Height": 44,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          }
+        ],
+        "Interactions": [],
+        "Name": "Screen_MENU",
+        "OverrideDefaultBufferSize": false,
+        "CanvasBufferSize": 6000
+      }
+    ],
+    "CustomContainerDefinitions": [
+      {
+        "Components": [
+          {
+            "Type": "Box",
+            "Color": {
+              "Red": 255,
+              "Green": 255,
+              "Blue": 255
+            },
+            "Alpha": 255,
+            "Name": "box1",
+            "X": 0,
+            "Y": 0,
+            "Width": 97,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "Line",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "StartX": 0,
+            "StartY": 0,
+            "EndX": 0,
+            "EndY": 300,
+            "LineWidth": 10,
+            "LineEndingStyle": "Square",
+            "Name": "line1",
+            "X": 94,
+            "Y": 0,
+            "Width": 3,
+            "Height": 300,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId1",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "home",
+            "X": 0,
+            "Y": 14,
+            "Width": 61,
+            "Height": 35,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId2",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "download",
+            "X": 0,
+            "Y": 64,
+            "Width": 77,
+            "Height": 35,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId3",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "refresh",
+            "X": 0,
+            "Y": 114,
+            "Width": 91,
+            "Height": 35,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId4",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "message",
+            "X": 0,
+            "Y": 164,
+            "Width": 33,
+            "Height": 35,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          },
+          {
+            "Type": "TextArea",
+            "TextId": "SingleUseId5",
+            "TextRotation": "0",
+            "Color": {
+              "Red": 0,
+              "Green": 0,
+              "Blue": 0
+            },
+            "Alpha": 255,
+            "AutoSize": true,
+            "LineSpacing": 0,
+            "Name": "menu",
+            "X": 0,
+            "Y": 214,
+            "Width": 59,
+            "Height": 35,
+            "Visible": true,
+            "LockPosition": false,
+            "Draggable": false,
+            "Clickable": false,
+            "Fadeable": false,
+            "Moveable": false
+          }
+        ],
+        "Interactions": [
+          {
+            "InteractionName": "Interaction1",
+            "HasCompletedTrigger": false,
+            "Trigger": {
+              "Type": "TriggerNone"
+            },
+            "Action": {
+              "Type": "ActionNone"
+            }
+          }
+        ],
+        "Name": "detail",
+        "X": 0,
+        "Y": 50,
+        "Width": 97,
+        "Height": 300
+      }
+    ],
+    "TextEntries": [
+      {
+        "TextEntryId": "SingleUseId1",
+        "IsResource": false
+      },
+      {
+        "TextEntryId": "SingleUseId2",
+        "IsResource": false
+      },
+      {
+        "TextEntryId": "SingleUseId3",
+        "IsResource": false
+      },
+      {
+        "TextEntryId": "SingleUseId4",
+        "IsResource": false
+      },
+      {
+        "TextEntryId": "SingleUseId5",
+        "IsResource": false
+      },
+      {
+        "TextEntryId": "SingleUseId6",
+        "IsResource": false
+      },
+      {
+        "TextEntryId": "SingleUseId7",
+        "IsResource": false
+      },
+      {
+        "TextEntryId": "SingleUseId8",
+        "IsResource": false
+      },
+      {
+        "TextEntryId": "SingleUseId9",
+        "IsResource": false
+      }
+    ],
+    "Name": "pnp_1",
+    "Resolution": {
+      "Width": 300,
+      "Height": 400
+    },
+    "SelectedColorDepth": 1,
+    "StartupScreenName": "Screen_HOME",
+    "SelectedStartupLanguage": "GB",
+    "Skin": "Blue",
+    "TouchGfxPath": "../Middlewares/ST/touchgfx",
+    "UIPath": ".",
+    "AvailableColorDepths": [
+      1
+    ],
+    "AvailableLCDs": {
+      "16": "LCD16bpp",
+      "1": "LCD1bpp"
+    },
+    "AvailableSections": [
+      "ExtFlashSection",
+      "IntFlashSection"
+    ],
+    "AvailableResolutions": [
+      {
+        "Width": 300,
+        "Height": 400
+      }
+    ],
+    "PhysicalButtons": [],
+    "GenerateAssetsCommand": "make -f simulator/gcc/Makefile assets -j8",
+    "PostGenerateCommand": "touchgfx update_project --project-file=simulator/msvs/Application.vcxproj",
+    "PostGenerateTargetCommand": "touchgfx update_project --project-file=../pnp_1.ioc --platform=m4",
+    "CompileSimulatorCommand": "make -f simulator/gcc/Makefile -j8",
+    "RunSimulatorCommand": "build\\bin\\simulator.exe",
+    "LandscapeSkinX": 0,
+    "LandscapeSkinY": 0,
+    "PortraitSkinX": 0,
+    "PortraitSkinY": 0,
+    "DisplayOrientation": "Landscape",
+    "Family": "STM32G4"
+  },
+  "Version": "4.16.1"
+}

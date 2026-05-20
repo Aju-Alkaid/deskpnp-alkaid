@@ -1,0 +1,46 @@
+# Keil MDK build artifacts
+*.uvguix.*
+*.scvd
+*.lst
+*.bin
+*.hex
+*.axf
+*.crf
+*.d
+*.o
+*.dep
+*.iex
+*.htm
+*.lnp
+*.plg
+*.sct
+*.tra
+*.map
+JLinkLog.txt
+JLinkSettings.ini
+RTE/
+
+# Build output directories
+build/
+MDK-ARM/RTE/
+MDK-ARM/DebugConfig/
+MDK-ARM/pnp_1/
+
+# IDE / OS
+*.bak
+*.orig
+*.tmp
+Thumbs.db
+Desktop.ini
+.vs/
+.vscode/
+*.DS_Store
+
+# Compiled Python
+__pycache__/
+*.pyc
+
+# CMake build
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake

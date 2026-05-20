@@ -1,0 +1,30 @@
+
+{
+  "Application": {
+    "Name": "pnp_1",
+    "TouchGfxPath": "../Middlewares/ST/touchgfx",
+    "AvailableColorDepths": [ 1 ],
+    "AvailableLCDs":
+    {
+      "1": "LCD1bpp"
+    },
+    "AvailableResolutions": [
+      {
+        "Width": 300,
+        "Height": 400
+      }
+    ],
+    "PostGenerateTargetCommand": "touchgfx update_project",
+    "Family": "STM32G4",
+    "SubFamily": "STM32G4x4",
+    "Platform": "m4",
+    "Toolchain": "MDK-ARM V5.32",
+    "ProjectFile": "../pnp_1.ioc",
+    "OptionalComponentsRoot": "../Middlewares/ST/touchgfx_components",
+    "OptionalComponents": [
+    ],
+    "AdditionalFeatures": [
+    ]
+  },
+  "Version": "4.22.1"
+}

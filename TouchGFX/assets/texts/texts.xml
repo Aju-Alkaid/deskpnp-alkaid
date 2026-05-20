@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextDatabase xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="texts.xsd" Version="4.22.1">
+  <Languages>
+    <Language Id="GB" />
+  </Languages>
+  <Texts>
+    <TextGroup Id="Group1">
+      <Text Id="__SingleUse_QTOZ" Alignment="Left" TypographyId="normal_handwrite">
+        <Translation Language="GB">home</Translation>
+      </Text>
+      <Text Id="__SingleUse_XWGZ" Alignment="Left" TypographyId="normal_handwrite">
+        <Translation Language="GB">import</Translation>
+      </Text>
+      <Text Id="__SingleUse_13NH" Alignment="Left" TypographyId="normal_handwrite">
+        <Translation Language="GB">reset</Translation>
+      </Text>
+      <Text Id="__SingleUse_SXYA" Alignment="Left" TypographyId="normal_handwrite">
+        <Translation Language="GB">log</Translation>
+      </Text>
+    </TextGroup>
+    <TextGroup Id="Unsorted">
+      <Text Id="__SingleUse_2LX0" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Reset done&#10;   up   -&gt; HOME&#10;down -&gt; IMPORT</Translation>
+      </Text>
+      <Text Id="__SingleUse_KF87" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Import done!&#10;&#10;PUSH to start</Translation>
+      </Text>
+      <Text Id="__SingleUse_F9WI" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Importing...</Translation>
+      </Text>
+      <Text Id="__SingleUse_YVVQ" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Ready to import</Translation>
+      </Text>
+      <Text Id="__SingleUse_FQ8H" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Reseting...</Translation>
+      </Text>
+      <Text Id="log" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">none</Translation>
+      </Text>
+      <Text Id="__SingleUse_6URR" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">&lt;value&gt;</Translation>
+      </Text>
+      <Text Id="Temp" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">-0</Translation>
+      </Text>
+      <Text Id="total_SMT" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">0</Translation>
+      </Text>
+      <Text Id="now_SMT" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">0</Translation>
+      </Text>
+      <Text Id="__SingleUse_HTY2" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Working</Translation>
+      </Text>
+      <Text Id="__SingleUse_234I" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Waiting</Translation>
+      </Text>
+      <Text Id="__SingleUse_ODTN" Alignment="Center" TypographyId="regular">
+        <Translation Language="GB">   &lt;value&gt;/&lt;value&gt;   </Translation>
+      </Text>
+      <Text Id="__SingleUse_SYMX" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Temp. &lt;value&gt;°C    </Translation>
+      </Text>
+      <Text Id="__SingleUse_3GH9" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">caution&#10;Do u want to reset all motors?&#10;&#10;   up   -&gt; yes&#10;down -&gt; no, &#10;                and return to HOME</Translation>
+      </Text>
+      <Text Id="__SingleUse_G70R" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">HOME</Translation>
+      </Text>
+      <Text Id="__SingleUse_C4NX" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">IMPORT</Translation>
+      </Text>
+      <Text Id="__SingleUse_3E0M" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">LOG</Translation>
+      </Text>
+    </TextGroup>
+  </Texts>
+  <Typographies>
+    <Typography Id="normal_handwrite" Font="comic.ttf" Size="25" Bpp="1" Direction="LTR" FallbackCharacter="@" WildcardCharacters="?" WildcardCharacterRanges="0-9,a-z,A-Z" />
+    <Typography Id="regular" Font="segoeui.ttf" Size="23" Bpp="4" Direction="LTR" FallbackCharacter="@" WildcardCharacters="?" WildcardCharacterRanges="0-9,a-z,A-Z" />
+  </Typographies>
+</TextDatabase>
