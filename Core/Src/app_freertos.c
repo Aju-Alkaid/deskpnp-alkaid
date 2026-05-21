@@ -40,11 +40,10 @@
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 osMessageQueueId_t motor_event_queue; 
-osMessageQueueId_t can_rx_queue;
 osMessageQueueId_t motion_cmd_queue;
 extern osMessageQueueId_t keyEventQueue;
-extern osMessageQueueId_t dataTransferQueue;  // System→GUI
-extern osMessageQueueId_t guiCmdQueue;        // GUI→System
+extern osMessageQueueId_t dataTransferQueue;
+osMutexId_t g_debug_mutex = NULL;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -64,6 +63,7 @@ osThreadId_t motorTestTaskHandle;
 osThreadId_t drv8803TestTaskHandle;
 osThreadId_t servoTestTaskHandle;
 osThreadId_t mksHandle;
+osThreadId_t hostMotionTaskHandle;
 
 const osThreadAttr_t PnP_Motion_Task_attributes = { 
   .name = "PnPMotion",
@@ -169,15 +169,16 @@ void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
 	UART_Driver_Init();
-	Semaphore_Init();
 	Event_Init();
 	Vision_Init();
 	Key_Init();
   /* USER CODE END Init */
 
   /* USER CODE BEGIN RTOS_MUTEX */
+  g_debug_mutex = osMutexNew(NULL);
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
+  g_debug_mutex = osMutexNew(NULL);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */	
@@ -190,14 +191,11 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_QUEUES */
  
-  can_rx_queue = osMessageQueueNew(10, sizeof(CAN_Rx_Packet_t), NULL);
 	motor_event_queue = osMessageQueueNew(32, sizeof(CAN_Rx_Packet_t), NULL);
 	motion_cmd_queue = osMessageQueueNew(20, sizeof(MotionCmd_t), NULL);
 	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
-	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
-	dataTransferQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
-	guiCmdQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
-	DT_Init();  // 初始化分发中枢路由表
+	dataTransferQueue = osMessageQueueNew(16, sizeof(DataTransferMsg_t), NULL);
+	host_pkt_queue = osMessageQueueNew(16, sizeof(HostMsg_t), NULL);
 	
 	
 	
@@ -228,7 +226,7 @@ void MX_FREERTOS_Init(void) {
 
   
   osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
-  osThreadNew(Key_Task, NULL, &keyTask_attributes);
+  hostMotionTaskHandle = osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 

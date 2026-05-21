@@ -37,6 +37,8 @@
 
 /* 外部变量：CAN接收队列（已在 driver_can.c 中定义） */
 extern osMessageQueueId_t motor_event_queue;
+extern osMutexId_t g_debug_mutex;
+extern osThreadId_t hostMotionTaskHandle;
 extern UART_HandleTypeDef huart1; 
 extern UART_HandleTypeDef huart3;
 extern TIM_HandleTypeDef htim5;
@@ -108,6 +110,7 @@ static int dbg_vformat(char* buf, int sz, const char* fmt, va_list args) {
 }
 
 void PrintDebug(const char* fmt, ...) {
+    osMutexAcquire(g_debug_mutex, osWaitForever);
     va_list args;
     va_start(args, fmt);
     int len = dbg_vformat(s_debug_buf, sizeof(s_debug_buf), fmt, args);
@@ -115,6 +118,7 @@ void PrintDebug(const char* fmt, ...) {
     if (len > 0) {
         UART_Write_DMA(UART_CH1, (uint8_t*)s_debug_buf, len);
     }
+    osMutexRelease(g_debug_mutex);
 }
 void StartMotorTestTask(void *argument);
 
@@ -813,6 +817,6 @@ void StartHostMotionTestTask(void *argument)
             UART_ClearData(UART_CH1);
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        osThreadFlagsWait(0x01, osFlagsWaitAny, pdMS_TO_TICKS(50));
     }
 }

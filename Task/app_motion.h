@@ -39,16 +39,12 @@ typedef struct {
 
 
 
-void Semaphore_Init(void);
 void Event_Init(void);
 
 /* 任务间队列 */
 extern osMessageQueueId_t motion_cmd_queue;
 extern osMessageQueueId_t motor_event_queue;   // 与 CAN 中断共用
 
-/*信号量*/
-extern osSemaphoreId_t semX1Done, semX2Done, semYDone;//三轴独立信号量
-extern osSemaphoreId_t semEmergency;//紧停信号量
 /*事件组*/
 extern osEventFlagsId_t evtAxesDone;
 

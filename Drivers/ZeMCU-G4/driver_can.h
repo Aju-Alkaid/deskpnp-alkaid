@@ -81,7 +81,6 @@ typedef struct {
 } CAN_Rx_Packet_t;
 
 
-extern osMessageQueueId_t can_rx_queue;
 
 extern bool init_finished;
 
