@@ -220,17 +220,17 @@
     <Filter Include="Header Files\generated\gui_generated\screen_import_screen">
       <UniqueIdentifier>A2E198FC-36DE-FE0F-C5F3-3A62E972EE91</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\gui\screen_refre_screen">
-      <UniqueIdentifier>8EAFB331-2600-2E20-4649-9EBD67CE77D0</UniqueIdentifier>
+    <Filter Include="Header Files\gui\screen_reset_screen">
+      <UniqueIdentifier>CA844575-2C5A-B344-C489-70094E6FD703</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\gui\screen_refre_screen">
-      <UniqueIdentifier>5ECAEE57-6D90-8DB5-7D07-EE9F06050FC8</UniqueIdentifier>
+    <Filter Include="Source Files\gui\screen_reset_screen">
+      <UniqueIdentifier>C36AE5F6-E931-CA5A-731E-A1B7527AEAE8</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\generated\gui_generated\screen_refre_screen">
-      <UniqueIdentifier>FA560F83-BD5A-806C-5594-141465D1AC29</UniqueIdentifier>
+    <Filter Include="Source Files\generated\gui_generated\screen_reset_screen">
+      <UniqueIdentifier>1AF9EA07-F372-4C30-27A2-DB8766816250</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\generated\gui_generated\screen_refre_screen">
-      <UniqueIdentifier>A7D184A7-EEAF-0646-756E-93F6DB592568</UniqueIdentifier>
+    <Filter Include="Header Files\generated\gui_generated\screen_reset_screen">
+      <UniqueIdentifier>70B4A251-240E-3A2B-EF6E-8ED1C8BA974B</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -300,17 +300,26 @@
     <ClCompile Include="..\..\gui\src\screen_log_screen\Screen_LOGView.cpp">
       <Filter>Source Files\gui\screen_log_screen</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREPresenter.cpp">
-      <Filter>Source Files\gui\screen_refre_screen</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREView.cpp">
-      <Filter>Source Files\gui\screen_refre_screen</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\generated\gui_generated\src\screen_refre_screen\Screen_REFREViewBase.cpp">
-      <Filter>Source Files\generated\gui_generated\screen_refre_screen</Filter>
-    </ClCompile>
     <ClCompile Include="..\..\generated\gui_generated\src\screen_log_screen\Screen_LOGViewBase.cpp">
       <Filter>Source Files\generated\gui_generated\screen_log_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\gui\src\containers\circleProgress.cpp">
+      <Filter>Source Files\gui\containers</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\generated\gui_generated\src\containers\circleProgressBase.cpp">
+      <Filter>Source Files\generated\gui_generated\containers</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\gui\src\model\Data_Transfer.c">
+      <Filter>Source Files\gui\model</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\gui\src\screen_reset_screen\Screen_RESETPresenter.cpp">
+      <Filter>Source Files\gui\screen_reset_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\gui\src\screen_reset_screen\Screen_RESETView.cpp">
+      <Filter>Source Files\gui\screen_reset_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\generated\gui_generated\src\screen_reset_screen\Screen_RESETViewBase.cpp">
+      <Filter>Source Files\generated\gui_generated\screen_reset_screen</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -790,17 +799,26 @@
     <ClInclude Include="..\..\gui\include\gui\screen_log_screen\Screen_LOGView.hpp">
       <Filter>Header Files\gui\screen_log_screen</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREPresenter.hpp">
-      <Filter>Header Files\gui\screen_refre_screen</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREView.hpp">
-      <Filter>Header Files\gui\screen_refre_screen</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_refre_screen\Screen_REFREViewBase.hpp">
-      <Filter>Header Files\generated\gui_generated\screen_refre_screen</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_log_screen\Screen_LOGViewBase.hpp">
       <Filter>Header Files\generated\gui_generated\screen_log_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\containers\circleProgress.hpp">
+      <Filter>Header Files\gui\containers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\model\Data_Transfer.h">
+      <Filter>Source Files\gui\model</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\containers\circleProgressBase.hpp">
+      <Filter>Header Files\generated\gui_generated\containers</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\screen_reset_screen\Screen_RESETPresenter.hpp">
+      <Filter>Header Files\gui\screen_reset_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\screen_reset_screen\Screen_RESETView.hpp">
+      <Filter>Header Files\gui\screen_reset_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_reset_screen\Screen_RESETViewBase.hpp">
+      <Filter>Header Files\generated\gui_generated\screen_reset_screen</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

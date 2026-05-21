@@ -1,63 +1,91 @@
-﻿#include <gui/model/Model.hpp>
+#include <gui/model/Model.hpp>
 #include <gui/model/ModelListener.hpp>
-#include <touchgfx/hal/HAL.hpp>
-#include <platform/driver/button/ButtonController.hpp>
-
-// 前向声明全局变量（定义在 Data_Transfer.c）
-extern osMessageQueueId_t dataTransferQueue;
+#include <string.h>
 
 Model::Model() : modelListener(0)
 {
-
 }
 
 void Model::tick()
 {
-    // 按键扫描已移至独立的 Key_Task，此处不再轮询
-    // 改为处理队列中的按键事件
-    processQueue();
+    processQueue();  // 每帧处理 System→GUI 通知
 }
 
+// ======================== System → GUI 通知处理 ========================
 void Model::processQueue(void)
 {
-    // 处理数据更新队列（来自主系统）
-    if (dataTransferQueue != NULL) {
-        DataTransferMsg_t msg;
-        while (osMessageQueueGet(dataTransferQueue, &msg, NULL, 0) == osOK) {
-            switch (msg.type) {
-                case DT_SMT_STATUS:
-                    // TODO: 通知 UI 更新 SMT 状态
-                    // modelListener->onSMTStatusChanged(msg.data.u8_val);
-                    break;
-                case DT_TEMP_CHANGE:
-                    // TODO: 通知 UI 更新温度
-                    // modelListener->onTempChanged(msg.data.u16_val);
-                    break;
-                case DT_DOWNLOAD_STATUS:
-                    // TODO: 通知 UI 更新下载状态
-                    // modelListener->onDownloadStatus(msg.data.u8_val);
-                    break;
-                case DT_SMT_PROGRESS:
-                    // TODO: 通知 UI 更新进度
-                    // modelListener->onSMTProgress(msg.data.raw[0], msg.data.raw[1]);
-                    break;
-                case DT_MOTOR_RESET_DONE:
-                    // TODO: 通知 UI 电机复位完成
-                    break;
-                case DT_KEY_EVENT:
-                    // 按键事件：通过 modelListener 传递
-                    if (modelListener) {
-                        modelListener->onKeyPressed(msg.data.raw[0]);
-                    }
-                    break;
-                case DT_CUSTOM_MSG:
-                    // 自定义消息处理
-                    break;
-                default:
-                    break;
-            }
+    // ---- 方向1: GUI→System 命令分发 ----
+    if (guiCmdQueue != NULL) {
+        DT_Msg_t cmd;
+        while (osMessageQueueGet(guiCmdQueue, &cmd, NULL, 0) == osOK) {
+            DT_Dispatch(&cmd);  // 路由表分发到对应 handler/queue
         }
     }
-    
-    // 按键事件由 KeyController::sample() 统一消费（松开触发），避免双路竞争
+
+    // ---- 方向2: System→GUI 通知处理 ----
+    if (dataTransferQueue == NULL || modelListener == NULL) return;
+
+    DT_Msg_t msg;
+    // 循环取出所有待处理消息（非阻塞）
+    while (osMessageQueueGet(dataTransferQueue, &msg, NULL, 0) == osOK) {
+        switch (msg.type) {
+            case DT_SMT_STATUS:
+                modelListener->onNotifySMTStatus(msg.data.status);
+                break;
+            case DT_TEMP_CHANGE:
+                modelListener->onNotifyTemp(msg.data.temp);
+                break;
+            case DT_DOWNLOAD_STATUS:
+                modelListener->onNotifyDownloadStatus(msg.data.status);
+                break;
+            case DT_SMT_PROGRESS:
+                modelListener->onNotifySMTProgress(
+                    msg.data.progress.current, msg.data.progress.total);
+                break;
+            case DT_MOTOR_RESET_DONE:
+                modelListener->onNotifyMotorResetDone();
+                break;
+            case DT_CUSTOM_MSG:
+                modelListener->onNotifyCustom(msg.data.raw[0], msg.data.raw[1]);
+                break;
+            default:
+                // 未识别的消息类型 — 可在此添加日志
+                break;
+        }
+    }
+}
+
+// ======================== GUI → System 命令发送 ========================
+// Presenter 调用此方法，将用户操作转换为系统命令
+//
+// 使用示例（在 Presenter 中）：
+//   model->sendCommand(DT_CMD_MOTOR_MOVE, 1000, 2000);  // 移动到(10.00mm, 20.00mm)
+//   model->sendCommand(DT_CMD_HEATER_SET, 1800);          // 设置温度 180.0℃
+//   model->sendCommand(DT_CMD_SMT_START);                  // 启动贴片
+void Model::sendCommand(DT_MsgType_t type, int32_t p1, int32_t p2)
+{
+    DT_Msg_t cmd;
+    memset(&cmd, 0, sizeof(cmd));
+    cmd.type = type;
+
+    // 根据命令类型填充参数
+    switch (type) {
+        case DT_CMD_MOTOR_MOVE:
+            cmd.data.move.x = p1;   // x 坐标 (mm*100)
+            cmd.data.move.y = p2;   // y 坐标 (mm*100)
+            cmd.data.move.r = 0;    // r 角度（暂不支持）
+            break;
+        case DT_CMD_HEATER_SET:
+            cmd.data.temp = (uint16_t)p1;  // 目标温度 (0.1℃)
+            break;
+        case DT_CMD_CUSTOM:
+            cmd.data.raw[0] = (uint8_t)p1;
+            cmd.data.raw[1] = (uint8_t)p2;
+            break;
+        // 无参数命令：SMT_START, SMT_PAUSE, MOTOR_STOP, MOTOR_HOME, SYSTEM_RESET
+        default:
+            break;
+    }
+
+    DT_SendCommand(&cmd);  // 放入 guiCmdQueue
 }

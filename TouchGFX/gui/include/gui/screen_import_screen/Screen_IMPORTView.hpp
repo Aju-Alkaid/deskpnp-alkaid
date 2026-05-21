@@ -1,4 +1,4 @@
-#ifndef SCREEN_IMPORTVIEW_HPP
+﻿#ifndef SCREEN_IMPORTVIEW_HPP
 #define SCREEN_IMPORTVIEW_HPP
 
 #include <gui_generated/screen_import_screen/Screen_IMPORTViewBase.hpp>
@@ -11,9 +11,11 @@ public:
     virtual ~Screen_IMPORTView() {}
     virtual void setupScreen();
     virtual void tearDownScreen();
-    
-		virtual	void handleKeyEvent(uint8_t key);
+    virtual void handleTickEvent();
+
+    virtual void handleKeyEvent(uint8_t key);
 protected:
+    uint8_t lastDownloadState;
 };
 
 #endif // SCREEN_IMPORTVIEW_HPP
