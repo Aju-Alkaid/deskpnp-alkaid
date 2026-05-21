@@ -43,7 +43,8 @@ osMessageQueueId_t motor_event_queue;
 osMessageQueueId_t can_rx_queue;
 osMessageQueueId_t motion_cmd_queue;
 extern osMessageQueueId_t keyEventQueue;
-extern osMessageQueueId_t dataTransferQueue;
+extern osMessageQueueId_t dataTransferQueue;  // System→GUI
+extern osMessageQueueId_t guiCmdQueue;        // GUI→System
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -193,7 +194,10 @@ void MX_FREERTOS_Init(void) {
 	motor_event_queue = osMessageQueueNew(32, sizeof(CAN_Rx_Packet_t), NULL);
 	motion_cmd_queue = osMessageQueueNew(20, sizeof(MotionCmd_t), NULL);
 	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
-	dataTransferQueue = osMessageQueueNew(16, sizeof(DataTransferMsg_t), NULL);
+	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
+	dataTransferQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
+	guiCmdQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
+	DT_Init();  // 初始化分发中枢路由表
 	
 	
 	

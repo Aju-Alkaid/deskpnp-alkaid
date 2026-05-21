@@ -1,7 +1,8 @@
-#ifndef __KEY_H__
+﻿#ifndef __KEY_H__
 #define __KEY_H__
 
-
+#include "main.h"
+#include "cmsis_os2.h"
 #include <stdint.h>
 #include <stdbool.h>
 
@@ -12,11 +13,11 @@ extern "C" {
 // ======================== 用户配置区域 ========================
 #define KEY_NUM         5   // 按键数量
 
-// 按键引脚定义（根据实际接线）
+// 按键引脚定义
 // KEY1
 #define KEY1_GPIO_PORT  GPIOC
 #define KEY1_GPIO_PIN   GPIO_PIN_6
-#define KEY1_ACTIVE_LEVEL  GPIO_PIN_RESET   // 按下为低电平
+#define KEY1_ACTIVE_LEVEL  GPIO_PIN_RESET
 
 // KEY2
 #define KEY2_GPIO_PORT  GPIOC
@@ -38,28 +39,45 @@ extern "C" {
 #define KEY_PUSH_GPIO_PIN  GPIO_PIN_9
 #define KEY_PUSH_ACTIVE_LEVEL GPIO_PIN_RESET
 
-// // 开发板Key
-// #define KEY_dev_GPIO_PORT GPIOD
-// #define KEY_dev_GPIO_PIN  GPIO_PIN_15
-// #define KEY_dev_ACTIVE_LEVEL GPIO_PIN_RESET
+// 消抖时间（毫秒）
+#define KEY_DEBOUNCE_MS    10
 
-// 消抖时间（毫秒），建议10~30ms
-#define KEY_DEBOUNCE_MS    20
-
-// // 按键返回值定义（与原来保持一致）
-#define key1    0   // KEY1
-#define key2    1   // KEY2
-#define down    2   // CW顺时针//down
-#define up      3   // CCW逆时针//wp
-#define push    4   // PUSH
-
+// 按键返回值定义（加 KEY_ 前缀避免命名冲突）
+#define KEY_KEY1    0   // KEY1
+#define KEY_KEY2    1   // KEY2
+#define KEY_DOWN    2   // CW顺时针 / down
+#define KEY_UP      3   // CCW逆时针 / up
+#define KEY_PUSH    4   // PUSH
 
 // ======================== API 函数 ========================
 void Key_Init(void);
-void Key_Scan(void);                // 需在主循环中周期调用（建议间隔10ms）
-uint8_t Key_GetEvent(uint8_t key_id); // 返回单击事件(1) 或 0
-uint8_t Key_IsAnyPressed(void);        // 返回当前被按下按键的键值（实时电平）
-void Key_ClearEvent(uint8_t key_id);   // 清除事件
+void Key_Scan(void);
+
+// 获取按键松开事件（原有接口，保持兼容）
+uint8_t Key_GetEvent(uint8_t key_id);
+
+// 获取按键按下事件（新增：按下一瞬间即触发）
+uint8_t Key_GetPressEvent(uint8_t key_id);
+
+// 查询当前是否有按键被按下（实时电平）
+uint8_t Key_IsAnyPressed(void);
+
+// 清除按键事件
+void Key_ClearEvent(uint8_t key_id);
+void Key_ClearPressEvent(uint8_t key_id);
+
+// ---- FreeRTOS 集成 ----
+// 按键事件结构体
+typedef struct {
+    uint8_t key_id;   // 按键 ID
+    uint8_t type;     // 0=释放(click), 1=按下(press)
+} KeyEvent_t;
+
+// 按键事件队列句柄（由 app_freertos.c 初始化）
+extern osMessageQueueId_t keyEventQueue;
+
+// 按键任务入口（在 app_freertos.c 中创建）
+void Key_Task(void *argument);
 
 #ifdef __cplusplus
 }

@@ -36,6 +36,7 @@
 #include "driver_uart.h"
 #include "driver_servo.h"
 #include "driver_motor.h"
+#include "lcd.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -46,6 +47,7 @@
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
 bool init_finished = false;
+
 
 /* USER CODE END PD */
 
@@ -64,7 +66,11 @@ bool init_finished = false;
 void SystemClock_Config(void);
 void MX_FREERTOS_Init(void);
 /* USER CODE BEGIN PFP */
-
+void MX_GPIO_Init(void);
+void MX_DMA_Init(void);
+void MX_SPI2_Init(void);
+void MX_CRC_Init(void);
+void MX_TIM7_Init(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -113,10 +119,14 @@ int main(void)
   MX_CRC_Init();
   MX_FDCAN1_Init();
   MX_TIM5_Init();
+  MX_TIM7_Init();
   MX_TouchGFX_Init();
   /* Call PreOsInit function */
+
   MX_TouchGFX_PreOSInit();
   /* USER CODE BEGIN 2 */
+	
+
   init_finished = true;
 	Servo_Init(&htim5); 
 	Motor_Init();
@@ -189,7 +199,7 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-
+extern void touchgfxSignalVSync(void);
 /* USER CODE END 4 */
 
 /**
@@ -204,16 +214,19 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
     if (htim->Instance == TIM2) {
-        // ÿ���������������1
+        // ÿ���������������?
         overflow_count++;
     }
+
   /* USER CODE END Callback 0 */
   if (htim->Instance == TIM6)
   {
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-
+  if (htim->Instance == TIM7) {
+    touchgfxSignalVSync();
+  }
   /* USER CODE END Callback 1 */
 }
 

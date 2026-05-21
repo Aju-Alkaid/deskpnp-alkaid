@@ -69,11 +69,13 @@ void MX_GPIO_Init(void)
                           |SPI3_CS_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOB, RESET2_Pin|BOOT0_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(GPIOB, RESET2_Pin|GPIO_PIN_14|BOOT0_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pin Output Level */
-  HAL_GPIO_WritePin(GPIOD, LCD_LED_Pin|LCD_DC_RS_Pin|LCD_RESET_Pin|TMC2_EN_Pin
-                          |TMC1_EN_Pin, GPIO_PIN_RESET);
+  HAL_GPIO_WritePin(LCD_RESET_GPIO_Port, LCD_RESET_Pin, GPIO_PIN_SET);
+
+  /*Configure GPIO pin Output Level */
+  HAL_GPIO_WritePin(GPIOD, LCD_DC_RS_Pin|LCD_CS_Pin|TMC2_EN_Pin|TMC1_EN_Pin, GPIO_PIN_RESET);
 
   /*Configure GPIO pins : SPI4_CS_Pin NENBLE1_Pin RESET1_Pin IN4_Pin
                            IN3_Pin IN2_Pin IN1_Pin */
@@ -124,8 +126,8 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
   HAL_GPIO_Init(GPIOA, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : RESET2_Pin BOOT0_Pin */
-  GPIO_InitStruct.Pin = RESET2_Pin|BOOT0_Pin;
+  /*Configure GPIO pins : RESET2_Pin PB14 BOOT0_Pin */
+  GPIO_InitStruct.Pin = RESET2_Pin|GPIO_PIN_14|BOOT0_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
@@ -145,10 +147,15 @@ void MX_GPIO_Init(void)
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   HAL_GPIO_Init(NFAULT1_GPIO_Port, &GPIO_InitStruct);
 
-  /*Configure GPIO pins : LCD_LED_Pin LCD_DC_RS_Pin LCD_RESET_Pin TMC2_EN_Pin
-                           TMC1_EN_Pin */
-  GPIO_InitStruct.Pin = LCD_LED_Pin|LCD_DC_RS_Pin|LCD_RESET_Pin|TMC2_EN_Pin
-                          |TMC1_EN_Pin;
+  /*Configure GPIO pins : LCD_RESET_Pin LCD_DC_RS_Pin LCD_CS_Pin */
+  GPIO_InitStruct.Pin = LCD_RESET_Pin|LCD_DC_RS_Pin|LCD_CS_Pin;
+  GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
+  GPIO_InitStruct.Pull = GPIO_NOPULL;
+  GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_HIGH;
+  HAL_GPIO_Init(GPIOD, &GPIO_InitStruct);
+
+  /*Configure GPIO pins : TMC2_EN_Pin TMC1_EN_Pin */
+  GPIO_InitStruct.Pin = TMC2_EN_Pin|TMC1_EN_Pin;
   GPIO_InitStruct.Mode = GPIO_MODE_OUTPUT_PP;
   GPIO_InitStruct.Pull = GPIO_NOPULL;
   GPIO_InitStruct.Speed = GPIO_SPEED_FREQ_LOW;
