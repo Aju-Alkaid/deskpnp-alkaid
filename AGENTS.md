@@ -33,10 +33,9 @@
 | 加热台 | CAN ID 0x10(命令) / 0x11(状态), 独立控制 |
 | 温度传感器 | PF9 / PA3, DS18B20 |
 | 舵机(Z轴) | PE8, TIM5_CH3, MG995 |
-| 吸嘴气泵 | PA12, GPIO 输出(高有效) — **注意与 CAN_TX 同为 PA12，需确认硬件是否复用** |
+| 吸嘴气泵 | PE12, GPIO 输出(高有效) |
 | BOOT0 | PB8, 启动选择 |
 | LCD_LED | PD8, LCD 背光 |
-
 ## 三、目录结构
 
 ```
@@ -242,7 +241,7 @@ pnp_1/
 | USART2_TX/RX | PD5/PD6 | MaixCam 摄像头 |
 | USART3_TX/RX | PB9/PB11 | TMC2209(R轴) |
 | CAN_TX/RX | PA12/PA11 | 三轴伺服电机 |
-| 吸嘴气泵 | PA12 | **与 CAN_TX 冲突！** |
+| 吸嘴气泵 | PE12 | 高有效 |
 | 舵机 PWM (Z轴) | PE8 | TIM5_CH3 |
 | 12V_C1 PWM | PB10 | TIM2_CH3 |
 | 12V_C2 PWM | PE8 | TIM5_CH3 (与舵机共用) |
