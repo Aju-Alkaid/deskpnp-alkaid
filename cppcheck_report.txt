@@ -1,0 +1,261 @@
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:115:32: style: Condition 'Length>7' is always false [knownConditionTrueFalse]
+    uint8_t data_len = (Length > 7) ? 7 : Length;
+                               ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:112:47: note: Assuming that condition 'Length>7' is not redundant
+    if (Data == NULL || Length == 0 || Length > 7) return 1; // 最多7字节有效数据，留1字节给CRC
+                                              ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:115:32: note: Condition 'Length>7' is always false
+    uint8_t data_len = (Length > 7) ? 7 : Length;
+                               ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:126:16: style: Condition 'Length<8' is always true [knownConditionTrueFalse]
+    if (Length < 8) {
+               ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:112:47: note: Assuming that condition 'Length>7' is not redundant
+    if (Data == NULL || Length == 0 || Length > 7) return 1; // 最多7字节有效数据，留1字节给CRC
+                                              ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:126:16: note: Condition 'Length<8' is always true
+    if (Length < 8) {
+               ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:105:65: style: inconclusive: Function 'CAN_Transmit_Data' argument 2 names different: declaration 'ID' definition 'can_id'. [funcArgNamesDifferent]
+uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t *Data, uint16_t Length)
+                                                                ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.h:105:65: note: Function 'CAN_Transmit_Data' argument 2 names different: declaration 'ID' definition 'can_id'.
+uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t ID, uint8_t *Data, uint16_t Length);
+                                                                ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:105:65: note: Function 'CAN_Transmit_Data' argument 2 names different: declaration 'ID' definition 'can_id'.
+uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t *Data, uint16_t Length)
+                                                                ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:105:82: style: Parameter 'Data' can be declared as pointer to const [constParameterPointer]
+uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t *Data, uint16_t Length)
+                                                                                 ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_can.c:249:29: style: Parameter 'buf' can be declared as pointer to const [constParameterPointer]
+uint8_t canCRC_ATM(uint8_t *buf,uint8_t len) //CRC_SUM8
+                            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_motor.c:37:13: style: struct member 'MotorController_t::target_pulse_x' is never used. [unusedStructMember]
+    int32_t target_pulse_x;      // 目标位置缓存
+            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_motor.c:38:13: style: struct member 'MotorController_t::target_pulse_y' is never used. [unusedStructMember]
+    int32_t target_pulse_y;
+            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_motor.c:39:14: style: struct member 'MotorController_t::start_time' is never used. [unusedStructMember]
+    uint32_t start_time;         // 用于超时检测
+             ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_motor.c:40:13: style: struct member 'MotorController_t::retry_count' is never used. [unusedStructMember]
+    uint8_t retry_count;         // 重试次数
+            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:315:13: warning: Identical condition 'err', second condition is always false [identicalConditionAfterEarlyExit]
+        if (err)
+            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:303:13: note: If condition 'err' is true, the function will return/exit
+        if (err)
+            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:315:13: note: Testing identical condition 'err'
+        if (err)
+            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:225:13: style: Redundant initialization for 'phy_pos'. The initialized value is overwritten before it is read. [redundantInitialization]
+    phy_pos = offset;
+            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:219:22: note: phy_pos is initialized
+    uint32_t phy_pos = offset;
+                     ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:225:13: note: phy_pos is overwritten
+    phy_pos = offset;
+            ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:225:5: style: Variable 'phy_pos' is assigned an expression that holds the same value. [redundantAssignment]
+    phy_pos = offset;
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:219:22: note: phy_pos is assigned 'offset' here.
+    uint32_t phy_pos = offset;
+                     ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:225:5: note: Variable 'phy_pos' is assigned an expression that holds the same value.
+    phy_pos = offset;
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:220:9: style: The scope of the variable 'err' can be reduced. [variableScope]
+    int err;
+        ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:294:9: style: The scope of the variable 'err' can be reduced. [variableScope]
+    int err;
+        ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:55:34: style: Parameter 'pTxData' can be declared as pointer to const [constParameterPointer]
+static int  W25Q64_TxRx(uint8_t *pTxData, uint8_t *pRxData, uint16_t Size, uint32_t Timeout)
+                                 ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_spiflash_w25q64.c:72:32: style: Parameter 'pTxData' can be declared as pointer to const [constParameterPointer]
+static int  W25Q64_Tx(uint8_t *pTxData, uint16_t Size, uint32_t Timeout)
+                               ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_timer.c:55:20: style: The scope of the variable 'tnow' can be reduced. [variableScope]
+    uint32_t told, tnow, tcnt = 0;
+                   ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_timer.c:51:37: style: Local variable 'htim2' shadows outer variable [shadowVariable]
+    extern TIM_HandleTypeDef        htim2;
+                                    ^
+E:\Desktop\qiansai\pnp_1\Core\Inc\tim.h:35:26: note: Shadowed declaration
+extern TIM_HandleTypeDef htim2;
+                         ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_timer.c:51:37: note: Shadow variable
+    extern TIM_HandleTypeDef        htim2;
+                                    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_timer.c:54:14: style: Local variable 'ticks' shadows outer variable [shadowVariable]
+    uint32_t ticks;
+             ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_timer.c:7:19: note: Shadowed declaration
+volatile uint64_t ticks = 0;
+                  ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_timer.c:54:14: note: Shadow variable
+    uint32_t ticks;
+             ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_timer.c:107:37: style: Local variable 'htim2' shadows outer variable [shadowVariable]
+    extern TIM_HandleTypeDef        htim2;
+                                    ^
+E:\Desktop\qiansai\pnp_1\Core\Inc\tim.h:35:26: note: Shadowed declaration
+extern TIM_HandleTypeDef htim2;
+                         ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_timer.c:107:37: note: Shadow variable
+    extern TIM_HandleTypeDef        htim2;
+                                    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:140:3: style: Variable 'ch->huart->Instance->ICR' is reassigned a value before the old one has been used. [redundantAssignment]
+  __HAL_UART_CLEAR_OREFLAG(ch->huart); // 清除溢出标志
+  ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:139:3: note: ch->huart->Instance->ICR is assigned
+  __HAL_UART_CLEAR_IDLEFLAG(ch->huart);
+  ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:140:3: note: ch->huart->Instance->ICR is overwritten
+  __HAL_UART_CLEAR_OREFLAG(ch->huart); // 清除溢出标志
+  ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:478:5: style: Variable '(huart)->Instance->ICR' is reassigned a value before the old one has been used. [redundantAssignment]
+    __HAL_UART_CLEAR_NEFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:477:5: note: (huart)->Instance->ICR is assigned
+    __HAL_UART_CLEAR_OREFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:478:5: note: (huart)->Instance->ICR is overwritten
+    __HAL_UART_CLEAR_NEFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:479:5: style: Variable '(huart)->Instance->ICR' is reassigned a value before the old one has been used. [redundantAssignment]
+    __HAL_UART_CLEAR_FEFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:478:5: note: (huart)->Instance->ICR is assigned
+    __HAL_UART_CLEAR_NEFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:479:5: note: (huart)->Instance->ICR is overwritten
+    __HAL_UART_CLEAR_FEFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:480:5: style: Variable '(huart)->Instance->ICR' is reassigned a value before the old one has been used. [redundantAssignment]
+    __HAL_UART_CLEAR_PEFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:479:5: note: (huart)->Instance->ICR is assigned
+    __HAL_UART_CLEAR_FEFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:480:5: note: (huart)->Instance->ICR is overwritten
+    __HAL_UART_CLEAR_PEFLAG(huart);
+    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:94:28: style: Local variable 'i' shadows outer variable [shadowVariable]
+    for (volatile uint32_t i = 0; i < 5000; i++);  // 几十微秒，根据主频调整
+                           ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:92:26: note: Shadowed declaration
+  for (volatile uint32_t i = 0; i < 5000; i++)
+                         ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:94:28: note: Shadow variable
+    for (volatile uint32_t i = 0; i < 5000; i++);  // 几十微秒，根据主频调整
+                           ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:209:31: style: Local variable 'huart1' shadows outer variable [shadowVariable]
+    extern UART_HandleTypeDef huart1;
+                              ^
+E:\Desktop\qiansai\pnp_1\Core\Inc\usart.h:37:27: note: Shadowed declaration
+extern UART_HandleTypeDef huart1;
+                          ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:209:31: note: Shadow variable
+    extern UART_HandleTypeDef huart1;
+                              ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:210:31: style: Local variable 'huart2' shadows outer variable [shadowVariable]
+    extern UART_HandleTypeDef huart2;
+                              ^
+E:\Desktop\qiansai\pnp_1\Core\Inc\usart.h:39:27: note: Shadowed declaration
+extern UART_HandleTypeDef huart2;
+                          ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:210:31: note: Shadow variable
+    extern UART_HandleTypeDef huart2;
+                              ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:211:31: style: Local variable 'huart3' shadows outer variable [shadowVariable]
+    extern UART_HandleTypeDef huart3;
+                              ^
+E:\Desktop\qiansai\pnp_1\Core\Inc\usart.h:41:27: note: Shadowed declaration
+extern UART_HandleTypeDef huart3;
+                          ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:211:31: note: Shadow variable
+    extern UART_HandleTypeDef huart3;
+                              ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:212:31: style: Local variable 'hlpuart1' shadows outer variable [shadowVariable]
+    extern UART_HandleTypeDef hlpuart1;
+                              ^
+E:\Desktop\qiansai\pnp_1\Core\Inc\usart.h:35:27: note: Shadowed declaration
+extern UART_HandleTypeDef hlpuart1;
+                          ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:212:31: note: Shadow variable
+    extern UART_HandleTypeDef hlpuart1;
+                              ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:66:52: style: Parameter 'data' can be declared as pointer to const [constParameterPointer]
+UART_Status_t UART_TMC_Send(Uart_Id_t id, uint8_t *data, uint16_t size) {
+                                                   ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:286:52: style: Parameter 'data' can be declared as pointer to const [constParameterPointer]
+UART_Status_t UART_SendData(Uart_Id_t id, uint8_t *data, uint16_t size)
+                                                   ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:331:33: style: Parameter 'data' can be declared as pointer to const [constParameterPointer]
+void TMC_UART_Transmit(uint8_t *data, uint16_t size) {
+                                ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:499:50: style: Parameter 'huart' can be declared as pointer to const [constParameterPointer]
+void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
+                                                 ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:543:21: style: Variable 'ch' can be declared as pointer to const [constVariablePointer]
+    UART_Channel_t *ch = &uart_channels[id];
+                    ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\driver_uart.c:42:23: style: struct member 'UART_Channel_t::last_ndtr' is never used. [unusedStructMember]
+    volatile uint16_t last_ndtr;    // 上次 NDTR (用于调试或复用)
+                      ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\lcd.c:33:48: style: Parameter 'hspi' can be declared as pointer to const [constParameterPointer]
+void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
+                                               ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\pid.c:66:8: style: Variable 'is_mutex_taken' is assigned a value that is never used. [unreadVariable]
+  bool is_mutex_taken = false;
+       ^
+E:\Desktop\qiansai\pnp_1\Drivers\ZeMCU-G4\ringbuf.c:41:39: style: Parameter 'rb' can be declared as pointer to const [constParameterPointer]
+uint16_t RingBuf_Available(RingBuf_t *rb) {
+                                      ^
+E:\Desktop\qiansai\pnp_1\Task\Task_Init.c:24:38: style: Variable 'vision_attr' is assigned a value that is never used. [unreadVariable]
+    const osThreadAttr_t vision_attr = {
+                                     ^
+E:\Desktop\qiansai\pnp_1\Task\app_host.c:195:37: style: Parameter 'data' can be declared as pointer to const [constParameterPointer]
+void Host_UartRecvCallback(uint8_t *data, int len) {
+                                    ^
+E:\Desktop\qiansai\pnp_1\Task\app_motion.c:246:13: style: The scope of the variable 'cur_x' can be reduced. [variableScope]
+    int32_t cur_x = 0;
+            ^
+E:\Desktop\qiansai\pnp_1\Task\app_motion.c:247:13: style: The scope of the variable 'cur_y' can be reduced. [variableScope]
+    int32_t cur_y = 0;
+            ^
+E:\Desktop\qiansai\pnp_1\Task\app_motor.c:36:44: style: Parameter 'pkt' can be declared as pointer to const [constParameterPointer]
+void PnP_Motor_RX_Handler(CAN_Rx_Packet_t *pkt) {
+                                           ^
+E:\Desktop\qiansai\pnp_1\Task\app_test.c:783:29: style: Local variable 'result' shadows outer variable [shadowVariable]
+                        int result = move_xy_relative(dx, dy, speed, acc, &cur_x, &cur_y);
+                            ^
+E:\Desktop\qiansai\pnp_1\Task\app_test.c:697:25: note: Shadowed declaration
+                    int result;
+                        ^
+E:\Desktop\qiansai\pnp_1\Task\app_test.c:783:29: note: Shadow variable
+                        int result = move_xy_relative(dx, dy, speed, acc, &cur_x, &cur_y);
+                            ^
+E:\Desktop\qiansai\pnp_1\Task\app_test.c:223:33: style: Parameter 'argument' can be declared as pointer to const [constParameterPointer]
+void StartDrv8803TestTask(void *argument)
+                                ^
+E:\Desktop\qiansai\pnp_1\Task\app_uart_parser.c:87:20: style: Condition 'p->idx>0' is always true [knownConditionTrueFalse]
+        if (p->idx > 0 && p->buf[p->idx - 1] == '\r') {
+                   ^
+E:\Desktop\qiansai\pnp_1\Task\app_uart_parser.c:84:20: note: Assuming that condition 'p->idx==0' is not redundant
+        if (p->idx == 0) return false;
+                   ^
+E:\Desktop\qiansai\pnp_1\Task\app_uart_parser.c:87:20: note: Condition 'p->idx>0' is always true
+        if (p->idx > 0 && p->buf[p->idx - 1] == '\r') {
+                   ^
+E:\Desktop\qiansai\pnp_1\Task\app_vision.c:157:36: style: Parameter 'data' can be declared as pointer to const [constParameterPointer]
+void CamUart_RecvCallback(uint8_t *data, int len) {
+                                   ^
