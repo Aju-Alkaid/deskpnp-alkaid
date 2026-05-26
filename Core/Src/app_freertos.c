@@ -133,7 +133,7 @@ osThreadId_t touchGFXHandle;
 const osThreadAttr_t touchGFX_attributes = {
   .name = "touchGFX",
   .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 2048 * 4
+  .stack_size = 1024 * 4
 };
 
 /* Definitions for KeyTask */
