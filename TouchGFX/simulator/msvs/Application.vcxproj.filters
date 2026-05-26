@@ -232,6 +232,12 @@
     <Filter Include="Header Files\generated\gui_generated\screen_reset_screen">
       <UniqueIdentifier>70B4A251-240E-3A2B-EF6E-8ED1C8BA974B</UniqueIdentifier>
     </Filter>
+    <Filter Include="Source Files\gui\screen_refre_screen">
+      <UniqueIdentifier>8FB043E4-11F6-526D-2D56-1E2DB7E80A1F</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\gui\screen_refre_screen">
+      <UniqueIdentifier>1DC3B36B-1058-3971-A26D-CEFF0D054906</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(TouchGFXReleasePath)\framework\source\platform\driver\touch\SDL2TouchController.cpp">
@@ -320,6 +326,12 @@
     </ClCompile>
     <ClCompile Include="..\..\generated\gui_generated\src\screen_reset_screen\Screen_RESETViewBase.cpp">
       <Filter>Source Files\generated\gui_generated\screen_reset_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREPresenter.cpp">
+      <Filter>Source Files\gui\screen_refre_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREView.cpp">
+      <Filter>Source Files\gui\screen_refre_screen</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -819,6 +831,12 @@
     </ClInclude>
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_reset_screen\Screen_RESETViewBase.hpp">
       <Filter>Header Files\generated\gui_generated\screen_reset_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREPresenter.hpp">
+      <Filter>Header Files\gui\screen_refre_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREView.hpp">
+      <Filter>Header Files\gui\screen_refre_screen</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

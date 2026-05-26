@@ -1,4 +1,4 @@
-﻿/**
+/**
   ******************************************************************************
   * File Name          : app_touchgfx.c
   ******************************************************************************
@@ -49,7 +49,6 @@
 void touchgfx_init(void);
 void touchgfx_components_init(void);
 void touchgfx_taskEntry(void);
-extern void TouchGFX_VSYNC_TimerStart(void);
 
 /* USER CODE BEGIN PFP */
 
@@ -67,6 +66,7 @@ void MX_TouchGFX_PreOSInit(void)
  */
 void MX_TouchGFX_Init(void)
 {
+  // Calling forward to touchgfx_init in C++ domain
   touchgfx_components_init();
   touchgfx_init();
 }
@@ -76,18 +76,22 @@ void MX_TouchGFX_Init(void)
  */
 void MX_TouchGFX_Process(void)
 {
+  // Calling forward to touchgfx_taskEntry in C++ domain
+  ST7306_Init(&hspi2);
+  ST7306_Clear();
+  ST7306_Refresh();
   touchgfx_taskEntry();
 }
 
 /**
  * TouchGFX application thread
  */
-	
 void TouchGFX_Task(void *argument)
 {
-  // LCD 硬件初始化（必须在 RTOS 启动后执行，HAL tick 已运行）
+  // Calling forward to touchgfx_taskEntry in C++ domain
   ST7306_Init(&hspi2);
-  // 进入 TouchGFX 主渲染循环（永不返回，VSYNC 由 HAL 内部启动）
+  ST7306_Clear();
+  ST7306_Refresh();
   touchgfx_taskEntry();
 }
 

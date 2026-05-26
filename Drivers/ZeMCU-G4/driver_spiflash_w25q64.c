@@ -311,7 +311,7 @@ int W25Q64_Erase(uint32_t offset, uint32_t len)
         tmpbuf[3] = (phy_pos >> 0) & 0xff;
         
         W25Q64_Select();
-        W25Q64_Tx(tmpbuf, 4, W25Q64_TIMEOUT);
+        err = W25Q64_Tx(tmpbuf, 4, W25Q64_TIMEOUT);
         if (err)
         {
             W25Q64_Deselect();
