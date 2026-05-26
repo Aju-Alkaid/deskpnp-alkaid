@@ -81,29 +81,11 @@ void TouchGFXHAL::setTFTFrameBuffer(uint16_t* address)
 }
 
 // 辅助函数
-// 将 TouchGFX 帧缓冲区（1bpp 水平扫描）转换为驱动所需的 2×4 格式
-static void convert_1bpp_to_2x4(const uint8_t* src, uint8_t* dst, uint16_t width, uint16_t height)
-{
-    for (uint16_t y = 0; y < height; y++) {
-        for (uint16_t x = 0; x < width; x++) {
-            uint16_t src_byte_idx = y * ((width + 7) / 8) + (x / 8);
-            uint8_t src_bit = 7 - (x % 8);
-            uint8_t color = (src[src_byte_idx] >> src_bit) & 0x01;
-            uint16_t dst_byte_idx = (y / 2) * (width / 4) + (x / 4);
-            uint8_t dst_bit = 7 - ((x % 4) * 2 + (y % 2));
-            if (color)
-                dst[dst_byte_idx] |= (1 << dst_bit);
-            else
-                dst[dst_byte_idx] &= ~(1 << dst_bit);
-        }
-    }
-}
-
+// �?TouchGFX 帧缓冲区�?bpp 水平扫描）转换为驱动所需�?2×4 格式
 void TouchGFXHAL::flushFrameBuffer(const touchgfx::Rect& rect) {
     const uint8_t* fb = (const uint8_t*)getClientFrameBuffer();
     if (fb == nullptr) return;
-    convert_1bpp_to_2x4(fb, display_buffer, LCD_W, LCD_H);
-    ST7306_Refresh();
+    ST7306_Refresh1bpp(fb);
 }
 
 extern "C" 

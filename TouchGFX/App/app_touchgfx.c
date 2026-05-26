@@ -78,8 +78,6 @@ void MX_TouchGFX_Process(void)
 {
   // Calling forward to touchgfx_taskEntry in C++ domain
   ST7306_Init(&hspi2);
-  ST7306_Clear();
-  ST7306_Refresh();
   touchgfx_taskEntry();
 }
 
@@ -90,8 +88,6 @@ void TouchGFX_Task(void *argument)
 {
   // Calling forward to touchgfx_taskEntry in C++ domain
   ST7306_Init(&hspi2);
-  ST7306_Clear();
-  ST7306_Refresh();
   touchgfx_taskEntry();
 }
 
