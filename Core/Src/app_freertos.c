@@ -133,13 +133,14 @@ osThreadId_t touchGFXHandle;
 const osThreadAttr_t touchGFX_attributes = {
   .name = "touchGFX",
   .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 2048 * 4
+  .stack_size = 1024 * 4
 };
 
+/* Definitions for KeyTask */
 const osThreadAttr_t keyTask_attributes = {
   .name = "KeyTask",
-  .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 256
+ .priority = (osPriority_t) osPriorityNormal,
+ .stack_size = 256
 };
 
 /* Private function prototypes -----------------------------------------------*/
@@ -178,7 +179,6 @@ void MX_FREERTOS_Init(void) {
   g_debug_mutex = osMutexNew(NULL);
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
-  g_debug_mutex = osMutexNew(NULL);
 
   /* USER CODE BEGIN RTOS_SEMAPHORES */
   /* add semaphores, ... */	
@@ -194,7 +194,7 @@ void MX_FREERTOS_Init(void) {
 	motor_event_queue = osMessageQueueNew(32, sizeof(CAN_Rx_Packet_t), NULL);
 	motion_cmd_queue = osMessageQueueNew(20, sizeof(MotionCmd_t), NULL);
 	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
-	dataTransferQueue = osMessageQueueNew(16, sizeof(DataTransferMsg_t), NULL);
+	dataTransferQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
 	host_pkt_queue = osMessageQueueNew(16, sizeof(HostMsg_t), NULL);
 	
 	
@@ -219,6 +219,7 @@ void MX_FREERTOS_Init(void) {
 //  servoTestTaskHandle = osThreadNew(StartServoTestTask, NULL, &servoTestTask_attributes);
 
 	osThreadNew(CAN_Process_Task, NULL, &canProcTask_attr);
+	osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
 //    osThreadNew(Host_Task, NULL, &hostTask_attributes);
 

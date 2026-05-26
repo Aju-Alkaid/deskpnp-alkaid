@@ -122,7 +122,6 @@ int main(void)
   MX_TIM7_Init();
   MX_TouchGFX_Init();
   /* Call PreOsInit function */
-
   MX_TouchGFX_PreOSInit();
   /* USER CODE BEGIN 2 */
 	
