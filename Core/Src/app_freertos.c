@@ -222,9 +222,9 @@ void MX_FREERTOS_Init(void) {
 
 //	osThreadNew(PnP_Motion_Task, NULL, &PnP_Motion_Task_attributes);
 
-	drv8803TestTaskHandle = osThreadNew(StartDrv8803TestTask, NULL, &drv8803TestTask_attributes);
+//	drv8803TestTaskHandle = osThreadNew(StartDrv8803TestTask, NULL, &drv8803TestTask_attributes);
   
-	motorTestTaskHandle = osThreadNew(StartMotorTestTask, NULL, &motorTestTask_attributes);
+//	motorTestTaskHandle = osThreadNew(StartMotorTestTask, NULL, &motorTestTask_attributes);
 
 //  servoTestTaskHandle = osThreadNew(StartServoTestTask, NULL, &servoTestTask_attributes);
 
