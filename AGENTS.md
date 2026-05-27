@@ -1,4 +1,4 @@
-# PnP 贴片机嵌入式固件 — 项目说明书
+﻿# PnP 贴片机嵌入式固件 — 项目说明书
 
 ## 一、项目概览
 
@@ -370,6 +370,7 @@ MKS SERVO42D 同步模式流程：
 - **同步触发消耗状态**：`motorSyncTrigger(0)` 执行后同步标志被清除，必须重新 `motorSyncEnable(1)` 才能继续缓存
 - **syncEnable 可能被电机忽略**：日志证明 Y 轴运行时无视 `motorSyncEnable(0)` 广播，故不切换同步模式、直接用缓存+触发更可靠
 - **三轴状态不一致**：一个 disable_sync_stop 周期后可能 X1/X2 在非同步而 Y 在同步，需末尾 `motorSyncEnable(1)` 统一
+- **move_xy_relative 同步保障**：每次 `move_xy_relative` 调用必须 (1) 发包前 `motorSyncEnable(1)` 确保缓存开启，(2) `motorSyncTrigger(0)` 后立即 `motorSyncEnable(1)` 恢复同步。缺失任一步骤会导致后续运动 X1 比 X2 早起步，双 X 龙门拉扯 → 抖动 + error。
 
 ### 11.7 disable_sync_stop 函数设计
 
@@ -391,16 +392,36 @@ static void disable_sync_stop(void) {
 1. 初版：`motorSyncEnable(0)` 退出同步 → `axis_stop` → `motorSyncEnable(1)` 重开。问题：Y 轴无视 syncEnable 广播
 2. 二版：去掉同步切换，纯缓存+触发。问题：触发后同步状态丢失，下次单步 X1/X2 直接执行不走同步
 3. **终版**：缓存急停 + 触发 + 恢复同步。兼顾可靠停止与状态一致性
+### 11.8 move_xy_relative 当前实现（2026-05 最终版）
 
-### 11.8 move_xy_relative 优化要点
+（`Task/app_test.c` move_xy_relative 函数）
 
-（`Task/app_test.c` 第 548-616 行）
+```c
+motorSyncEnable(1);         // ★ 发包前强制开启同步（确保 0xF5 被缓存而非立即执行）
+osDelay(5);
 
-1. **按需发指令**：仅向 dx!=0 或 dy!=0 的轴发送 positionMode3Run，避免向静止轴发冗余命令
-2. **按需等待**：`done_mask` 只包含需要运动的轴完成标志，不等静止轴
-3. **osDelay(2) 防崩溃**：连续 CAN 发送间插入 2ms 延时，释放 PrintDebug→vsnprintf（现为 dbg_vformat）栈帧
-4. **CMSIS 错误码过滤**：`if ((int32_t)flags < 0)` 先判断是否为错误码再检查事件标志
-5. **中断响应**：轮询期间处理 UART 新命令，支持运动中取消
+if (dx != 0) {
+    positionMode3Run(X1_ADDR, speed, acc, target_x);
+    osDelay(2);             // ★ CAN 时序：给 MKS 电机足够时间处理 0xF5 缓存
+    positionMode3Run(X2_ADDR, speed, acc, target_x);
+    osDelay(2);
+}
+if (dy != 0) {
+    positionMode3Run(Y_ADDR,  speed, acc, target_y);
+    osDelay(2);             // ★ 无此延时 Y 轴来不及缓存 → 不运动
+}
+
+motorSyncTrigger(0);        // 三轴同时执行
+osDelay(5);
+motorSyncEnable(1);         // ★ 触发后恢复同步，下次运动不被破坏
+osDelay(5);
+// ... 等待到位事件 ...
+```
+
+**关键要点**：
+1. **osDelay(2) 的双重作用**：(a) CAN TX FIFO 防溢出，(b) 给 MKS 电机处理 0xF5 缓存的时间。去掉后 Y 的 0xF5 距 0x4B 触发仅 ~100μs，电机来不及缓存 → Y 不运动
+2. **同步双保险**：`motorSyncTrigger` 消耗同步标志，不恢复则下次 `move_xy_relative` 的 0xF5 立即执行，X1 比 X2 早 2ms 起步 → 机械拉扯
+3. **最优参数**：speed=300, acc=25（speed=600/acc=70 导致短行程无巡航段、全程加减速、跟随误差累积）
 
 ### 11.9 dbg_vformat 轻量格式化
 
@@ -417,6 +438,25 @@ static void disable_sync_stop(void) {
 
 **格式位解析顺序**：旗标(0)→宽度→精度(.2/.1/.*)→长度(l)→类型符(d/u/s/X/f)。
 **坑**：宽度位（如 %02X 的 2）必须在进入类型符前跳过，否则被当作普通字符输出。
+
+### 11.10 位置模式跟随误差调试记录（2026-05-28）
+
+**现象**：JOG 连续运动无 error，MOVE_TO 位置运动时 X1 出现跟随误差（逐渐增大、到位清零），三轴抖动。
+
+**根因**：
+- MKS 0xF5 位置模式是内置轨迹规划器，给定 speed/acc/target 后内部规划加速→巡航→减速曲线
+- JOG 目标 = 8388607（极远）→ 短暂加速后恒速巡航 → 跟随误差 ≈ 0
+- 位置模式目标 = 短行程（如 10mm = 32768 步）→ speed=600/acc=70 时全程加减速、无巡航段 → 跟随误差持续累积
+- X1 机械负载 > X2（双 X 龙门不对称），加速时 X1 力矩不足，误差更大
+
+**解决过程**：
+1. 降速降加速度 speed 600→300, acc 70→10：error 仍存在，根因是 **同步模式在 trigger 后被消耗，move_xy_relative 未恢复**
+2. 修复同步：发包前后双 `motorSyncEnable(1)` + 移除 osDelay(2) → error 消失，但 **Y 轴不运动**
+3. 恢复 osDelay(2)：无延时 Y 的 0xF5 距触发仅 ~100μs，MKS 来不及缓存 → Y 被跳过
+4. 微调 acc 10→25：在扭矩需求和加速持续时间之间折中
+5. MKS 硬件上调高 X1 工作电流（Ma，0x83 指令）：补偿 X1 额外机械负载，降低跟随误差。保持电流 HoldMa 不调整
+
+**最终状态**：speed=300, acc=25，`move_xy_relative` 带同步双保险 + osDelay(2) 时序保护，X1 电流在 MKS 调参软件中单独提升。
 
 ## 十二、TouchGFX + FreeRTOS 移植日志（2026-05）
 
