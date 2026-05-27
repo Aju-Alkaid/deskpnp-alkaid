@@ -895,6 +895,16 @@
               <FileType>1</FileType>
               <FilePath>..\Drivers\ZeMCU-G4\ringbuf.c</FilePath>
             </File>
+            <File>
+              <FileName>driver_esp32.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\ZeMCU-G4\driver_esp32.c</FilePath>
+            </File>
+            <File>
+              <FileName>driver_esp32.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\ZeMCU-G4\driver_esp32.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>
@@ -2848,6 +2858,26 @@
               <FileName>app_vision.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\Task\app_vision.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_esp_protocol.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Task\app_esp_protocol.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_esp_protocol.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Task\app_esp_protocol.h</FilePath>
+            </File>
+            <File>
+              <FileName>app_esp_task.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Task\app_esp_task.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_esp_task.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Task\app_esp_task.h</FilePath>
             </File>
           </Files>
         </Group>

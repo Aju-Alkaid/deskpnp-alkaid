@@ -1,4 +1,4 @@
-﻿#include "gui/model/Data_Transfer.h"
+#include "gui/model/Data_Transfer.h"
 #include <string.h>
 
 // ======================== 全局状态变量（向后兼容）====================
