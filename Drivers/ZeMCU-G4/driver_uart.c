@@ -484,8 +484,15 @@ void UART_Error_Handler(UART_HandleTypeDef *huart)
     ch->overflow_count++;
     ch->is_rx_active = false;
 
+    // TX ???UART??????TX DMA???tx_pending??????
+    if (ch->tx_pending) {
+        HAL_UART_AbortTransmit(ch->huart);
+        ch->tx_pending = false;
+        uart_tx_service(ch);
+    }
+
     UART_StartReceive_DMA(ch);
-		
+
 }
 
 

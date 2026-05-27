@@ -25,6 +25,7 @@
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
+#include "app_esp_task.h"
 #include "driver_can.h"
 #include "app_motion.h"
 #include "app_test.h"
@@ -44,6 +45,7 @@ osMessageQueueId_t motion_cmd_queue;
 extern osMessageQueueId_t keyEventQueue;
 extern osMessageQueueId_t dataTransferQueue;
 osMutexId_t g_debug_mutex = NULL;
+osMessageQueueId_t esp_cmd_queue;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -127,6 +129,13 @@ const osThreadAttr_t hostMotionTestTask_attributes = {
     .priority = osPriorityNormal
 };
 
+
+const osThreadAttr_t espTask_attributes = {
+    .name = "ESP32",
+    .stack_size = 512,
+    .priority = osPriorityNormal,
+};
+
 /* USER CODE END Variables */
 /* Definitions for touchGFX */
 osThreadId_t touchGFXHandle;
@@ -156,6 +165,7 @@ void Host_Task(void *argument);
 void StartHostCommTestTask(void *argument);
 void StartHostMotionTestTask(void *argument);
 void Key_Task(void *argument);
+void ESP_Task(void *argument);
 /* USER CODE END FunctionPrototypes */
 
 void TouchGFX_Task(void *argument);
@@ -196,7 +206,7 @@ void MX_FREERTOS_Init(void) {
 	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
 	dataTransferQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
 	host_pkt_queue = osMessageQueueNew(16, sizeof(HostMsg_t), NULL);
-	
+	esp_cmd_queue = osMessageQueueNew(8, sizeof(ESP_Cmd_t), NULL);
 	
 	
   /* USER CODE END RTOS_QUEUES */
@@ -226,8 +236,9 @@ void MX_FREERTOS_Init(void) {
 //    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
 
   
-  osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
   hostMotionTaskHandle = osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
+
+  osThreadNew(ESP_Task, NULL, &espTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 
