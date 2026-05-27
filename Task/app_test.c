@@ -1,4 +1,4 @@
-﻿#include "driver_uart.h"  
+#include "driver_uart.h"  
 #include "FreeRTOS.h"     
 #include "task.h"         
 #include <string.h>       // 用于 strlen
@@ -594,6 +594,10 @@ static int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
 
     osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
 
+    /* 确保同步模式开启，再缓存运动指令 */
+    motorSyncEnable(1);
+    osDelay(5);
+
     if (dx != 0) {
         positionMode3Run(X1_ADDR, speed, acc, target_x);
         osDelay(2);
@@ -606,6 +610,10 @@ static int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
     }
 
     motorSyncTrigger(0);
+    osDelay(5);
+    /* 触发后立即恢复同步标志，供下次运动使用 */
+    motorSyncEnable(1);
+    osDelay(5);
 
     uint32_t done_mask = 0;
     if (dx != 0) done_mask |= (EVENT_X1_DONE | EVENT_X2_DONE);
@@ -669,8 +677,8 @@ void StartHostMotionTestTask(void *argument)
     int32_t cur_y = 0;
     bool jog_active = false;
 
-    const uint16_t speed = 600;
-    const uint8_t  acc   = 70;
+    const uint16_t speed = 300;
+    const uint8_t  acc   = 25;
 
     /* 电机初始化: 配置工作模式+使能+归零 */
 		CAN_Init(&hfdcan1, NULL);
