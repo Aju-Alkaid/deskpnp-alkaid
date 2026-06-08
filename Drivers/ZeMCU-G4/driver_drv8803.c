@@ -1,44 +1,120 @@
 ﻿#include "stm32g4xx_hal.h"
 #include "driver_drv8803.h"
 
-
 #ifdef USE_FREERTOS
 #include "FreeRTOS.h"
 #include "task.h"
 #endif
 
+// ==================== 8 个物理输出端口实例 ====================
+const PowerPort_t Port_12VO1 = {
+    .num_pins = 1,
+    .pins = {
+        { .port = GPIOE, .pin = GPIO_PIN_11 }
+    }
+};
+
+const PowerPort_t Port_12VO2 = {
+    .num_pins = 1,
+    .pins = {
+        { .port = GPIOE, .pin = GPIO_PIN_12 }
+    }
+};
+
+const PowerPort_t Port_12VO3 = {
+    .num_pins = 2,
+    .pins = {
+        { .port = GPIOE, .pin = GPIO_PIN_13 },   // 开关
+        { .port = GPIOE, .pin = GPIO_PIN_8  }    // PWM
+    }
+};
+
+const PowerPort_t Port_12VO4 = {
+    .num_pins = 2,
+    .pins = {
+        { .port = GPIOE, .pin = GPIO_PIN_14 },   // 开关
+        { .port = GPIOB, .pin = GPIO_PIN_10 }    // PWM
+    }
+};
+
+const PowerPort_t Port_24VO1 = {
+    .num_pins = 1,
+    .pins = {
+        { .port = GPIOA, .pin = GPIO_PIN_6 }
+    }
+};
+
+const PowerPort_t Port_24VO2 = {
+    .num_pins = 1,
+    .pins = {
+        { .port = GPIOA, .pin = GPIO_PIN_7 }
+    }
+};
+
+const PowerPort_t Port_24VO3 = {
+    .num_pins = 2,
+    .pins = {
+        { .port = GPIOC, .pin = GPIO_PIN_4 },    // 开关
+        { .port = GPIOB, .pin = GPIO_PIN_1 }     // PWM
+    }
+};
+
+const PowerPort_t Port_24VO4 = {
+    .num_pins = 2,
+    .pins = {
+        { .port = GPIOC, .pin = GPIO_PIN_5 },    // 开关
+        { .port = GPIOB, .pin = GPIO_PIN_2 }     // PWM
+    }
+};
+
+// ==================== 所有端口的列表（用于批量初始化） ====================
+static const PowerPort_t * const g_all_ports[] = {
+    &Port_12VO1, &Port_12VO2, &Port_12VO3, &Port_12VO4,
+    &Port_24VO1, &Port_24VO2, &Port_24VO3, &Port_24VO4
+};
+
 /**
- * @brief 配置两个 DRV8803 芯片的初始状态
- * @note  所有 GPIO 模式（输入/输出/上拉）必须在 CubeMX 中正确配置。
- *        本函数仅设置初始输出电平，不调用 HAL_GPIO_Init，避免与 MX_GPIO_Init 冲突。
+ * @brief 初始化所有 DRV8803 输出端口和芯片控制引脚
+ * @note  所有 GPIO 模式必须在 CubeMX 中配置。本函数仅设置初始输出电平。
  */
-HAL_StatusTypeDef DRV8803_Dual_Config(void)
+HAL_StatusTypeDef DRV8803_Init(void)
 {
-    // U12 (12V) 初始状态
-    HAL_GPIO_WritePin(DRV1_EN_PORT, DRV1_EN_PIN, GPIO_PIN_SET);      // 禁用
-    HAL_GPIO_WritePin(DRV1_RESET_PORT, DRV1_RESET_PIN, GPIO_PIN_RESET); // RESET = LOW 正常工作（参考裸机驱动验证）
-    HAL_GPIO_WritePin(DRV1_IN1_PORT, DRV1_IN1_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(DRV1_IN2_PORT, DRV1_IN2_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(DRV1_IN3_PORT, DRV1_IN3_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(DRV1_IN4_PORT, DRV1_IN4_PIN, GPIO_PIN_RESET);
+    // 所有输出端口引脚初始化为低电平
+    for (int i = 0; i < 8; i++) {
+        for (int j = 0; j < g_all_ports[i]->num_pins; j++) {
+            HAL_GPIO_WritePin(g_all_ports[i]->pins[j].port,
+                              g_all_ports[i]->pins[j].pin,
+                              GPIO_PIN_RESET);
+        }
+    }
 
-    // U13 (24V) 初始状态
-    HAL_GPIO_WritePin(DRV2_EN_PORT, DRV2_EN_PIN, GPIO_PIN_SET);      // 禁用
-    HAL_GPIO_WritePin(DRV2_RESET_PORT, DRV2_RESET_PIN, GPIO_PIN_RESET); // RESET = LOW 正常工作
-    HAL_GPIO_WritePin(DRV2_IN1_PORT, DRV2_IN1_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(DRV2_IN2_PORT, DRV2_IN2_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(DRV2_IN3_PORT, DRV2_IN3_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(DRV2_IN4_PORT, DRV2_IN4_PIN, GPIO_PIN_RESET);
+    // U12 (12V) 芯片控制引脚
+    HAL_GPIO_WritePin(DRV1_EN_PORT, DRV1_EN_PIN, GPIO_PIN_SET);        // 禁用
+    HAL_GPIO_WritePin(DRV1_RESET_PORT, DRV1_RESET_PIN, GPIO_PIN_RESET); // 正常工作
 
-    // PWM 控制线初始状态（低电平）
-    HAL_GPIO_WritePin(PWM_12V_C1_PORT, PWM_12V_C1_PIN, GPIO_PIN_RESET);
-//    HAL_GPIO_WritePin(PWM_12V_C2_PORT, PWM_12V_C2_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(PWM_24V_C1_PORT, PWM_24V_C1_PIN, GPIO_PIN_RESET);
-    HAL_GPIO_WritePin(PWM_24V_C2_PORT, PWM_24V_C2_PIN, GPIO_PIN_RESET);
+    // U13 (24V) 芯片控制引脚
+    HAL_GPIO_WritePin(DRV2_EN_PORT, DRV2_EN_PIN, GPIO_PIN_SET);        // 禁用
+    HAL_GPIO_WritePin(DRV2_RESET_PORT, DRV2_RESET_PIN, GPIO_PIN_RESET); // 正常工作
 
     return HAL_OK;
 }
 
+/**
+ * @brief 控制单个输出端口的开关状态
+ * @param port 端口实例指针（如 &Port_12VO1）
+ * @param on   true=导通, false=断开
+ * @note  仅操作 pins[0]（开关引脚），不影响 PWM 引脚
+ */
+void DRV8803_SetOutput(const PowerPort_t *port, bool on)
+{
+    HAL_GPIO_WritePin(port->pins[0].port,
+                      port->pins[0].pin,
+                      on ? GPIO_PIN_SET : GPIO_PIN_RESET);
+}
+
+/**
+ * @brief 芯片级使能/禁用
+ */
 void DRV8803_EnableChip(uint8_t chip_id, bool enable)
 {
     if (chip_id == 1) {
@@ -48,38 +124,9 @@ void DRV8803_EnableChip(uint8_t chip_id, bool enable)
     }
 }
 
-void DRV8803_SetGlobalChannel(GlobalChannel_t ch, bool state)
-{
-    GPIO_PinState pinState = state ? GPIO_PIN_SET : GPIO_PIN_RESET;
-
-    switch (ch) {
-        case CH1: HAL_GPIO_WritePin(DRV1_IN1_PORT, DRV1_IN1_PIN, pinState); break;
-        case CH2: HAL_GPIO_WritePin(DRV1_IN2_PORT, DRV1_IN2_PIN, pinState); break;
-        case CH3: HAL_GPIO_WritePin(DRV1_IN3_PORT, DRV1_IN3_PIN, pinState); break;
-        case CH4: HAL_GPIO_WritePin(DRV1_IN4_PORT, DRV1_IN4_PIN, pinState); break;
-        case CH5: HAL_GPIO_WritePin(DRV2_IN1_PORT, DRV2_IN1_PIN, pinState); break;
-        case CH6: HAL_GPIO_WritePin(DRV2_IN2_PORT, DRV2_IN2_PIN, pinState); break;
-        case CH7: HAL_GPIO_WritePin(DRV2_IN3_PORT, DRV2_IN3_PIN, pinState); break;
-        case CH8: HAL_GPIO_WritePin(DRV2_IN4_PORT, DRV2_IN4_PIN, pinState); break;
-        default: break;
-    }
-}
-
-void DRV8803_SetChipChannels(uint8_t chip_id, uint8_t channel_mask)
-{
-    if (chip_id == 1) {
-        DRV8803_SetGlobalChannel(CH1, (channel_mask & 0x01));
-        DRV8803_SetGlobalChannel(CH2, (channel_mask & 0x02));
-        DRV8803_SetGlobalChannel(CH3, (channel_mask & 0x04));
-        DRV8803_SetGlobalChannel(CH4, (channel_mask & 0x08));
-    } else if (chip_id == 2) {
-        DRV8803_SetGlobalChannel(CH5, (channel_mask & 0x01));
-        DRV8803_SetGlobalChannel(CH6, (channel_mask & 0x02));
-        DRV8803_SetGlobalChannel(CH7, (channel_mask & 0x04));
-        DRV8803_SetGlobalChannel(CH8, (channel_mask & 0x08));
-    }
-}
-
+/**
+ * @brief 读取芯片故障状态
+ */
 bool DRV8803_IsChipFault(uint8_t chip_id)
 {
     if (chip_id == 1) {
@@ -90,6 +137,9 @@ bool DRV8803_IsChipFault(uint8_t chip_id)
     return false;
 }
 
+/**
+ * @brief 触发芯片硬件复位
+ */
 void DRV8803_TriggerChipReset(uint8_t chip_id)
 {
     GPIO_TypeDef* resetPort;

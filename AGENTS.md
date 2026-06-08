@@ -1,4 +1,4 @@
-# PnP 贴片机嵌入式固件 — 项目说明书
+﻿# PnP 贴片机嵌入式固件 — 项目说明书
 
 ## 一、项目概览
 
@@ -27,7 +27,7 @@
 | TIM6 | HAL 系统时基 |
 | CRC | 硬件 CRC 校验 |
 | GPIO 按键 | KEY1(PC6) / KEY2(PC7) / CW(PA8) / CCW(PC8) / PUSH(PC9), 低电平有效 |
-| DRV8803×2 | U12(12V 驱动): PE9(EN)/PE10(RST)/PE14(IN1)/PE13(IN2)/PE12(IN3)/PE11(IN4)/PE15(FAULT) |
+| DRV8803×2 | U12(12V 驱动): PE9(EN)/PE10(RST)/PE15(FAULT) ; 输出端口见 §10.4 |
 |  | U13(24V 驱动): PA4(EN)/PB0(RST)/PA6(IN5)/PA7(IN6)/PC4(IN7)/PC5(IN8)/PA5(FAULT) |
 | TMC2209 | UART3 通信, PD15(TMC1_EN) / PD14(TMC2_EN 预留) |
 | 加热台 | CAN ID 0x10(命令) / 0x11(状态), 独立控制 |
@@ -261,7 +261,14 @@ pnp_1/
 | BOOT0 | PB8 | 启动选择 |
 | 温度传感器 | PF9 / PA3 | DS18B20 |
 | LCD_LED | PD8 | LCD 背光 |
-| DRV1_IN4_PIN | PE11 | 控制真空泵使能失能 |
+| 12VO1(开关) | PE11 | 真空泵 / 12V输出1 |
+| 12VO2(开关) | PE12 | 12V输出2（预留） |
+| 12VO3(开关/PWM) | PE13 / PE8 | 12V输出3 + PWM(TIM5_CH3) |
+| 12VO4(开关/PWM) | PE14 / PB10 | 12V输出4 + PWM(TIM2_CH3) |
+| 24VO1(开关) | PA6 | 24V输出1 |
+| 24VO2(开关) | PA7 | 24V输出2 |
+| 24VO3(开关/PWM) | PC4 / PB1 | 24V输出3 + PWM(TIM3_CH4) |
+| 24VO4(开关/PWM) | PC5 / PB2 | 24V输出4 + PWM(TIM5_CH1) |
 
 ### 10.2 电机 CAN 指令速查
 | 功能码 | 功能 | 数据长度 |
@@ -285,6 +292,73 @@ pnp_1/
 - `Core/` 目录（CubeMX 生成）仍为 **GBK（CP936）编码**
 - CubeMX 生成的 CubeMX User Code 起始/结束标记：`/* USER CODE BEGIN ... */` / `/* USER CODE END ... */`
 - CubeMX 重新生成代码时，标记外内容会被覆盖
+### 10.4 DRV8803 端口对照与使用示例
+
+**端口对应关系：**
+
+| 逻辑端口 | 开关引脚 | PWM 引脚 | PWM TIM 通道 | 用途 |
+|----------|---------|---------|-------------|------|
+| `Port_12VO1` | PE11 | — | — | 真空泵 |
+| `Port_12VO2` | PE12 | — | — | 预留 |
+| `Port_12VO3` | PE13 | PE8 | TIM5_CH3 | 12V PWM 输出 |
+| `Port_12VO4` | PE14 | PB10 | TIM2_CH3 | 12V PWM 输出 |
+| `Port_24VO1` | PA6 | — | — | 24V 输出 |
+| `Port_24VO2` | PA7 | — | — | 24V 输出 |
+| `Port_24VO3` | PC4 | PB1 | TIM3_CH4 | 24V PWM 输出 |
+| `Port_24VO4` | PC5 | PB2 | TIM5_CH1 | 24V PWM 输出 |
+
+> **芯片级引脚**（固定，不属于输出端口）：
+> U12(12V): PE9(EN) / PE10(RST) / PE15(FAULT)
+> U13(24V): PA4(EN) / PB0(RST) / PA5(FAULT)
+
+**数据结构：**
+
+```c
+typedef struct {
+    GPIO_TypeDef *port;
+    uint16_t      pin;
+} Pin_t;
+
+typedef struct {
+    uint8_t num_pins;   // 1=仅开关, 2=开关+PWM
+    Pin_t   pins[2];    // pins[0]=开关引脚, pins[1]=PWM引脚
+} PowerPort_t;
+```
+
+**API 函数：**
+
+| 函数 | 说明 |
+|------|------|
+| `DRV8803_Init()` | 初始化所有输出端口为低电平，禁用两个芯片 |
+| `DRV8803_SetOutput(port, on)` | 控制某端口开关（仅操作 pins[0]） |
+| `DRV8803_EnableChip(id, enable)` | 芯片级使能（1=12V, 2=24V） |
+| `DRV8803_IsChipFault(id)` | 查询芯片故障状态 |
+| `DRV8803_TriggerChipReset(id)` | 硬件复位指定芯片 |
+| `DRV8803_HandleFault_RTOS(id)` | FreeRTOS 任务中的故障恢复流程 |
+
+**使用示例：**
+
+```c
+// 初始化
+DRV8803_Init();
+DRV8803_EnableChip(1, true);    // 使能 U12 (12V)
+
+// 开关控制
+DRV8803_SetOutput(&Port_12VO1, true);   // 开启真空泵
+DRV8803_SetOutput(&Port_12VO1, false);  // 关闭
+
+// PWM 控制（通过便捷宏访问引脚）
+HAL_GPIO_WritePin(PWM_12VO3_PIN.port, PWM_12VO3_PIN.pin, GPIO_PIN_SET);
+
+// 故障处理
+if (DRV8803_IsChipFault(1)) {
+    DRV8803_HandleFault_RTOS(1);
+    DRV8803_EnableChip(1, true);
+    DRV8803_SetOutput(&Port_12VO1, true);
+}
+```
+
+
 ## 十一、调试任务与经验总结
 
 ### 11.1 StartHostMotionTestTask
