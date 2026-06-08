@@ -132,10 +132,10 @@ static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
     return -1;   // 超时
 }
 
-static void nozzle_on(void) {
+void nozzle_on(void) {
     HAL_GPIO_WritePin(NOZZLE_GPIO_PORT, NOZZLE_GPIO_PIN, GPIO_PIN_SET);
 }
-static void nozzle_off(void) {
+void nozzle_off(void) {
     HAL_GPIO_WritePin(NOZZLE_GPIO_PORT, NOZZLE_GPIO_PIN, GPIO_PIN_RESET);
 }
 
@@ -146,26 +146,26 @@ static void servo_delay_ms(uint32_t ms) {
     osDelay(ms);   // FreeRTOS 下的毫秒延时
 }
 
-static void z_down(void) {
+void z_down(void) {
     Servo_SetAngle(SERVO_CH_Z, ANGLE_DOWN);
     servo_delay_ms(300);   // 等待到位
 }
 
-static void z_up(void) {
+void z_up(void) {
     Servo_SetAngle(SERVO_CH_Z, ANGLE_UP);
     servo_delay_ms(300);
 }
 
 /* ---------- 组合的吸取 / 放置流程 ---------- */
 
-static void pick_component(void) {
+void pick_component(void) {
     z_down();
     nozzle_on();
     servo_delay_ms(100);   // 吸稳
     z_up();
 }
 
-static void place_component(void) {
+void place_component(void) {
     z_down();
     nozzle_off();
     servo_delay_ms(100);   // 释放
@@ -201,10 +201,11 @@ static int32_t speed_to_vactual(float speed_rpm, uint8_t dir) {
  * @param speed_rpm 转速
  * @note  当前角度未记录，需先在系统任务中维护
  */
-static void r_axis_rotate(float angle, float speed_rpm) {
-    // 假设 R 轴当前位置为 cur_angle (可在应用层维护)
-    float cur_angle = 0.0f;  // TODO: 从系统状态获取
-    float delta = angle - cur_angle;
+/* ---- R 轴当前角度 (供外部读写) ---- */
+static float g_cur_r_angle = 0.0f;
+
+void r_axis_rotate(float angle, float speed_rpm) {
+    float delta = angle - g_cur_r_angle;
     if (delta < -180.0f) delta += 360.0f;
     else if (delta > 180.0f) delta -= 360.0f;   // 选择最短路径
 
@@ -223,8 +224,7 @@ static void r_axis_rotate(float angle, float speed_rpm) {
     TMC_SetSpeed(0);
     osDelay(R_ACCEL_DELAY);   // 等待电机停稳
 
-    // 更新当前位置 (这里应更新全局变量，可由调用者负责)
-    // current_r_angle = angle;
+    g_cur_r_angle = angle;
 }
 
 /* ---------- 任务入口 ---------- */

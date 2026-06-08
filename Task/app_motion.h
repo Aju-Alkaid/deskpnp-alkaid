@@ -48,4 +48,13 @@ extern osMessageQueueId_t motor_event_queue;   // 与 CAN 中断共用
 /*事件组*/
 extern osEventFlagsId_t evtAxesDone;
 
+
+/* ---- Z轴+吸嘴+R轴 动作（供 Host_Task 直接调用）---- */
+void nozzle_on(void);
+void nozzle_off(void);
+void z_down(void);
+void z_up(void);
+void pick_component(void);
+void place_component(void);
+void r_axis_rotate(float angle, float speed_rpm);
 #endif
