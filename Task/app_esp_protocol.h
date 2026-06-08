@@ -124,7 +124,7 @@ uint8_t ESP_GetResponseType(const uint8_t *rx_buf);
  * @brief  提取 ESP 响应负载指针和长度
  * @param  rx_buf   ESP 发来的 128 字节接收缓冲区
  * @param  out_len  输出: 负载有效字节数 (从 Byte 2 读取)
- * @return 指向负载起始位置 (rx_buf + 1)，不拷贝
+ * @return 指向负载起始位置 (rx_buf + 3)，不拷贝
  */
 const char* ESP_GetResponsePayload(const uint8_t *rx_buf, uint8_t *out_len);
 

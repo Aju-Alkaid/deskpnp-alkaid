@@ -244,6 +244,19 @@ static void _process_response(void)
         return;
     }
 
+    /* 响应类型白名单检查: 不是已知类型则静默丢弃 (防御 SPI 全 0xFF 等情况) */
+    if (resp_type != ESP_RESP_FAULT &&
+        resp_type != ESP_RESP_WIFI_STATUS &&
+        resp_type != ESP_RESP_COMPOUND &&
+        resp_type != ESP_RESP_VERSION) {
+        return;
+    }
+
+    /* payload 长度合法性检查: 最大 123 字节 (128-3 header-2 footer) */
+    if (s_rx_buf[2] > 123) {
+        return;
+    }
+
     /* 有效响应: 更新最后接收 tick，清零无响应计数 */
     g_esp_last_rx_tick = osKernelGetTickCount();
     s_no_resp_count = 0;

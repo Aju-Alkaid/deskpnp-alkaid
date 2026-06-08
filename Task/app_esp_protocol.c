@@ -89,7 +89,7 @@ uint8_t ESP_GetResponseType(const uint8_t *rx_buf)
 const char* ESP_GetResponsePayload(const uint8_t *rx_buf, uint8_t *out_len)
 {
     *out_len = rx_buf[2];
-    return (const char*)(&rx_buf[1]);
+    return (const char*)(&rx_buf[3]);
 }
 
 uint8_t ESP_GetResponseSeq(const uint8_t *rx_buf)
