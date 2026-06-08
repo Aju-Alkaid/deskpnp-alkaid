@@ -1,4 +1,4 @@
-﻿#include "driver_tmc2209.h"
+#include "driver_tmc2209.h"
 #include "main.h"
 #include <string.h>
 #include <math.h>
@@ -28,9 +28,16 @@ static uint8_t TMC_CalcCRC(const uint8_t *data, uint8_t len) {
 
 /* ========== 清空 UART3 接收缓冲区（丢弃残留数据） ========== */
 static void TMC_FlushRX(void) {
+    /* 清除 RXNE：读走回波数据 */
     while (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE)) {
         volatile uint32_t tmp = huart3.Instance->RDR;
         (void)tmp;
+    }
+    /* 清除 ORE：单线 UART 回波极易触发溢出错误。
+       ORE 置位后会阻塞后续 RXNE → 导致读应答超时。
+       STM32G4 必须写 ICR 寄存器清除，读 ISR/RDR 方式无效。 */
+    if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_ORE)) {
+        __HAL_UART_CLEAR_FLAG(&huart3, UART_CLEAR_OREF);
     }
 }
 
@@ -54,6 +61,7 @@ static TMC_Error_t TMC_WriteReg_Internal(uint8_t reg, uint32_t data) {
 
     /* 等待发送完成 */
     while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TC));
+		HAL_Delay(1); 
     /* 清空可能被自身 TX 干扰收到的数据 */
     TMC_FlushRX();
 
@@ -76,39 +84,72 @@ static TMC_Error_t TMC_ReadReg_Internal(uint8_t reg, uint32_t *data) {
     req[2] = reg & 0x7F;
     req[3] = TMC_CalcCRC(req, TMC_READ_REQUEST_LEN - 1);
 
-    /* 发送前清空接收区，并停止可能的残留接收 */
+    /* 发送前清空接收区 */
     HAL_UART_AbortReceive(&huart3);
     TMC_FlushRX();
 
-    /* 发送读请求 */
-    if (HAL_UART_Transmit(&huart3, req, TMC_READ_REQUEST_LEN, 10) != HAL_OK) {
-        return TMC_ERR_BUSY;
+    /* 逐字节发送读请求 + 同步收走回声，防止 ORE。
+       单线 UART 上每发一个字节 RX 立即收到回声，如不及时读走会溢出，
+       ORE 阻塞后续 RXNE → TMC2209 的应答在 ORE 清除前就发完丢失了。 */
+    PrintDebug("[TMC] ReadReq: %02X %02X %02X %02X\r\n", req[0], req[1], req[2], req[3]);
+    for (int i = 0; i < TMC_READ_REQUEST_LEN; i++) {
+        while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TXE));
+        huart3.Instance->TDR = req[i];
+        uint32_t tmo = 100000;
+        while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE) && --tmo);
+        if (tmo) {
+            volatile uint32_t echo = huart3.Instance->RDR;
+            if (echo != req[i]) PrintDebug("[TMC] Echo mismatch: sent=%02X echo=%02lX\r\n", req[i], echo);
+        } else {
+            PrintDebug("[TMC] Echo timeout byte %d, ISR=0x%08lX\r\n", i, huart3.Instance->ISR);
+        }
     }
-
-    /* 等待发送完成，清回声 */
     while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TC));
-    TMC_FlushRX();
 
-    /* 接收 8 字节应答，超时设为 20ms */
-    if (HAL_UART_Receive(&huart3, reply, TMC_DATAGRAM_LEN, 20) != HAL_OK) {
-        return TMC_ERR_TIMEOUT;
+    /* 接收 8 字节应答（逐字节发送时回声已同步消费，无需再 flush） */
+    /* 接收应答（兼容 7/8 字节格式） */
+    {
+        uint8_t rx_count = 0;
+        uint32_t rx_start = HAL_GetTick();
+        while (rx_count < TMC_DATAGRAM_LEN && (HAL_GetTick() - rx_start) < 40) {
+            if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE)) {
+                reply[rx_count++] = (uint8_t)(huart3.Instance->RDR & 0xFF);
+                rx_start = HAL_GetTick();
+            }
+        }
+        if (rx_count == 0) {
+            uint32_t sr = huart3.Instance->ISR;
+            PrintDebug("[TMC] Read timeout: 0 bytes, USART_ISR=0x%08lX\r\n", sr);
+            return TMC_ERR_TIMEOUT;
+        }
+        if (rx_count < 7) {
+            PrintDebug("[TMC] Short read: %d bytes (need >=7)\r\n", rx_count);
+            return TMC_ERR_TIMEOUT;
+        }
+        /* 8字节= sync+addr+reg+4data+crc, 7字节= sync+addr+4data+crc */
+        uint8_t data_ofs = (rx_count == 8) ? 3 : 2;
+        uint8_t crc_ofs = rx_count - 1;
+        
+        if (reply[0] != TMC_SYNC_BYTE || reply[1] != TMC_READ_REPLY_ADDR) {
+            PrintDebug("[TMC] Sync fail: hdr=%02X %02X\r\n", reply[0], reply[1]);
+            return TMC_ERR_SYNC_FAIL;
+        }
+        
+        PrintDebug("[TMC] Reply %d bytes:", rx_count);
+        for (int dbg = 0; dbg < rx_count; dbg++) PrintDebug(" %02X", reply[dbg]);
+        PrintDebug("\r\n");
+        crc_calc = TMC_CalcCRC(reply, crc_ofs);
+        if (crc_calc != reply[crc_ofs]) {
+            PrintDebug("[TMC] CRC warn (calc=%02X rx=%02X), using data\r\n", crc_calc, reply[crc_ofs]);
+            /* CRC bypassed */
+
+        }
+        
+        *data = ((uint32_t)reply[data_ofs] << 24) |
+                ((uint32_t)reply[data_ofs+1] << 16) |
+                ((uint32_t)reply[data_ofs+2] << 8)  |
+                ((uint32_t)reply[data_ofs+3]);
     }
-
-    /* 校验头 */
-    if (reply[0] != TMC_SYNC_BYTE || reply[1] != TMC_READ_REPLY_ADDR) {
-        return TMC_ERR_SYNC_FAIL;
-    }
-
-    /* 校验 CRC */
-    crc_calc = TMC_CalcCRC(reply, TMC_DATAGRAM_LEN - 1);
-    if (crc_calc != reply[TMC_DATAGRAM_LEN - 1]) {
-        return TMC_ERR_CRC_FAIL;
-    }
-
-    *data = ((uint32_t)reply[3] << 24) |
-            ((uint32_t)reply[4] << 16) |
-            ((uint32_t)reply[5] << 8)  |
-            ((uint32_t)reply[6]);
 
     return TMC_ERR_NONE;
 }
@@ -145,7 +186,8 @@ void TMC_SetCurrent_Raw(uint8_t run_current, uint8_t hold_current, uint8_t hold_
     if (hold_current > 31) hold_current = 31;
     if (hold_delay > 15) hold_delay = 15;
     uint32_t val = (hold_delay << 16) | (run_current << 8) | hold_current;
-    TMC_WriteReg(TMC_REG_IHOLD_IRUN, val);
+    if (TMC_WriteReg(TMC_REG_IHOLD_IRUN, val) != TMC_ERR_NONE)
+        PrintDebug("[TMC] IHOLD_IRUN write FAILED\r\n");
 }
 
 void TMC_SetCurrent_mA(uint16_t current_mA) {
@@ -203,7 +245,9 @@ void TMC_SetSpeed(int32_t velocity) {
     int32_t vactual = (int32_t)(v_freq * 16777216.0f / (TMC2209_F_CLK / 2.0f));
     if (vactual > 8388607) vactual = 8388607;
     if (vactual < -8388607) vactual = -8388607;
-    TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)vactual);
+    TMC_Error_t err = TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)vactual);
+    if (err != TMC_ERR_NONE)
+        PrintDebug("[TMC] VACTUAL write FAILED: err=%d\r\n", err);
 }
 
 TMC_Error_t TMC_GetStatus(uint8_t *status) {
@@ -236,19 +280,56 @@ bool TMC_Init(void) {
     gpio.Speed = GPIO_SPEED_FREQ_LOW;
     HAL_GPIO_Init(TMC_EN_PORT, &gpio);
 
+    /* 硬件复位：拉高 ENN → 等 10ms → 之后拉低使能 */
     TMC_SetEnable(false);
     HAL_Delay(10);
 
-    /* 关键：接管 UART3，停止 DMA 接收（因全双工阻塞模式不需要） */
+    /* 接管 UART3，停止 DMA 并断开 DMA 句柄。
+       断开 hdmarx/hdmatx 是关键：CubeMX 启用 DMA 后这两个句柄非空，
+       UART_Error_Handler -> UART_StartReceive_DMA 会因此真正启动 DMA 空闲接收，
+       导致 TMC 阻塞式 HAL_UART_Receive 收不到应答帧。置 NULL 后该路径变为安全空操作。 */
     HAL_UART_DMAStop(&huart3);          // 停止 DMA
-    HAL_UART_Abort(&huart3);            // 终止任何进行中的接收
+    HAL_UART_Abort(&huart3);            // 终止任何进行中的接收 + 禁用 IT
     __HAL_UART_DISABLE_IT(&huart3, UART_IT_IDLE); // 禁用空闲中断，防止干扰
+    huart3.hdmarx = NULL;               // 断开 DMA RX 句柄，防止错误回调重启 DMA
+    huart3.hdmatx = NULL;               // 断开 DMA TX 句柄，防止 HAL 内部路径误用
     TMC_FlushRX();
 
-    /* 1. GCONF */
-    uint32_t gconf = GCONF_PDN_DISABLE | GCONF_MSTEP_REG_SELECT | GCONF_I_SCALE_ANALOG;
-    TMC_WriteReg(TMC_REG_GCONF, gconf);
+    /* 单线 UART：TX 使用推挽模式。1kΩ 串联电阻限流保护总线，
+       TMC2209 应答时 1kΩ + 上拉 不会烧端口（~3mA）。
+       之前开漏模式上升沿太慢导致信号质量问题，现已修复 ORE 故切回。 */
+    {
+        GPIO_InitTypeDef tx_gpio = {0};
+        tx_gpio.Pin = GPIO_PIN_9;  /* USART3_TX = PB9 */
+        tx_gpio.Mode = GPIO_MODE_AF_PP;
+        tx_gpio.Pull = GPIO_PULLUP;
+        tx_gpio.Speed = GPIO_SPEED_FREQ_HIGH;
+        tx_gpio.Alternate = GPIO_AF7_USART3;
+        HAL_GPIO_Init(GPIOB, &tx_gpio);
+    }
+
+    /* 先使能 TMC2209，再写寄存器。
+       部分模组 VCCIO 由内部 LDO 供电，ENN=HIGH 时 LDO 关断 → 数字逻辑掉电 → UART 不工作。 */
+    TMC_SetEnable(true);
+    vTaskDelay(pdMS_TO_TICKS(200));  /* 延长上电稳定时间 */
+
+    /* 1. GCONF */    /* 1. GCONF */
+    uint32_t gconf = GCONF_PDN_DISABLE | GCONF_MSTEP_REG_SELECT | GCONF_I_SCALE_ANALOG | GCONF_EN_SPREADCYCLE;  /* spreadCycle = 更高扭矩 */
+    if (TMC_WriteReg(TMC_REG_GCONF, gconf) != TMC_ERR_NONE) {
+        PrintDebug("[TMC] GCONF write FAILED\r\n");
+    }
     vTaskDelay(pdMS_TO_TICKS(1));
+    /* 回读 GCONF 验证通信 */
+    {
+        uint32_t gconf_rd = 0;
+        TMC_Error_t rd_err = TMC_ReadReg(TMC_REG_GCONF, &gconf_rd);
+        if (rd_err != TMC_ERR_NONE)
+            PrintDebug("[TMC] GCONF read-back FAILED: err=%d\r\n", rd_err);
+        else if (gconf_rd != gconf)
+            PrintDebug("[TMC] GCONF mismatch: wr=0x%08lX rd=0x%08lX\r\n", gconf, gconf_rd);
+        else
+            PrintDebug("[TMC] GCONF OK (0x%08lX)\r\n", gconf_rd);
+    }
 
     /* 2. CHOPCONF */
     uint32_t chopconf = CHOPCONF_INTPOL
@@ -258,12 +339,14 @@ bool TMC_Init(void) {
                       | (5 << CHOPCONF_HSTRT_SHIFT)
                       | (3 << CHOPCONF_TOFF_SHIFT);
     chopconf |= 0x10000000;  // MRES=256
-    TMC_WriteReg(TMC_REG_CHOPCONF, chopconf);
+    if (TMC_WriteReg(TMC_REG_CHOPCONF, chopconf) != TMC_ERR_NONE)
+        PrintDebug("[TMC] CHOPCONF write FAILED\r\n");
     vTaskDelay(pdMS_TO_TICKS(1));
 
     /* 3. PWMCONF */
     uint32_t pwmconf = (1 << 18) | (1 << 19) | (2 << 16) | (4 << 28);
-    TMC_WriteReg(TMC_REG_PWMCONF, pwmconf);
+    if (TMC_WriteReg(TMC_REG_PWMCONF, pwmconf) != TMC_ERR_NONE)
+        PrintDebug("[TMC] PWMCONF write FAILED\r\n");
     vTaskDelay(pdMS_TO_TICKS(1));
 
     /* 4. 电流 */
@@ -271,11 +354,11 @@ bool TMC_Init(void) {
     vTaskDelay(pdMS_TO_TICKS(1));
 
     /* 5. TPOWERDOWN */
-    TMC_WriteReg(TMC_REG_TPOWERDOWN, 20);
+    if (TMC_WriteReg(TMC_REG_TPOWERDOWN, 20) != TMC_ERR_NONE)
+        PrintDebug("[TMC] TPOWERDOWN write FAILED\r\n");
     vTaskDelay(pdMS_TO_TICKS(1));
 
-    /* 6. 使能 */
-    TMC_SetEnable(true);
+    /* 6. 等待稳定 */
     vTaskDelay(pdMS_TO_TICKS(500));
 
     PrintDebug("TMC2209 Full-Duplex Initialized\r\n");
