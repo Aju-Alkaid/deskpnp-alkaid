@@ -61,6 +61,10 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
         }
         return HCMD_MOVE_TO;
     }
+    if (MATCH("SET_SERVO")) {
+        if (space) *param = (float)strtof(space + 1, NULL);
+        return HCMD_SET_SERVO;
+    }
     if (MATCH("SET_ORIGIN")) {
         return HCMD_SET_ORIGIN;
     }

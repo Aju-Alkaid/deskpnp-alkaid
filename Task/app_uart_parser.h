@@ -19,6 +19,7 @@ typedef enum {
     HCMD_MOVE_STOP,
     /* 坐标系 */
     HCMD_SET_ORIGIN,
+    HCMD_SET_SERVO,     // 舵机角度设定
     HCMD_MOVE_TO,       // 运动至指定坐标
     /* 退出调试 */
     HCMD_EXIT_DEBUG,
