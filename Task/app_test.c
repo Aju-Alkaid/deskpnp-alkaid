@@ -1,4 +1,4 @@
-#include "driver_uart.h"  
+﻿#include "driver_uart.h"  
 #include "FreeRTOS.h"     
 #include "task.h"         
 #include <string.h>       // 用于 strlen
@@ -28,11 +28,6 @@
 
 
 /* ---- 上位机运动测试 常量 ---- */
-#define STEPS_PER_MM     3276.8f
-#define JOG_MAX_STEPS    8388607
-#define X1_ADDR          0x01
-#define X2_ADDR          0x02
-#define Y_ADDR           0x03
 
 
 /* 外部变量：CAN接收队列（已在 driver_can.c 中定义） */
@@ -540,7 +535,7 @@ void StartHostCommTestTask(void *argument)
  * @brief 发送急停指令到指定电机轴
  * @param addr 电机 CAN ID (0x01/0x02/0x03)
  */
-static void axis_stop(int32_t addr)
+void axis_stop(int32_t addr)
 {
     uint8_t tx[8] = {0};
     tx[0] = 0xF5;
@@ -552,7 +547,7 @@ static void axis_stop(int32_t addr)
  * @note  不切换同步模式，直接用 0xF5 速度=0 + 0x4B 触发。
  *        电机运行期间缓存可被新 0xF5 覆盖，0x4B 触发后中止当前运动。
  */
-static void disable_sync_stop(void)
+void disable_sync_stop(void)
 {
     axis_stop(X1_ADDR);
     axis_stop(X2_ADDR);
@@ -575,9 +570,9 @@ static void disable_sync_stop(void)
  * @return 0 成功, -1 超时, -2 异常
  */
 /* 运动中断标志 */
-static volatile bool s_cmd_interrupted = false;
+volatile bool s_cmd_interrupted = false;
 
-static int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
+int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
                              int32_t *cur_x, int32_t *cur_y)
 {
     int32_t target_x = *cur_x + dx;
@@ -826,5 +821,205 @@ void StartHostMotionTestTask(void *argument)
         }
 
         osThreadFlagsWait(0x01, osFlagsWaitAny, pdMS_TO_TICKS(50));
+    }
+}
+
+/* ================================================================
+ * Z轴舵机 + 吸嘴气泵 + R轴旋转 联合测试任务
+ *
+ * 测试流程（循环执行）：
+ *   [Z轴舵机]  转到拾取角 → 开启气泵 → 转到贴装角 → 关闭气泵
+ *   [R轴旋转]  正转 → 停 → 反转 → 停
+ *   每步均有 PrintDebug 日志输出，便于串口观察。
+ * ================================================================ */
+
+/* ---- 测试参数宏 ---- */
+#define PICKPLACE_SERVO_CH       2            /* PE8 → TIM5_CH3 → 通道索引 2 */
+#define PICKPLACE_PICK_ANGLE     30.0f        /* 拾取角度（吸嘴下降） */
+#define PICKPLACE_PLACE_ANGLE    120.0f       /* 贴装角度（吸嘴上升） */
+#define PICKPLACE_PUMP_CH        CH3          /* 吸嘴气泵 DRV8803 通道 (PE12=IN3) */
+
+#define PICKPLACE_R_SPEED        80000        /* R轴转速（微步/秒） */
+#define PICKPLACE_R_RUN_MS       1500         /* R轴单次旋转持续时间(ms) */
+#define PICKPLACE_STEP_DELAY_MS  500          /* 动作间停顿(ms) */
+
+/**
+ * @brief Z轴舵机拾取动作：转到拾取角度 → 开气泵
+ */
+static void pickplace_pick(void)
+{
+    PrintDebug("[PickPlace] 拾取: 舵机→%.0f° + 气泵ON\r\n", PICKPLACE_PICK_ANGLE);
+    Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PICK_ANGLE);
+    vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
+    DRV8803_SetGlobalChannel(PICKPLACE_PUMP_CH, true);
+    PrintDebug("[PickPlace] 气泵已开启\r\n");
+}
+
+/**
+ * @brief Z轴舵机贴装动作：关气泵 → 转到贴装角度
+ */
+static void pickplace_place(void)
+{
+    PrintDebug("[PickPlace] 贴装: 气泵OFF + 舵机→%.0f°\r\n", PICKPLACE_PLACE_ANGLE);
+    DRV8803_SetGlobalChannel(PICKPLACE_PUMP_CH, false);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);
+    vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
+    PrintDebug("[PickPlace] 贴装完成\r\n");
+}
+
+/**
+ * @brief R轴正转（带写后读回校验）
+ */
+static void pickplace_r_forward(void)
+{
+    uint32_t vactual = 0;
+    uint8_t  gstat   = 0;
+
+    /* 回收 UART3：防止其他任务重新启用了 DMA 干扰阻塞通信 */
+    HAL_UART_DMAStop(&huart3);
+    HAL_UART_Abort(&huart3);
+    __HAL_UART_DISABLE_IT(&huart3, UART_IT_IDLE);
+
+    PrintDebug("[PickPlace] R轴正转 %ld 微步/秒, 持续 %dms\r\n",
+               PICKPLACE_R_SPEED, PICKPLACE_R_RUN_MS);
+
+    /* 写 VACTUAL */
+    TMC_SetSpeed(PICKPLACE_R_SPEED);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    /* 读回校验 */
+    if (TMC_ReadReg(0x22, &vactual) == TMC_ERR_NONE) {
+        PrintDebug("[PickPlace] VACTUAL 读回=0x%08lX (%ld)\r\n", vactual, (int32_t)vactual);
+    } else {
+        PrintDebug("[PickPlace] VACTUAL 读回失败!\r\n");
+    }
+
+    /* 读状态寄存器 */
+    if (TMC_ReadReg(0x6F, &vactual) == TMC_ERR_NONE) {
+        uint32_t drv = vactual;
+        PrintDebug("[PickPlace] DRV_STATUS=0x%08lX stst=%ld olb=%ld ola=%ld s2gb=%ld s2ga=%ld otpw=%ld ot=%ld fsact=%ld\r\n",
+                   drv,
+                   (drv >> 31) & 1, (drv >> 30) & 1, (drv >> 29) & 1,
+                   (drv >> 28) & 1, (drv >> 27) & 1,
+                   (drv >> 26) & 1, (drv >> 25) & 1,
+                   (drv >> 16) & 0x1F);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RUN_MS));
+
+    /* 停止 */
+    TMC_SetSpeed(0);
+    vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
+    PrintDebug("[PickPlace] R轴停止\r\n");
+}
+
+/**
+ * @brief R轴反转（带写后读回校验）
+ */
+static void pickplace_r_reverse(void)
+{
+    uint32_t vactual = 0;
+
+    /* 回收 UART3：防止其他任务重新启用了 DMA 干扰阻塞通信 */
+    HAL_UART_DMAStop(&huart3);
+    HAL_UART_Abort(&huart3);
+    __HAL_UART_DISABLE_IT(&huart3, UART_IT_IDLE);
+
+    PrintDebug("[PickPlace] R轴反转 %ld 微步/秒, 持续 %dms\r\n",
+               -PICKPLACE_R_SPEED, PICKPLACE_R_RUN_MS);
+
+    /* 写 VACTUAL */
+    TMC_SetSpeed(-PICKPLACE_R_SPEED);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    /* 读回校验 */
+    if (TMC_ReadReg(0x22, &vactual) == TMC_ERR_NONE) {
+        PrintDebug("[PickPlace] VACTUAL 读回=0x%08lX (%ld)\r\n", vactual, (int32_t)vactual);
+    } else {
+        PrintDebug("[PickPlace] VACTUAL 读回失败!\r\n");
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RUN_MS));
+
+    /* 停止 */
+    TMC_SetSpeed(0);
+    vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
+    PrintDebug("[PickPlace] R轴停止\r\n");
+}
+
+/**
+ * @brief Z轴舵机 + 吸嘴气泵 + R轴旋转 联合测试任务
+ * @note  启动时依次初始化舵机、DRV8803、TMC2209。
+ *        主循环：拾取→贴装→R正转→R反转，周而复始。
+ */
+void StartPickPlaceTestTask(void *argument)
+{
+    vTaskDelay(pdMS_TO_TICKS(500));
+    PrintDebug("========================================\r\n");
+    PrintDebug("  PickPlace 联合测试任务启动\r\n");
+    PrintDebug("  Z轴舵机(CH%d) + 气泵(CH%d) + R轴(TMC2209)\r\n",
+               PICKPLACE_SERVO_CH, (int)PICKPLACE_PUMP_CH);
+    PrintDebug("========================================\r\n");
+
+    /* ---- 1. 初始化舵机 ---- */
+    Servo_Init(&htim5);
+    Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);  /* 初始置高位 */
+    vTaskDelay(pdMS_TO_TICKS(300));
+    PrintDebug("[PickPlace] 舵机初始化完成，当前角度=%.0f°\r\n",
+               Servo_GetAngle(PICKPLACE_SERVO_CH));
+
+    /* ---- 2. 初始化 DRV8803（气泵） ---- */
+    DRV8803_Dual_Config();
+    DRV8803_EnableChip(1, true);   /* U12 12V 芯片使能 */
+    DRV8803_SetChipChannels(1, 0x00);  /* 所有通道初始关闭 */
+    PrintDebug("[PickPlace] DRV8803 初始化完成\r\n");
+
+    /* ---- 3. 初始化 R轴 TMC2209 ---- */
+    if (!TMC_Init()) {
+        PrintDebug("[PickPlace] FATAL: TMC2209 初始化失败！任务挂起。\r\n");
+        vTaskSuspend(NULL);
+    }
+    PrintDebug("[PickPlace] TMC2209 (R轴) 初始化完成\r\n");
+
+    /* 回读关键寄存器确认配置正确 */
+    {
+        uint32_t gconf, chopconf, gstat;
+        if (TMC_ReadReg(0x00, &gconf) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] GCONF    =0x%08lX (PDN_DIS=%ld, MSTEP_REG=%ld, I_SCALE=%ld)\r\n",
+                       gconf, (gconf>>6)&1, (gconf>>7)&1, gconf&1);
+        if (TMC_ReadReg(0x6C, &chopconf) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] CHOPCONF =0x%08lX (TOFF=%ld, MRES=%ld, INTPOL=%ld)\r\n",
+                       chopconf, chopconf&0xF, (chopconf>>24)&0xF, (chopconf>>28)&1);
+        if (TMC_ReadReg(0x01, &gstat) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] GSTAT    =0x%08lX (reset=%ld, drv_err=%ld, uv_cp=%ld)\r\n",
+                       gstat, (gstat>>0)&1, (gstat>>1)&1, (gstat>>2)&1);
+        if (TMC_ReadReg(0x22, &gconf) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] VACTUAL  =%ld (初始值)\r\n", (int32_t)gconf);
+    }
+
+    /* ---- 4. 主测试循环 ---- */
+    uint32_t cycle = 0;
+    for (;;)
+    {
+        cycle++;
+        PrintDebug("\r\n--- PickPlace 测试周期 %lu ---\r\n", cycle);
+
+        /* Z轴：拾取动作 */
+        pickplace_pick();
+        vTaskDelay(pdMS_TO_TICKS(300));
+
+        /* Z轴：贴装动作 */
+        pickplace_place();
+        vTaskDelay(pdMS_TO_TICKS(300));
+
+        /* R轴：正转 */
+        pickplace_r_forward();
+
+        /* R轴：反转 */
+        pickplace_r_reverse();
+
+        PrintDebug("--- 周期 %lu 完成，等待下一轮 ---\r\n\r\n", cycle);
+        vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
