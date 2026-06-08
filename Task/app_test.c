@@ -217,18 +217,15 @@ static void SimplePWM(GPIO_TypeDef* port, uint16_t pin,
  */
 void StartDrv8803TestTask(void *argument)
 {
-     PrintDebug("--- 真空泵测试 (IN4/PE11) ---\r\n");
+     PrintDebug("--- 真空泵测试 (12VO1/PE11) ---\r\n");
 
-    DRV8803_Dual_Config();
+    DRV8803_Init();
 
     DRV8803_EnableChip(1, true);
     DRV8803_EnableChip(2, false);
 
-    DRV8803_SetChipChannels(1, 0x00);
-    DRV8803_SetChipChannels(2, 0x00);
-
-    DRV8803_SetGlobalChannel(CH4, true);
-    PrintDebug("IN4 (PE11) 真空泵已开启.\r\n");
+    DRV8803_SetOutput(&Port_12VO1, true);
+    PrintDebug("12VO1 (PE11) 真空泵已开启.\r\n");
 
     const TickType_t faultCheckPeriod = pdMS_TO_TICKS(100);
     for (;;)
@@ -238,8 +235,8 @@ void StartDrv8803TestTask(void *argument)
             PrintDebug("[FAULT] U12 fault! Attempt recovery...\r\n");
             DRV8803_HandleFault_RTOS(1);
             DRV8803_EnableChip(1, true);
-            DRV8803_SetGlobalChannel(CH4, true);
-            PrintDebug("U12 re-enabled, CH4 vacuum pump restored.\r\n");
+            DRV8803_SetOutput(&Port_12VO1, true);
+            PrintDebug("U12 re-enabled, 12VO1 vacuum pump restored.\r\n");
         }
         vTaskDelay(faultCheckPeriod);
     }
@@ -837,7 +834,7 @@ void StartHostMotionTestTask(void *argument)
 #define PICKPLACE_SERVO_CH       2            /* PE8 → TIM5_CH3 → 通道索引 2 */
 #define PICKPLACE_PICK_ANGLE     30.0f        /* 拾取角度（吸嘴下降） */
 #define PICKPLACE_PLACE_ANGLE    120.0f       /* 贴装角度（吸嘴上升） */
-#define PICKPLACE_PUMP_CH        CH3          /* 吸嘴气泵 DRV8803 通道 (PE12=IN3) */
+#define PICKPLACE_PUMP_PORT      (&Port_12VO2)  /* 吸嘴气泵 (12VO2/PE12) */
 
 #define PICKPLACE_R_SPEED        80000        /* R轴转速（微步/秒） */
 #define PICKPLACE_R_RUN_MS       1500         /* R轴单次旋转持续时间(ms) */
@@ -851,7 +848,7 @@ static void pickplace_pick(void)
     PrintDebug("[PickPlace] 拾取: 舵机→%.0f° + 气泵ON\r\n", PICKPLACE_PICK_ANGLE);
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PICK_ANGLE);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
-    DRV8803_SetGlobalChannel(PICKPLACE_PUMP_CH, true);
+    DRV8803_SetOutput(PICKPLACE_PUMP_PORT, true);
     PrintDebug("[PickPlace] 气泵已开启\r\n");
 }
 
@@ -861,7 +858,7 @@ static void pickplace_pick(void)
 static void pickplace_place(void)
 {
     PrintDebug("[PickPlace] 贴装: 气泵OFF + 舵机→%.0f°\r\n", PICKPLACE_PLACE_ANGLE);
-    DRV8803_SetGlobalChannel(PICKPLACE_PUMP_CH, false);
+    DRV8803_SetOutput(PICKPLACE_PUMP_PORT, false);
     vTaskDelay(pdMS_TO_TICKS(100));
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
@@ -958,8 +955,8 @@ void StartPickPlaceTestTask(void *argument)
     vTaskDelay(pdMS_TO_TICKS(500));
     PrintDebug("========================================\r\n");
     PrintDebug("  PickPlace 联合测试任务启动\r\n");
-    PrintDebug("  Z轴舵机(CH%d) + 气泵(CH%d) + R轴(TMC2209)\r\n",
-               PICKPLACE_SERVO_CH, (int)PICKPLACE_PUMP_CH);
+    PrintDebug("  Z轴舵机(CH%d) + 气泵(12VO2) + R轴(TMC2209)\r\n",
+               PICKPLACE_SERVO_CH, 12);  /* 12VO2 */
     PrintDebug("========================================\r\n");
 
     /* ---- 1. 初始化舵机 ---- */
@@ -970,9 +967,8 @@ void StartPickPlaceTestTask(void *argument)
                Servo_GetAngle(PICKPLACE_SERVO_CH));
 
     /* ---- 2. 初始化 DRV8803（气泵） ---- */
-    DRV8803_Dual_Config();
+    DRV8803_Init();
     DRV8803_EnableChip(1, true);   /* U12 12V 芯片使能 */
-    DRV8803_SetChipChannels(1, 0x00);  /* 所有通道初始关闭 */
     PrintDebug("[PickPlace] DRV8803 初始化完成\r\n");
 
     /* ---- 3. 初始化 R轴 TMC2209 ---- */
