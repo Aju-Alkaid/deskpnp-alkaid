@@ -1,4 +1,4 @@
-/* USER CODE BEGIN Header */
+﻿/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * File Name          : app_freertos.c
@@ -46,6 +46,7 @@ extern osMessageQueueId_t keyEventQueue;
 extern osMessageQueueId_t dataTransferQueue;
 osMutexId_t g_debug_mutex = NULL;
 osMessageQueueId_t esp_cmd_queue;
+osMessageQueueId_t host_pkt_queue;
 /* USER CODE END PTD */
 
 /* Private define ------------------------------------------------------------*/
@@ -66,6 +67,7 @@ osThreadId_t drv8803TestTaskHandle;
 osThreadId_t servoTestTaskHandle;
 osThreadId_t mksHandle;
 osThreadId_t hostMotionTaskHandle;
+osThreadId_t pickPlaceTestTaskHandle;
 
 const osThreadAttr_t PnP_Motion_Task_attributes = { 
   .name = "PnPMotion",
@@ -104,7 +106,7 @@ const osThreadAttr_t MKSTestTask_attributes = {
 
 const osThreadAttr_t hostTask_attributes = {
     .name = "HostComm",
-    .stack_size = 1024,
+    .stack_size = 4096,
     .priority = osPriorityNormal
 };
 
@@ -113,6 +115,7 @@ const osThreadAttr_t canProcTask_attr = {
     .stack_size = 512, 
     .priority = osPriorityNormal 
 };
+
 
 
 
@@ -127,6 +130,13 @@ const osThreadAttr_t hostMotionTestTask_attributes = {
     .name = "HostMotion",
     .stack_size = 2048,
     .priority = osPriorityNormal
+};
+
+
+const osThreadAttr_t pickPlaceTestTask_attributes = {
+    .name = "PickPlace",
+    .stack_size = 2048,
+    .priority = osPriorityNormal,
 };
 
 
@@ -205,7 +215,7 @@ void MX_FREERTOS_Init(void) {
 	motion_cmd_queue = osMessageQueueNew(20, sizeof(MotionCmd_t), NULL);
 	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
 	dataTransferQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
-	host_pkt_queue = osMessageQueueNew(16, sizeof(HostMsg_t), NULL);
+	host_pkt_queue = osMessageQueueNew(64, sizeof(HostMsg_t), NULL);
 	esp_cmd_queue = osMessageQueueNew(8, sizeof(ESP_Cmd_t), NULL);
 	
 	
@@ -224,21 +234,22 @@ void MX_FREERTOS_Init(void) {
 
 //	drv8803TestTaskHandle = osThreadNew(StartDrv8803TestTask, NULL, &drv8803TestTask_attributes);
   
-//	motorTestTaskHandle = osThreadNew(StartMotorTestTask, NULL, &motorTestTask_attributes);
+	motorTestTaskHandle = osThreadNew(StartMotorTestTask, NULL, &motorTestTask_attributes);//2209
 
 //  servoTestTaskHandle = osThreadNew(StartServoTestTask, NULL, &servoTestTask_attributes);
 
 	osThreadNew(CAN_Process_Task, NULL, &canProcTask_attr);
 	osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
-//    osThreadNew(Host_Task, NULL, &hostTask_attributes);
+osThreadNew(Host_Task, NULL, &hostTask_attributes);
 
 //    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
 
   
-  hostMotionTaskHandle = osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
+//    hostMotionTaskHandle = osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
 
   osThreadNew(ESP_Task, NULL, &espTask_attributes);
+//  pickPlaceTestTaskHandle = osThreadNew(StartPickPlaceTestTask, NULL, &pickPlaceTestTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 
@@ -269,4 +280,3 @@ __weak void TouchGFX_Task(void *argument)
 
 
 /* USER CODE END Application */
-
