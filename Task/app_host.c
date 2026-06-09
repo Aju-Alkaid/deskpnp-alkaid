@@ -328,6 +328,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
 
     default:
         break;
+    }
 }
 
 /* ================================================================
