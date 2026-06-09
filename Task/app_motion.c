@@ -8,6 +8,7 @@
 #include "driver_tmc2209.h"   
 #include <math.h>   // 解决 fabsf 未声明
 #include "app_test.h"
+#include "driver_drv8803.h"
 
 extern TIM_HandleTypeDef htim5;
 
@@ -28,9 +29,7 @@ osEventFlagsId_t evtAxesDone = NULL;   // 用于三轴到位同步
 #define ANGLE_UP     120.0f   // 吸嘴升起角度 (请根据实际机械调)
 #define ANGLE_DOWN   60.0f    // 吸嘴下降角度
 
-// 吸嘴气泵 GPIO (根据你的硬件修改)
-#define NOZZLE_GPIO_PORT   GPIOE
-#define NOZZLE_GPIO_PIN    GPIO_PIN_11
+// 吸嘴气泵由 DRV8803 12VO1 (PE11) 控制，见 driver_drv8803.h Pump_On/Off
 
 // R 轴参数（需根据实测调整）
 #define R_MICROSTEPS    256
@@ -133,10 +132,10 @@ static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
 }
 
 void nozzle_on(void) {
-    HAL_GPIO_WritePin(NOZZLE_GPIO_PORT, NOZZLE_GPIO_PIN, GPIO_PIN_SET);
+    DRV8803_SetOutput(&Port_12VO1, true);
 }
 void nozzle_off(void) {
-    HAL_GPIO_WritePin(NOZZLE_GPIO_PORT, NOZZLE_GPIO_PIN, GPIO_PIN_RESET);
+    DRV8803_SetOutput(&Port_12VO1, false);
 }
 
 /* ---------- 封装 Z 轴基本动作 ---------- */
