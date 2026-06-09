@@ -67,4 +67,30 @@ void DRV8803_TriggerChipReset(uint8_t chip_id);
 // 故障恢复处理（FreeRTOS 任务中调用）
 void DRV8803_HandleFault_RTOS(uint8_t chip_id);
 
+
+// ==================== 语义化端口宏 ====================
+#define PUMP_PORT   (&Port_12VO1)   // 12VO1/PE11 接气泵
+#define VALVE_PORT  (&Port_24VO1)   // 24VO1/PA6 接电磁阀
+
+// ==================== 语义化接口函数（静态内联） ====================
+
+/** @brief 气泵开启（12VO1/PE11） */
+static inline void Pump_On(void) {
+    DRV8803_SetOutput(&Port_12VO1, true);
+}
+
+/** @brief 气泵关闭（12VO1/PE11） */
+static inline void Pump_Off(void) {
+    DRV8803_SetOutput(&Port_12VO1, false);
+}
+
+/** @brief 电磁阀开启（24VO1/PA6） */
+static inline void Valve_On(void) {
+    DRV8803_SetOutput(&Port_24VO1, true);
+}
+
+/** @brief 电磁阀关闭（24VO1/PA6） */
+static inline void Valve_Off(void) {
+    DRV8803_SetOutput(&Port_24VO1, false);
+}
 #endif /* __DRV8803_DUAL_H */
