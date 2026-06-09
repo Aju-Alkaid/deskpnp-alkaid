@@ -147,19 +147,20 @@ const osThreadAttr_t espTask_attributes = {
 };
 
 /* USER CODE END Variables */
+/* Definitions for KeyTask */
+
+const osThreadAttr_t keyTask_attributes = {
+  .name = "KeyTask",
+ .priority = (osPriority_t) osPriorityNormal,
+  .stack_size = 256
+};
+
 /* Definitions for touchGFX */
 osThreadId_t touchGFXHandle;
 const osThreadAttr_t touchGFX_attributes = {
   .name = "touchGFX",
   .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 1024 * 4
-};
-
-/* Definitions for KeyTask */
-const osThreadAttr_t keyTask_attributes = {
-  .name = "KeyTask",
- .priority = (osPriority_t) osPriorityNormal,
- .stack_size = 256
+  .stack_size = 2048 * 4
 };
 
 /* Private function prototypes -----------------------------------------------*/
@@ -234,14 +235,14 @@ void MX_FREERTOS_Init(void) {
 
 //	drv8803TestTaskHandle = osThreadNew(StartDrv8803TestTask, NULL, &drv8803TestTask_attributes);
   
-	motorTestTaskHandle = osThreadNew(StartMotorTestTask, NULL, &motorTestTask_attributes);//2209
+//	motorTestTaskHandle = osThreadNew(StartMotorTestTask, NULL, &motorTestTask_attributes);  //2209
 
 //  servoTestTaskHandle = osThreadNew(StartServoTestTask, NULL, &servoTestTask_attributes);
 
 	osThreadNew(CAN_Process_Task, NULL, &canProcTask_attr);
 	osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
-osThreadNew(Host_Task, NULL, &hostTask_attributes);
+//	osThreadNew(Host_Task, NULL, &hostTask_attributes);
 
 //    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
 
@@ -249,7 +250,7 @@ osThreadNew(Host_Task, NULL, &hostTask_attributes);
 //    hostMotionTaskHandle = osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
 
   osThreadNew(ESP_Task, NULL, &espTask_attributes);
-//  pickPlaceTestTaskHandle = osThreadNew(StartPickPlaceTestTask, NULL, &pickPlaceTestTask_attributes);
+  pickPlaceTestTaskHandle = osThreadNew(StartPickPlaceTestTask, NULL, &pickPlaceTestTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 
@@ -280,3 +281,4 @@ __weak void TouchGFX_Task(void *argument)
 
 
 /* USER CODE END Application */
+
