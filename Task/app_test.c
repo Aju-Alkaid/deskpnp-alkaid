@@ -37,6 +37,7 @@ extern osThreadId_t hostMotionTaskHandle;
 extern UART_HandleTypeDef huart1; 
 extern UART_HandleTypeDef huart3;
 extern TIM_HandleTypeDef htim5;
+extern TIM_HandleTypeDef htim2;
 static char s_debug_buf[128]; 
 
 
@@ -222,7 +223,12 @@ void StartDrv8803TestTask(void *argument)
     DRV8803_Init();
 
     DRV8803_EnableChip(1, true);
-    DRV8803_EnableChip(2, false);
+    DRV8803_EnableChip(2, true);   /* U13 24V 芯片使能（电磁阀） */
+    /* U13 上电后给 IN5 一个跳变确保输出状态 */
+    GPIOA->BSRR = GPIO_PIN_6;                   /* PA6 HIGH */
+    vTaskDelay(pdMS_TO_TICKS(2));
+    GPIOA->BSRR = (uint32_t)GPIO_PIN_6 << 16;   /* PA6 LOW (阀初始关闭) */
+    
 
     DRV8803_SetOutput(&Port_12VO1, true);
     PrintDebug("12VO1 (PE11) 真空泵已开启.\r\n");
@@ -822,42 +828,60 @@ void StartHostMotionTestTask(void *argument)
 }
 
 /* ================================================================
+
+/* ================================================================
  * Z轴舵机 + 吸嘴气泵 + R轴旋转 联合测试任务
  *
  * 测试流程（循环执行）：
- *   [Z轴舵机]  转到拾取角 → 开启气泵 → 转到贴装角 → 关闭气泵
- *   [R轴旋转]  正转 → 停 → 反转 → 停
- *   每步均有 PrintDebug 日志输出，便于串口观察。
+ *   [Z轴舵机]  转到拾取角 → 开气泵 → 转到贴装角 → 关气泵
+ *   [R轴旋转]  斜坡启动正转 → 停 → 斜坡启动反转 → 停
+ *
+ * 调试：定义 PICKPLACE_VERBOSE 开启 VACTUAL/DRV_STATUS 读回校验。
  * ================================================================ */
+
+/* #define PICKPLACE_VERBOSE */   /* 取消注释以开启详细诊断 */
 
 /* ---- 测试参数宏 ---- */
 #define PICKPLACE_SERVO_CH       2            /* PE8 → TIM5_CH3 → 通道索引 2 */
 #define PICKPLACE_PICK_ANGLE     30.0f        /* 拾取角度（吸嘴下降） */
 #define PICKPLACE_PLACE_ANGLE    120.0f       /* 贴装角度（吸嘴上升） */
-#define PICKPLACE_PUMP_PORT      (&Port_12VO2)  /* 吸嘴气泵 (12VO2/PE12) */
+#define PICKPLACE_PUMP_PORT      (&Port_12VO1)  /* 吸嘴气泵 (12VO1/PE11) */
+#define PICKPLACE_SERVO_PORT     (&Port_12VO4)  /* Z轴舵机供电 (12VO4/PE14) */
 
-#define PICKPLACE_R_SPEED        80000        /* R轴转速（微步/秒） */
-#define PICKPLACE_R_RUN_MS       1500         /* R轴单次旋转持续时间(ms) */
-#define PICKPLACE_STEP_DELAY_MS  500          /* 动作间停顿(ms) */
+#define PICKPLACE_R_SPEED        80000        /* R轴目标转速（微步/秒） */
+#define PICKPLACE_R_RAMP_STEP    8000         /* 斜坡每级增量（微步/秒） */
+#define PICKPLACE_R_RAMP_MS      40           /* 斜坡每级延时 (ms) */
+#define PICKPLACE_R_RUN_MS       1500         /* R轴全速运行时间 (ms) */
+#define PICKPLACE_STEP_DELAY_MS  500          /* 动作间停顿 (ms) */
+
+/* ================================================================
+ * 内部辅助函数
+ * ================================================================ */
 
 /**
- * @brief Z轴舵机拾取动作：转到拾取角度 → 开气泵
+ * @brief Z轴舵机拾取：转到拾取角 → 开气泵 → 开电磁阀
  */
 static void pickplace_pick(void)
 {
-    PrintDebug("[PickPlace] 拾取: 舵机→%.0f° + 气泵ON\r\n", PICKPLACE_PICK_ANGLE);
+    PrintDebug("[PickPlace] 拾取: 舵机→%.0f° + 泵ON + 阀ON\r\n",
+               PICKPLACE_PICK_ANGLE);
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PICK_ANGLE);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
     DRV8803_SetOutput(PICKPLACE_PUMP_PORT, true);
-    PrintDebug("[PickPlace] 气泵已开启\r\n");
+    /* 阀是低端开关：OUT5拉GND才导通。先HIGH再LOW确保锁存 */
+    GPIOA->BSRR = GPIO_PIN_6;                   /* PA6 HIGH */
+    vTaskDelay(pdMS_TO_TICKS(2));
+    GPIOA->BSRR = (uint32_t)GPIO_PIN_6 << 16;   /* PA6 LOW → 阀ON */
 }
-
 /**
- * @brief Z轴舵机贴装动作：关气泵 → 转到贴装角度
+ * @brief Z轴舵机贴装：关阀 → 关泵 → 转到贴装角
  */
 static void pickplace_place(void)
 {
-    PrintDebug("[PickPlace] 贴装: 气泵OFF + 舵机→%.0f°\r\n", PICKPLACE_PLACE_ANGLE);
+    PrintDebug("[PickPlace] 贴装: 阀OFF + 泵OFF + 舵机→%.0f°\r\n",
+               PICKPLACE_PLACE_ANGLE);
+    /* 阀关断 → PA6=HIGH */
+    GPIOA->BSRR = GPIO_PIN_6;  /* BS6 → PA6 HIGH */
     DRV8803_SetOutput(PICKPLACE_PUMP_PORT, false);
     vTaskDelay(pdMS_TO_TICKS(100));
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);
@@ -866,80 +890,64 @@ static void pickplace_place(void)
 }
 
 /**
- * @brief R轴正转（带写后读回校验）
+ * @brief R轴斜坡启动（正转）
+ *
+ * VACTUAL 模式无极变速/加速斜坡，直接跳全速时静摩擦力会卡住电机。
+ * 从 5000 微步/秒起步，每级 +8000，逐级提升至目标转速。
  */
 static void pickplace_r_forward(void)
 {
-    uint32_t vactual = 0;
-    uint8_t  gstat   = 0;
-
-    /* 回收 UART3：防止其他任务重新启用了 DMA 干扰阻塞通信 */
-    HAL_UART_DMAStop(&huart3);
-    HAL_UART_Abort(&huart3);
-    __HAL_UART_DISABLE_IT(&huart3, UART_IT_IDLE);
-
-    PrintDebug("[PickPlace] R轴正转 %ld 微步/秒, 持续 %dms\r\n",
+    PrintDebug("[PickPlace] R轴正转 斜坡→%ld µstep/s, 持续 %dms\r\n",
                PICKPLACE_R_SPEED, PICKPLACE_R_RUN_MS);
 
-    /* 写 VACTUAL */
+    /* 速度斜坡 */
+    for (int32_t s = 5000; s < PICKPLACE_R_SPEED; s += PICKPLACE_R_RAMP_STEP) {
+        TMC_SetSpeed(s);
+        vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RAMP_MS));
+    }
     TMC_SetSpeed(PICKPLACE_R_SPEED);
-    vTaskDelay(pdMS_TO_TICKS(10));
 
-    /* 读回校验 */
-    if (TMC_ReadReg(0x22, &vactual) == TMC_ERR_NONE) {
-        PrintDebug("[PickPlace] VACTUAL 读回=0x%08lX (%ld)\r\n", vactual, (int32_t)vactual);
-    } else {
-        PrintDebug("[PickPlace] VACTUAL 读回失败!\r\n");
+#ifdef PICKPLACE_VERBOSE
+    {
+        uint32_t val;
+        if (TMC_ReadReg(TMC_REG_VACTUAL, &val) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] VACTUAL=0x%08lX (%ld)\r\n", val, (int32_t)val);
+        /* DRV_STATUS: stst 表示是否停转，fsact 是实际电流等级 */
+        if (TMC_ReadReg(TMC_REG_DRV_STATUS, &val) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] DRV_STATUS stst=%ld fsact=%ld\r\n",
+                       (val >> 31) & 1, (val >> 16) & 0x1F);
     }
-
-    /* 读状态寄存器 */
-    if (TMC_ReadReg(0x6F, &vactual) == TMC_ERR_NONE) {
-        uint32_t drv = vactual;
-        PrintDebug("[PickPlace] DRV_STATUS=0x%08lX stst=%ld olb=%ld ola=%ld s2gb=%ld s2ga=%ld otpw=%ld ot=%ld fsact=%ld\r\n",
-                   drv,
-                   (drv >> 31) & 1, (drv >> 30) & 1, (drv >> 29) & 1,
-                   (drv >> 28) & 1, (drv >> 27) & 1,
-                   (drv >> 26) & 1, (drv >> 25) & 1,
-                   (drv >> 16) & 0x1F);
-    }
+#endif
 
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RUN_MS));
-
-    /* 停止 */
     TMC_SetSpeed(0);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
     PrintDebug("[PickPlace] R轴停止\r\n");
 }
 
 /**
- * @brief R轴反转（带写后读回校验）
+ * @brief R轴斜坡启动（反转）
  */
 static void pickplace_r_reverse(void)
 {
-    uint32_t vactual = 0;
-
-    /* 回收 UART3：防止其他任务重新启用了 DMA 干扰阻塞通信 */
-    HAL_UART_DMAStop(&huart3);
-    HAL_UART_Abort(&huart3);
-    __HAL_UART_DISABLE_IT(&huart3, UART_IT_IDLE);
-
-    PrintDebug("[PickPlace] R轴反转 %ld 微步/秒, 持续 %dms\r\n",
+    PrintDebug("[PickPlace] R轴反转 斜坡→%ld µstep/s, 持续 %dms\r\n",
                -PICKPLACE_R_SPEED, PICKPLACE_R_RUN_MS);
 
-    /* 写 VACTUAL */
-    TMC_SetSpeed(-PICKPLACE_R_SPEED);
-    vTaskDelay(pdMS_TO_TICKS(10));
-
-    /* 读回校验 */
-    if (TMC_ReadReg(0x22, &vactual) == TMC_ERR_NONE) {
-        PrintDebug("[PickPlace] VACTUAL 读回=0x%08lX (%ld)\r\n", vactual, (int32_t)vactual);
-    } else {
-        PrintDebug("[PickPlace] VACTUAL 读回失败!\r\n");
+    for (int32_t s = -5000; s > -PICKPLACE_R_SPEED; s -= PICKPLACE_R_RAMP_STEP) {
+        TMC_SetSpeed(s);
+        vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RAMP_MS));
     }
+    TMC_SetSpeed(-PICKPLACE_R_SPEED);
+
+#ifdef PICKPLACE_VERBOSE
+    {
+        uint32_t val;
+        if (TMC_ReadReg(TMC_REG_VACTUAL, &val) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] VACTUAL=0x%08lX (%ld)\r\n", val, (int32_t)val);
+    }
+#endif
 
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RUN_MS));
-
-    /* 停止 */
     TMC_SetSpeed(0);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
     PrintDebug("[PickPlace] R轴停止\r\n");
@@ -955,21 +963,28 @@ void StartPickPlaceTestTask(void *argument)
     vTaskDelay(pdMS_TO_TICKS(500));
     PrintDebug("========================================\r\n");
     PrintDebug("  PickPlace 联合测试任务启动\r\n");
-    PrintDebug("  Z轴舵机(CH%d) + 气泵(12VO2) + R轴(TMC2209)\r\n",
-               PICKPLACE_SERVO_CH, 12);  /* 12VO2 */
+    PrintDebug("  Z轴舵机(CH%d) + 气泵(12VO1) + 电磁阀(24VO1) + R轴(TMC2209)\r\n",
+               PICKPLACE_SERVO_CH);
     PrintDebug("========================================\r\n");
 
-    /* ---- 1. 初始化舵机 ---- */
-    Servo_Init(&htim5);
-    Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);  /* 初始置高位 */
-    vTaskDelay(pdMS_TO_TICKS(300));
-    PrintDebug("[PickPlace] 舵机初始化完成，当前角度=%.0f°\r\n",
-               Servo_GetAngle(PICKPLACE_SERVO_CH));
-
-    /* ---- 2. 初始化 DRV8803（气泵） ---- */
+    /* ---- 1. 初始化 DRV8803（气泵） ---- */
     DRV8803_Init();
-    DRV8803_EnableChip(1, true);   /* U12 12V 芯片使能 */
+    DRV8803_EnableChip(1, true);
+    DRV8803_EnableChip(2, true);   /* U13 24V 芯片使能（电磁阀） */
     PrintDebug("[PickPlace] DRV8803 初始化完成\r\n");
+
+    /* ---- 2. 初始化舵机 ---- */
+    Servo_Init(&htim2);
+    DRV8803_SetOutput(PICKPLACE_SERVO_PORT, true);  /* 舵机上电 */
+    vTaskDelay(pdMS_TO_TICKS(100));
+    Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);
+    vTaskDelay(pdMS_TO_TICKS(300));
+    if (Servo_IsInitialized(PICKPLACE_SERVO_CH)) {
+        PrintDebug("[PickPlace] 舵机初始化完成，当前角度=%.0f°\r\n",
+                   Servo_GetAngle(PICKPLACE_SERVO_CH));
+    } else {
+        PrintDebug("[PickPlace] 舵机初始化失败！\r\n");
+    }
 
     /* ---- 3. 初始化 R轴 TMC2209 ---- */
     if (!TMC_Init()) {
@@ -978,20 +993,17 @@ void StartPickPlaceTestTask(void *argument)
     }
     PrintDebug("[PickPlace] TMC2209 (R轴) 初始化完成\r\n");
 
-    /* 回读关键寄存器确认配置正确 */
+    /* 回读关键寄存器（始终执行，用于确认配置） */
     {
-        uint32_t gconf, chopconf, gstat;
-        if (TMC_ReadReg(0x00, &gconf) == TMC_ERR_NONE)
-            PrintDebug("[PickPlace] GCONF    =0x%08lX (PDN_DIS=%ld, MSTEP_REG=%ld, I_SCALE=%ld)\r\n",
-                       gconf, (gconf>>6)&1, (gconf>>7)&1, gconf&1);
-        if (TMC_ReadReg(0x6C, &chopconf) == TMC_ERR_NONE)
-            PrintDebug("[PickPlace] CHOPCONF =0x%08lX (TOFF=%ld, MRES=%ld, INTPOL=%ld)\r\n",
-                       chopconf, chopconf&0xF, (chopconf>>24)&0xF, (chopconf>>28)&1);
-        if (TMC_ReadReg(0x01, &gstat) == TMC_ERR_NONE)
-            PrintDebug("[PickPlace] GSTAT    =0x%08lX (reset=%ld, drv_err=%ld, uv_cp=%ld)\r\n",
-                       gstat, (gstat>>0)&1, (gstat>>1)&1, (gstat>>2)&1);
-        if (TMC_ReadReg(0x22, &gconf) == TMC_ERR_NONE)
-            PrintDebug("[PickPlace] VACTUAL  =%ld (初始值)\r\n", (int32_t)gconf);
+        uint32_t reg_val;
+        if (TMC_ReadReg(TMC_REG_GCONF, &reg_val) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] GCONF   =0x%08lX (PDN_DIS=%ld, MSTEP_REG=%ld, I_SCALE=%ld)\r\n",
+                       reg_val, (reg_val>>6)&1, (reg_val>>7)&1, reg_val&1);
+        if (TMC_ReadReg(TMC_REG_CHOPCONF, &reg_val) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] CHOPCONF=0x%08lX (TOFF=%ld, MRES=%ld, INTPOL=%ld)\r\n",
+                       reg_val, reg_val&0xF, (reg_val>>24)&0xF, (reg_val>>28)&1);
+        if (TMC_ReadReg(TMC_REG_VACTUAL, &reg_val) == TMC_ERR_NONE)
+            PrintDebug("[PickPlace] VACTUAL =%ld (初始值)\r\n", (int32_t)reg_val);
     }
 
     /* ---- 4. 主测试循环 ---- */
@@ -1001,21 +1013,15 @@ void StartPickPlaceTestTask(void *argument)
         cycle++;
         PrintDebug("\r\n--- PickPlace 测试周期 %lu ---\r\n", cycle);
 
-        /* Z轴：拾取动作 */
-        pickplace_pick();
+        pickplace_pick();                       /* Z轴拾取 */
         vTaskDelay(pdMS_TO_TICKS(300));
-
-        /* Z轴：贴装动作 */
-        pickplace_place();
+        pickplace_place();                      /* Z轴贴装 */
         vTaskDelay(pdMS_TO_TICKS(300));
+        pickplace_r_forward();                  /* R轴正转 */
 
-        /* R轴：正转 */
-        pickplace_r_forward();
+        pickplace_r_reverse();                  /* R轴反转 */
 
-        /* R轴：反转 */
-        pickplace_r_reverse();
-
-        PrintDebug("--- 周期 %lu 完成，等待下一轮 ---\r\n\r\n", cycle);
+        PrintDebug("--- 周期 %lu 完成 ---\r\n\r\n", cycle);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
