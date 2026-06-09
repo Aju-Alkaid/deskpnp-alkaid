@@ -22,8 +22,8 @@
 | SPI2 | PB13(SCK) / PB15(MOSI), CS=PD10, DC/RS=PD9, RST=PD8, 连接 LCD(ST7306) |
 | SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, 连接 W25Q64 Flash |
 | SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, 连接 ESP32 通信模块 |
-| TIM2 | CH1(PA0) PWM / CH3(PB10)：12V_C1 PWM 控制 / 32位时间戳基准 |
-| TIM5 | CH1(PB2)：24V_C1 PWM / CH3(PE8)：12V_C2 及 MG995 舵机 PWM (50Hz) |
+| TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) Z轴舵机 PWM (50Hz) / 32位时间戳基准 |
+| TIM5 | CH1(PB2) 24V_C1 PWM / CH3(PE8) 12V_C2 PWM (50Hz) |
 | TIM6 | HAL 系统时基 |
 | CRC | 硬件 CRC 校验 |
 | GPIO 按键 | KEY1(PC6) / KEY2(PC7) / CW(PA8) / CCW(PC8) / PUSH(PC9), 低电平有效 |
@@ -32,8 +32,9 @@
 | TMC2209 | UART3 通信, PD15(TMC1_EN) / PD14(TMC2_EN 预留) |
 | 加热台 | CAN ID 0x10(命令) / 0x11(状态), 独立控制 |
 | 温度传感器 | PF9 / PA3, DS18B20 |
-| 舵机(Z轴) | PE8, TIM5_CH3, MG995 |
-| 吸嘴气泵 | PE12, GPIO 输出(高有效) |
+| 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM) |
+| 吸嘴气泵 | PE11 (12VO1, DRV8803 U12 OUT1 开关) |
+| 电磁阀 | PA6 (24VO1, DRV8803 U13 OUT5 低端开关, PA6=LOW时导通) |
 | BOOT0 | PB8, 启动选择 |
 | LCD_LED | PD8, LCD 背光 |
 ## 三、目录结构
@@ -234,6 +235,18 @@ pnp_1/
 
 ## 十、快速参考
 
+### 9.7 已完成的改进（2026-06）
+
+**1. TIM2 频率调整：** CubeMX 中 TIM2 ARR 从 1000 改为 19999，使 CH3(PB10) 产生 50Hz PWM 用于 Z 轴舵机。CH1(PA0, 12V_C1) 频率同步降至 50Hz，但由于 pulse 值远超 ARR 实际只做开关控制，不受影响。
+
+**2. CubeMX PE8 AF Bug（已在 driver_servo.c 中修复）：** CubeMX 生成的 TIM5_CH3(PE8) AF 是 AF1，但 STM32G474 正确值是 AF2。Servo_Init() 中检测 TIM5 时自动修复。
+
+**3. TIM5 HAL State 共享限制（已在 driver_servo.c 中绕过）：** TIM5_CH1 先启动导致 State=BUSY，阻塞 CH3 的 HAL_TIM_PWM_Start。通过临时恢复 State 绕过。
+
+**4. TMC2209 VACTUAL 启动扭矩不足：** 直接跳全速时静摩擦卡住电机，需用速度斜坡（5000→80000 µstep/s，每级 +8000，40ms/级）。
+
+**5. DRV8803 24V 端口为低端开关：** Port_24VO1(PA6) 等 24V 端口负载串在 24V 电源和 OUT 之间，PA6=LOW 时 OUT 拉 GND 负载导通，逻辑与 12V 端口相反。
+
 ### 10.1 常用 GPIO 引脚速查
 | 功能 | 引脚 | 备注 |
 |------|------|------|
@@ -242,9 +255,9 @@ pnp_1/
 | USART3_TX/RX | PB9/PB11 | TMC2209(R轴) |
 | CAN_TX/RX | PA12/PA11 | 三轴伺服电机 |
 | 吸嘴气泵 | PE12 | 高有效 |
-| 舵机 PWM (Z轴) | PE8 | TIM5_CH3 |
-| 12V_C1 PWM | PB10 | TIM2_CH3 |
-| 12V_C2 PWM | PE8 | TIM5_CH3 (与舵机共用) |
+| 舵机 PWM (Z轴) | PB10 | TIM2_CH3 (50Hz) |
+| 12V_C1 PWM | PA0 | TIM2_CH1 |
+| 12V_C2 PWM | PE8 | TIM5_CH3 (50Hz) |
 | 24V_C1 PWM | PB2 | TIM5_CH1 |
 | 24V_C2 PWM | PB1 | |
 | SPI2_SCK/MOSI | PB13/PB15 | LCD |
@@ -1148,3 +1161,108 @@ ENN=HIGH 时 LDO 关断，数字逻辑掉电，UART 不工作，所有配置写�
 3. TMC2209 上电后需 200ms+ 稳定，LDO 供电模组在 ENN=HIGH 时 UART 掉电
 4. 此 TMC2209 模组使用 7 字节应答格式 + 非标准 CRC，但数据和读写功能正常
 5. huart3.hdmarx/hdmatx 必须在 TMC 使用前置 NULL，否则 UART_Error_Handler 会重启 DMA 偷走数据
+
+## 十七、PickPlace 联合测试任务（2026-06-04~10）
+
+### 17.1 概述
+
+`StartPickPlaceTestTask` 位于 `Task/app_test.c`，用于测试 Z 轴舵机 + 吸嘴气泵 + 电磁阀 + R 轴的联合工作流程。
+
+**任务属性：** 栈 2048B，优先级 Normal，名 `"PickPlace"`
+
+**初始化顺序：**
+1. `DRV8803_Init()` → `EnableChip(1)` + `EnableChip(2)` — 使能 12V 和 24V 两个 DRV8803 芯片
+2. `Servo_Init(&htim2)` → `DRV8803_SetOutput(&Port_12VO4, true)` — TIM2_CH3(PB10) 50Hz PWM + 舵机上电
+3. `TMC_Init()` — R 轴 TMC2209 初始化
+
+**测试循环：**
+
+| 步骤 | 动作 | 舵机 | 气泵(PE11) | 电磁阀(PA6) |
+|------|------|------|-----------|------------|
+| 拾取 | 舵机→30° + 气泵ON + 阀ON | PB10→30° | HIGH | LOW(导通) |
+| 贴装 | 阀OFF + 泵OFF + 舵机→120° | PB10→120° | LOW | HIGH(关断) |
+| R正转 | 斜坡 5000→80000 µstep/s | — | — | — |
+| R反转 | 斜坡 -5000→-80000 µstep/s | — | — | — |
+
+### 17.2 关键实现细节
+
+**R 轴速度斜坡：** TMC2209 VACTUAL 模式无极变速/加速斜坡。直接跳全速时静摩擦力会卡住电机，需从 5000 µstep/s 起步，每级 +8000，40ms/级，逐步提升至 80000。
+
+**电磁阀控制：** 24V O1(PA6) 是 DRV8803 U13 的低端开关。PA6=LOW 时 OUT5 拉 GND，阀两端 24V 压差导通。PA6=HIGH 时 OUT5 拉 24V，阀两端同电位关断。代码用 `GPIOA->BSRR` 直写寄存器，先 HIGH 再 LOW 确保 DRV8803 锁存状态变化。
+
+**调试开关：**
+- `PICKPLACE_VERBOSE`（app_test.c）— 开启 VACTUAL/DRV_STATUS 读回校验
+- `SERVO_DEBUG`（driver_servo.h）— 开启 TIM 寄存器诊断输出
+
+### 17.3 涉及文件
+
+| 文件 | 角色 |
+|------|------|
+| Task/app_test.c | StartPickPlaceTestTask + 辅助函数 |
+| Task/app_test.h | 函数声明 + 任务属性 |
+| Core/Src/app_freertos.c | 任务创建（pickPlaceTestTaskHandle） |
+| Drivers/ZeMCU-G4/driver_servo.c/h | 舵机 PWM 驱动 |
+| Drivers/ZeMCU-G4/driver_drv8803.c/h | DRV8803 端口驱动 |
+| Drivers/ZeMCU-G4/driver_tmc2209.c/h | R 轴 TMC2209 驱动 |
+
+
+## 十八、舵机驱动改进记录（2026-06）
+
+### 18.1 CubeMX AF 映射 Bug
+
+**问题：** CubeMX 生成的 `HAL_TIM_MspPostInit` 中 PE8(TIM5_CH3) 被设为 `GPIO_AF1_TIM5`(AF1)，但 STM32G474 上 PE8→TIM5_CH3 对应 AF2。AF1 实际是 TIM1_CH1N，导致 TIM5_CH3 PWM 无法输出到 PE8。
+
+**修复：** `driver_servo.c` 的 `Servo_Init()` 内检测 `htim->Instance == TIM5` 时，用 AF=0x02 重新初始化 PE8。
+
+**注意：** TIM2_CH3(PB10) 的 AF 配置在 CubeMX 中是正确的，不需要修复。
+
+### 18.2 TIM5 多通道 HAL 状态锁
+
+**问题：** TIM5_CH1(PB2, 24V_C1) 被其他代码先调用 `HAL_TIM_PWM_Start` 启动后，`htim5.State` 变为 BUSY。之后 `Servo_Init` 调用 `HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3)` 时 HAL 状态检查返回 HAL_ERROR，CC3E(CCER bit8) 未被置位。
+
+**修复：** 临时保存 `htim->State` → 设为 `HAL_TIM_STATE_READY` → 调用 `HAL_TIM_PWM_Start` → 还原 State。此操作在任务启动阶段无并发风险。
+
+### 18.3 舵机改为 TIM2_CH3
+
+舵机信号从 PE8(TIM5_CH3) 迁移到 PB10(TIM2_CH3)。CubeMX 中需配置：
+- TIM2: PSC=169, ARR=19999 → 50Hz
+- TIM2_CH3: PWM Generation CH3
+
+TIM2_CH1(PA0, 12V_C1) 受此频率变更影响从 ~1kHz 降到 50Hz，但由于 12V_C1 pulse 远超 ARR 实际只是开关控制，不受影响。
+
+### 18.4 SERVO_DEBUG 诊断
+
+在 `driver_servo.h` 中定义 `SERVO_DEBUG` 后，`Servo_Init()` 会输出 TIM PSC/ARR/CCR/CR1/CCER 寄存器值，用于验证 PWM 配置。调试完成后注释掉即可恢复干净编译。
+
+
+## 十九、DRV8803 端口映射与使用注意事项
+
+### 19.1 当前实际接线
+
+| 逻辑端口 | 开关引脚 | PWM 引脚 | 实际用途 |
+|----------|---------|---------|----------|
+| Port_12VO1 | PE11 | — | 吸嘴气泵 |
+| Port_12VO2 | PE12 | — | 预留 |
+| Port_12VO3 | PE13 | PE8(TIM5_CH3) | 预留(PWM) |
+| Port_12VO4 | PE14 | PB10(TIM2_CH3) | Z轴舵机供电+PWM |
+| Port_24VO1 | PA6 | — | 电磁阀(低端开关) |
+| Port_24VO2 | PA7 | — | 预留 |
+| Port_24VO3 | PC4 | PB1(TIM3_CH4) | 预留(PWM) |
+| Port_24VO4 | PC5 | PB2(TIM5_CH1) | 24V_C1(PWM) |
+
+### 19.2 API 使用要点
+
+- `DRV8803_Init()` 后必须分别调用 `DRV8803_EnableChip(1, true)` 和 `DRV8803_EnableChip(2, true)` 使能 U12/U13
+- `DRV8803_SetOutput()` 仅操作开关引脚(pins[0])，HIGH=导通(HIGH-side ON)
+- **24V 端口（Port_24VO1 等）是低端开关**：`DRV8803_SetOutput` 的 on/off 逻辑与输出状态相反。on=true 时 OUT 拉 24V（负载关），on=false 时 OUT 拉 GND（负载开）
+- PWM 引脚(pins[1])由上层通过 HAL 定时器 API 控制，不走 DRV8803_SetOutput
+- `DRV8803_Init()` 会将所有端口引脚拉低，使能芯片后 24V 端口默认处于"导通"状态（OUT=GND），需在初始化完成后主动拉高关断
+
+### 19.3 故障排查
+
+| 现象 | 检查项 |
+|------|--------|
+| 12V 端口不工作 | PE9(EN1) 是否为 LOW |
+| 24V 端口不工作 | PA4(EN2) 是否为 LOW、PB0(RST2) 是否为 LOW |
+| 电磁阀不动 | PA6 是否有 HIGH→LOW 跳变、U13 是否使能、24V 供电是否正常 |
+| 舵机不转 | PB10 是否有 50Hz PWM、PE14(开关) 是否 HIGH |
