@@ -1,72 +1,125 @@
-﻿#include "driver_servo.h"
+﻿#include <stdbool.h>
+#include "driver_servo.h"
 #include <math.h>
 #include <string.h>
 
-/* 内部舵机数组，记录每个通道的配置和状态 */
+/* ---- 诊断宏（由头文件 SERVO_DEBUG 开关控制） ---- */
+#ifdef SERVO_DEBUG
+extern void PrintDebug(const char* fmt, ...);
+#define SERVO_LOG(fmt, ...)  PrintDebug("[Servo] " fmt, ##__VA_ARGS__)
+#else
+#define SERVO_LOG(fmt, ...)  ((void)0)
+#endif
+
+/* ================================================================
+ *  模块内部状态
+ * ================================================================ */
+
 static Servo_HandleTypeDef servo_handles[SERVO_TIM_CHANNEL_MAX] = {0};
+static uint16_t              timer_arr = 0;  /* ARR 缓存，避免重复读 */
 
-/* 通道映射表 */
-static const uint32_t servo_channels[SERVO_TIM_CHANNEL_MAX] = {
-    TIM_CHANNEL_1,
-    TIM_CHANNEL_2,
-    TIM_CHANNEL_3,
-    TIM_CHANNEL_4
-};
-/* 定时器 ARR 值（自动重装载），由 Servo_Init 计算 */
-static uint16_t timer_arr = 0;
-
-/**
- * @brief  初始化舵机模块，计算 PWM 比较值范围并启动所有通道
- * @param  htim : 指向已经配置为 50Hz PWM 输出的定时器句柄
- * @note   必须在 CubeMX 中设置定时器为 PWM 模式，且频率为 50Hz
- *         即：PWM 频率 = 定时器时钟 / (PSC+1) / (ARR+1) = 50 Hz
- */
-
+/* ================================================================
+ *  Servo_Init
+ * ================================================================ */
 
 void Servo_Init(TIM_HandleTypeDef *htim)
 {
     if (htim == NULL) return;
 
-    timer_arr = htim->Init.Period;   
-    float pulse_per_us = (float)(timer_arr + 1) / (SERVO_PWM_PERIOD_MS * 1000.0f);
+    /* ---- 计算 0°/90°/180° 对应的 CCR ---- */
+    timer_arr = htim->Init.Period;
+    float pulse_per_us = (float)(timer_arr + 1)
+                       / (SERVO_PWM_PERIOD_MS * 1000.0f);
     uint16_t min_cmp = (uint16_t)(SERVO_PWM_MIN_US * pulse_per_us);
     uint16_t max_cmp = (uint16_t)(SERVO_PWM_MAX_US * pulse_per_us);
     uint16_t mid_cmp = (min_cmp + max_cmp) / 2;
 
-    /* 只初始化你实际用到的通道：索引 2 → TIM_CHANNEL_3 → PE8 */
-    uint8_t idx = 2;  // 对应 TIM_CHANNEL_3
-    servo_handles[idx].htim      = htim;
-    servo_handles[idx].channel   = TIM_CHANNEL_3;
-    servo_handles[idx].min_pulse = min_cmp;
-    servo_handles[idx].max_pulse = max_cmp;
-    servo_handles[idx].mid_pulse = mid_cmp;
+    /* ---- 通道 2 = TIM_CHANNEL_3 = PE8 ---- */
+    uint8_t idx = 2;
+    servo_handles[idx].htim        = htim;
+    servo_handles[idx].channel     = TIM_CHANNEL_3;
+    servo_handles[idx].min_pulse   = min_cmp;
+    servo_handles[idx].max_pulse   = max_cmp;
+    servo_handles[idx].mid_pulse   = mid_cmp;
+    servo_handles[idx].initialized = false;
 
-    /* 只启动我们需要的通道 */
-    if (HAL_TIM_PWM_Start(htim, TIM_CHANNEL_3) != HAL_OK) {
-        // 启动失败可以在这里用 LED 闪灯或打印，但当前尽量不要用阻塞打印
-        // 可以在外边打印调试信息
+    /* ---- GPIO 初始化（仅 TIM5_CH3，TIM2_CH3 由 CubeMX 配置） ---- */
+    if (htim->Instance == TIM5)
+    {
+        GPIO_InitTypeDef gpio_cfg = {0};
+        gpio_cfg.Pin       = GPIO_PIN_8;
+        gpio_cfg.Mode      = GPIO_MODE_AF_PP;
+        gpio_cfg.Pull      = GPIO_NOPULL;
+        gpio_cfg.Speed     = GPIO_SPEED_FREQ_LOW;
+        gpio_cfg.Alternate = 0x02;   /* STM32G474: PE8 AF2 = TIM5_CH3 */
+        HAL_GPIO_Init(GPIOE, &gpio_cfg);
     }
+
+    /* ------------------------------------------------------------
+     *  修复 ：绕过 HAL 对同一定时器多通道的限制
+     *
+     *  TIM5_CH1 (PB2, 24V_C1) 先被 HAL_TIM_PWM_Start 启动，
+     *  htim5.State 变为 BUSY。之后调 HAL_TIM_PWM_Start(&htim5,
+     *  TIM_CHANNEL_3) 时 HAL 检测到 State != READY → 返回
+     *  HAL_ERROR，CC3E (CCER bit8) 不会被置位。
+     *
+     *  解决：临时恢复 State = READY → 走 HAL → 还原 State。
+     *  安全：此操作在任务启动阶段，无并发；TIM5 是通用定时器，
+     *  无 MOE/刹车，额外使能 CH3 不影响已运行的 CH1。
+     * ------------------------------------------------------------ */
+    {
+        HAL_TIM_StateTypeDef prev_state = htim->State;
+        htim->State = HAL_TIM_STATE_READY;
+        HAL_TIM_PWM_Start(htim, TIM_CHANNEL_3);
+        htim->State = prev_state;
+    }
+
+    /* 初始舵机置中位 */
     __HAL_TIM_SET_COMPARE(htim, TIM_CHANNEL_3, mid_cmp);
+    servo_handles[idx].initialized = true;
+
+    /* ---- 调试输出（仅 SERVO_DEBUG 开启时编译） ---- */
+#ifdef SERVO_DEBUG
+    {
+        /* 定时器状态验证 */
+        SERVO_LOG("TIM%lu CH%lu PSC=%lu ARR=%lu CCR=%lu\r\n",
+                  ((htim->Instance == TIM2) ? 2UL : 5UL),
+                  3UL,
+                  (uint32_t)htim->Init.Prescaler,
+                  (uint32_t)htim->Init.Period,
+                  (uint32_t)__HAL_TIM_GET_COMPARE(htim, TIM_CHANNEL_3));
+        SERVO_LOG("TIM CR1=0x%04lX CNT=%lu CCER=0x%04lX (CH3=%lu)\r\n",
+                  (uint32_t)htim->Instance->CR1,
+                  (uint32_t)__HAL_TIM_GET_COUNTER(htim),
+                  (uint32_t)htim->Instance->CCER,
+                  ((htim->Instance->CCER >> 8) & 1UL));
+                  (uint32_t)htim->Instance->CCER,
+                  ((htim->Instance->CCER >> 8) & 1),
+                  (uint32_t)htim->Instance->CCMR2);
+    }
+#endif
 }
-/**
- * @brief  设置舵机角度（0 ~ 180°）
- * @param  ch   : 舵机通道号，0 ~ SERVO_TIM_CHANNEL_MAX-1
- * @param  angle: 目标角度，超出范围会被截断
- * @note   非阻塞，直接修改 PWM 比较值
- */
+
+/* ================================================================
+ *  Servo_SetAngle
+ * ================================================================ */
+
 void Servo_SetAngle(uint8_t ch, float angle)
 {
-		if (ch >= SERVO_TIM_CHANNEL_MAX || servo_handles[ch].htim == NULL) return;
-	
-    /* 限制角度范围 */
+    if (ch >= SERVO_TIM_CHANNEL_MAX) return;
+    if (!servo_handles[ch].initialized) return;
+
     if (angle < 0.0f) angle = 0.0f;
     if (angle > SERVO_ANGLE_RANGE) angle = SERVO_ANGLE_RANGE;
 
-    /* 线性映射到比较值 */
-    float scale = (float)(servo_handles[ch].max_pulse - servo_handles[ch].min_pulse) / SERVO_ANGLE_RANGE;
-    uint16_t pulse = (uint16_t)(servo_handles[ch].min_pulse + angle * scale);
+    float    scale = (float)(servo_handles[ch].max_pulse
+                           - servo_handles[ch].min_pulse)
+                   / SERVO_ANGLE_RANGE;
+    uint16_t pulse = (uint16_t)(servo_handles[ch].min_pulse
+                                + angle * scale);
 
-    __HAL_TIM_SET_COMPARE(servo_handles[ch].htim, servo_handles[ch].channel, pulse);
+    __HAL_TIM_SET_COMPARE(servo_handles[ch].htim,
+                          servo_handles[ch].channel, pulse);
 }
 
 /**
@@ -76,6 +129,8 @@ void Servo_SetAngle(uint8_t ch, float angle)
 void Servo_SetMid(uint8_t ch)
 {
     if (ch >= SERVO_TIM_CHANNEL_MAX) return;
+    if (!servo_handles[ch].initialized) return;
+
     __HAL_TIM_SET_COMPARE(servo_handles[ch].htim,
                           servo_handles[ch].channel,
                           servo_handles[ch].mid_pulse);
@@ -88,7 +143,10 @@ void Servo_SetMid(uint8_t ch)
 void Servo_Stop(uint8_t ch)
 {
     if (ch >= SERVO_TIM_CHANNEL_MAX) return;
+    if (servo_handles[ch].htim == NULL) return;
+
     HAL_TIM_PWM_Stop(servo_handles[ch].htim, servo_handles[ch].channel);
+    servo_handles[ch].initialized = false;
 }
 
 /**
@@ -98,12 +156,27 @@ void Servo_Stop(uint8_t ch)
  */
 float Servo_GetAngle(uint8_t ch)
 {
-    if (ch >= SERVO_TIM_CHANNEL_MAX) return -1.0f;
+    if (ch >= SERVO_TIM_CHANNEL_MAX)          return -1.0f;
+    if (!servo_handles[ch].initialized)       return -1.0f;
 
-    uint16_t pulse = __HAL_TIM_GET_COMPARE(servo_handles[ch].htim, servo_handles[ch].channel);
-    float scale = (float)(servo_handles[ch].max_pulse - servo_handles[ch].min_pulse) / SERVO_ANGLE_RANGE;
+    uint16_t pulse = __HAL_TIM_GET_COMPARE(servo_handles[ch].htim,
+                                            servo_handles[ch].channel);
+    float scale = (float)(servo_handles[ch].max_pulse
+                        - servo_handles[ch].min_pulse)
+                / SERVO_ANGLE_RANGE;
     float angle = (pulse - servo_handles[ch].min_pulse) / scale;
+
     if (angle < 0.0f) angle = 0.0f;
     if (angle > SERVO_ANGLE_RANGE) angle = SERVO_ANGLE_RANGE;
     return angle;
+}
+
+/* ================================================================
+ *  Servo_IsInitialized
+ * ================================================================ */
+
+bool Servo_IsInitialized(uint8_t ch)
+{
+    if (ch >= SERVO_TIM_CHANNEL_MAX) return false;
+    return servo_handles[ch].initialized;
 }
