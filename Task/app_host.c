@@ -318,16 +318,16 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         break;
 
     case HCMD_EXIT_DEBUG:
-        g_state = HOST_DEBUG;
+        g_state = HOST_INIT;
         g_jog_active = false;
         PrintDebug("[HOST] Exit debug, back to IDLE.\r\n");
-        osDelay(200);
+        host_send("EXIT_DEBUG_MODE");
+        osDelay(50);
         host_send("DOWNLOAD_READY");
         break;
 
     default:
         break;
-    }
 }
 
 /* ================================================================
@@ -532,6 +532,8 @@ void Host_Task(void *argument) {
 
     /* 启动握手：发送 DEBUG_MODE，进入调试模式 */
     UART_SendString(UART_CH1, "DEBUG_MODE\n");
+    osDelay(50);
+    UART_SendString(UART_CH1, "DOWNLOAD_READY\n");
     g_state = HOST_DEBUG;
 
 

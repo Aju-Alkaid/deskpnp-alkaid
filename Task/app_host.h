@@ -12,7 +12,7 @@
 #define MAX_COMPONENTS  128
 
 /* 下载超时(ms) */
-#define DOWNLOAD_TIMEOUT_MS  300
+#define DOWNLOAD_TIMEOUT_MS  500
 
 /* 元件信息 */
 typedef struct {
