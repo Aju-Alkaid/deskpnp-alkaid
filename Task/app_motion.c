@@ -215,13 +215,20 @@ void r_axis_rotate(float angle, float speed_rpm) {
     float usteps_per_sec = speed_rpm * R_STEPS_PER_REV / 60.0f;
     uint32_t run_time_ms = (uint32_t)(usteps * 1000.0f / usteps_per_sec);
 
+    /* 使能 TMC2209 驱动 */
+    TMC_SetEnable(true);
+    vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));   /* 上电稳定 */
+
     // 设置速度并运行指定时间
     TMC_SetSpeed(speed_to_vactual(speed_rpm, dir));
-    osDelay(run_time_ms);
+    vTaskDelay(pdMS_TO_TICKS(run_time_ms));
 
     // 停止（速度设为 0）
     TMC_SetSpeed(0);
-    osDelay(R_ACCEL_DELAY);   // 等待电机停稳
+    vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY));   // 等待电机停稳
+
+    /* 关闭 TMC2209 驱动 */
+    TMC_SetEnable(false);
 
     g_cur_r_angle = angle;
 }
