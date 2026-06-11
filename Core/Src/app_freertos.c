@@ -1,4 +1,4 @@
-﻿/* USER CODE BEGIN Header */
+/* USER CODE BEGIN Header */
 /**
   ******************************************************************************
   * File Name          : app_freertos.c
@@ -146,6 +146,12 @@ const osThreadAttr_t espTask_attributes = {
     .priority = osPriorityNormal,
 };
 
+
+const osThreadAttr_t camTestTask_attributes = {
+    .name = "CamTest",
+    .stack_size = 2048,
+    .priority = osPriorityNormal,
+};
 /* USER CODE END Variables */
 /* Definitions for KeyTask */
 
@@ -192,7 +198,6 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
 	UART_Driver_Init();
 	Event_Init();
-	Vision_Init();
 	Key_Init();
   /* USER CODE END Init */
 
@@ -242,7 +247,8 @@ void MX_FREERTOS_Init(void) {
 	osThreadNew(CAN_Process_Task, NULL, &canProcTask_attr);
 	osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
-//	osThreadNew(Host_Task, NULL, &hostTask_attributes);
+	osThreadNew(Host_Task, NULL, &hostTask_attributes);
+//	osThreadNew(StartCamTestTask, NULL, &camTestTask_attributes);
 
 //    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
 
@@ -250,7 +256,7 @@ void MX_FREERTOS_Init(void) {
 //    hostMotionTaskHandle = osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
 
   osThreadNew(ESP_Task, NULL, &espTask_attributes);
-  pickPlaceTestTaskHandle = osThreadNew(StartPickPlaceTestTask, NULL, &pickPlaceTestTask_attributes);
+//  pickPlaceTestTaskHandle = osThreadNew(StartPickPlaceTestTask, NULL, &pickPlaceTestTask_attributes);
 
   /* USER CODE END RTOS_THREADS */
 
