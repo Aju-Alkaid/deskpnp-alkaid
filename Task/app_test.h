@@ -39,3 +39,7 @@ extern const osThreadAttr_t pickPlaceTestTask_attributes;
 
 #endif
 
+/* ---- 摄像头通讯测试任务 ---- */
+void StartCamTestTask(void *argument);
+extern const osThreadAttr_t camTestTask_attributes;
+

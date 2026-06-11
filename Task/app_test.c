@@ -12,6 +12,7 @@
 #include "app_motion.h"
 #include <math.h>   // 解决 fabsf 未声明
 #include "app_uart_parser.h"
+#include "app_vision.h"
 
 // 简单的步进脉冲生成函数 (需根据你的GPIO定义修改)
 #define STEP_GPIO_PORT GPIOD
@@ -177,9 +178,14 @@ void StartMotorTestTask(void *argument) {
     int32_t speed = 40000;  // 微步/秒
 
     for (;;) {
+        TMC_SetEnable(true);
+        vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
         TMC_SetSpeed(speed);
         PrintDebug("Speed set to %ld\r\n", speed);
         vTaskDelay(pdMS_TO_TICKS(2000));
+        TMC_SetSpeed(0);
+        vTaskDelay(pdMS_TO_TICKS(50));
+        TMC_SetEnable(false);
 
         // 反转方向
         speed = -speed;
@@ -622,6 +628,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
     const uint32_t poll_ms = 10;
     const uint32_t total_timeout = 10000;
 
+    UART_ClearData(UART_CH1);  /* 清除外层循环残留的 data_ready，防止误判为中断命令 */
     while (elapsed < total_timeout) {
         uint32_t flags = osEventFlagsWait(evtAxesDone,
                                            wait_mask,
@@ -1024,4 +1031,175 @@ void StartPickPlaceTestTask(void *argument)
         PrintDebug("--- 周期 %lu 完成 ---\r\n\r\n", cycle);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
+}
+
+/* ================================================================
+ * 摄像头 + 电机联动测试
+ *
+ * 依次测试 P1(散料区找元件) → P3(下相机偏移) → P2(Mark点建系)。
+ * 每个 Process 有独立超时，超时或出错后跳到下一个。
+ *
+ * ★ 收到 GOT_POS 后会实际驱动 XY 电机移动，再发 "go" 给摄像头，
+ *   形成完整的位置反馈闭环。
+ * ================================================================ */
+#define CAM_TEST_TIMEOUT_P1   30000   /* P1 超时 ms */
+#define CAM_TEST_TIMEOUT_P2   60000   /* P2 超时 ms (3个Mark) */
+#define CAM_TEST_TIMEOUT_P3   30000   /* P3 超时 ms */
+
+/* 偏移→步数换算系数 (需根据相机 FOV 实测标定！) */
+#define CAM_PX_TO_STEPS       (STEPS_PER_MM / 1000.0f)   /* 像素 → 步数 */
+#define CAM_MM10000_TO_STEPS  (STEPS_PER_MM / 10000.0f)  /* mm*10000 → 步数 */
+#define CAM_MOVE_SPEED        300
+#define CAM_MOVE_ACC          25
+
+/**
+ * @brief 运行一个视觉 Process 到完成或超时
+ * @param cmd        VCMD_P1 / VCMD_P2 / VCMD_P3
+ * @param timeout_ms 超时 (ms)
+ * @param cur_x      当前 X 坐标 (步数, 输入输出)
+ * @param cur_y      当前 Y 坐标 (步数, 输入输出)
+ * @return true=完成, false=超时或出错
+ */
+static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
+                         int32_t *cur_x, int32_t *cur_y) {
+    Vision_Start(cmd);
+
+    /* P2 启动后状态是 IDLE，需要主动发 "go" */
+    if (cmd == VCMD_P2) {
+        osDelay(200);
+        if (Vision_GetState() == VISION_IDLE) {
+            Vision_Go();
+            PrintDebug("[CAM_TEST] P2 initial go sent.\r\n");
+        }
+    }
+
+    VisionState_t prev = Vision_GetState();
+    uint32_t start_tick = osKernelGetTickCount();
+
+    while ((osKernelGetTickCount() - start_tick) < pdMS_TO_TICKS(timeout_ms)) {
+        UART_Driver_Process();
+
+        VisionState_t state = Vision_GetState();
+        if (state != prev) {
+            PrintDebug("[CAM_TEST] State: %d -> %d\r\n", (int)prev, (int)state);
+
+            switch (state) {
+            case VISION_GOT_STOP:
+                Vision_Go();
+                PrintDebug("[CAM_TEST]   -> sent go\r\n");
+                break;
+
+            case VISION_GOT_POS: {
+                const VisionResult_t *r = Vision_GetResult();
+                int32_t dx_s = 0, dy_s = 0;
+
+                if (cmd == VCMD_P2) {
+                    dx_s = (int32_t)(r->dx * CAM_MM10000_TO_STEPS);
+                    dy_s = (int32_t)(r->dy * CAM_MM10000_TO_STEPS);
+                    PrintDebug("[CAM_TEST]   Mark%d/%d: dx=%ld dy=%ld mm10000 -> move(%ld,%ld)\r\n",
+                               (int)r->mark_index, (int)r->mark_count,
+                               (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
+                } else {
+                    dx_s = (int32_t)(r->dx * CAM_PX_TO_STEPS);
+                    dy_s = (int32_t)(r->dy * CAM_PX_TO_STEPS);
+                    if (r->angle_x100 != 0 || r->class_name[0] != '\0') {
+                        PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px ang=%ld.%02ld cls=%s -> move(%ld,%ld)\r\n",
+                                   (long)r->dx, (long)r->dy,
+                                   (long)(r->angle_x100/100), (long)(r->angle_x100%100),
+                                   r->class_name, (long)dx_s, (long)dy_s);
+                    } else {
+                        PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px -> move(%ld,%ld)\r\n",
+                                   (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
+                    }
+                }
+
+                if (dx_s != 0 || dy_s != 0) {
+                    int ret = move_xy_relative(dx_s, dy_s, CAM_MOVE_SPEED,
+                                               CAM_MOVE_ACC, cur_x, cur_y);
+                    PrintDebug("[CAM_TEST]   move done, cur=(%ld,%ld) ret=%d\r\n",
+                               (long)*cur_x, (long)*cur_y, ret);
+                }
+                Vision_Go();
+                break;
+            }
+
+            case VISION_DONE:
+                return true;
+
+            case VISION_ERROR:
+                PrintDebug("[CAM_TEST]   ERROR: %s\r\n", Vision_GetError());
+                return false;
+
+            default:
+                break;
+            }
+            prev = state;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    PrintDebug("[CAM_TEST] TIMEOUT after %lu ms\r\n", (unsigned long)timeout_ms);
+    return false;
+}
+
+/**
+ * @brief 摄像头 + 电机联动测试任务
+ * @note  初始化 CAN/MKS 电机 + Vision，依次执行 P1/P3/P2。
+ *        根据摄像头返回的偏移实际驱动 XY 平台移动。
+ */
+void StartCamTestTask(void *argument) {
+    vTaskDelay(pdMS_TO_TICKS(500));
+
+    /* 关闭 R 轴（本任务不使用 TMC2209） */
+    TMC_SetEnable(false);
+
+    /* ---- 1. CAN + 电机初始化 ---- */
+    CAN_Init(&hfdcan1, NULL);
+    HAL_FDCAN_ActivateNotification(&hfdcan1,
+        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_BUS_OFF |
+        FDCAN_IT_ERROR_PASSIVE | FDCAN_IT_ARB_PROTOCOL_ERROR |
+        FDCAN_IT_DATA_PROTOCOL_ERROR, 0);
+    osDelay(200);
+    Motor_Init();
+    osDelay(200);
+
+    /* ---- 2. 视觉模块初始化 ---- */
+    Vision_Init();
+
+    PrintDebug("========================================\r\n");
+    PrintDebug("  Camera + Motor Interactive Test\r\n");
+    PrintDebug("  USART2 -> MaixCam  |  CAN -> X1/X2/Y\r\n");
+    PrintDebug("  PX_TO_STEPS=%.1f  MM10000_TO_STEPS=%.1f\r\n",
+               CAM_PX_TO_STEPS, CAM_MM10000_TO_STEPS);
+    PrintDebug("========================================\r\n");
+
+    int32_t cur_x = 0, cur_y = 0;
+
+    /* ---- P1: 散料区元件检测 ---- */
+    PrintDebug("\r\n--- Test 1/3: P1 (component detect) ---\r\n");
+    if (!cam_test_run(VCMD_P1, CAM_TEST_TIMEOUT_P1, &cur_x, &cur_y)) {
+        PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
+    } else {
+        PrintDebug("[CAM_TEST] P1 PASSED\r\n");
+    }
+
+    /* ---- P3: 下相机偏移检测 (需要时取消注释) ---- */
+    // PrintDebug("\r\n--- Test 2/3: P3 (bottom cam offset) ---\r\n");
+    // if (!cam_test_run(VCMD_P3, CAM_TEST_TIMEOUT_P3, &cur_x, &cur_y)) {
+    //     PrintDebug("[CAM_TEST] P3 FAILED, continuing...\r\n");
+    // } else {
+    //     PrintDebug("[CAM_TEST] P3 PASSED\r\n");
+    // }
+
+    /* ---- P2: Mark 点建系 (需要时取消注释) ---- */
+    // PrintDebug("\r\n--- Test 3/3: P2 (mark alignment) ---\r\n");
+    // if (!cam_test_run(VCMD_P2, CAM_TEST_TIMEOUT_P2, &cur_x, &cur_y)) {
+    //     PrintDebug("[CAM_TEST] P2 FAILED\r\n");
+    // } else {
+    //     PrintDebug("[CAM_TEST] P2 PASSED\r\n");
+    // }
+
+    PrintDebug("\r\n=== Camera Test Complete ===\r\n");
+    vTaskSuspend(NULL);
 }

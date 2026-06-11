@@ -132,7 +132,7 @@ static void send_frame(const char *str) {
         memcpy(buf + 2, str, len);
     }
     buf[2 + len] = FRAME_TAIL;
-    UART_SendData(UART_CH2, buf, (uint16_t)(len + 3));
+    HAL_UART_Transmit(&huart2, buf, (uint16_t)(len + 3), 100);
 }
 
 /* 重置所有内部状态 */
