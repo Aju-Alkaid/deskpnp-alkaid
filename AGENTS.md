@@ -136,17 +136,21 @@ pnp_1/
 
 | 任务 | 栈大小 | 优先级 | 功能 |
 |------|--------|--------|------|
-| `Host_Task` | 1024 | Normal | 上位机通信 + CSV解析 + 视觉协调 |
+| `Host_Task` | 1024 | Normal | ★ 主任务：上位机通信 + 调试命令 + CSV解析 + 视觉协调 + PnP流程 |
 | `CAN_Process_Task` | 512 | Normal | 从 motor_event_queue 取 CAN 报文，设事件组标志 |
-| `vMotorTestTask` | 1024 | Normal | 电机测试任务（当前活跃的生产任务） |
+| `vMotorTestTask` | 1024 | Normal | MKS 电机测试任务（已注释） |
 | `TouchGFX_Task` | 8192 | Normal | GUI 图形界面渲染 + VSYNC + 按键处理 |
 | `Key_Task` | 256 | Normal | 硬件按键扫描（10ms）+ 消抖 → keyEventQueue |
-| `PnP_Motion_Task` | 1024 | Normal | 正式运动任务（已注释，未激活） |
+| `ESP_Task` | 512 | Normal | ESP32 通信 + WiFi 状态管理 |
+| `PnP_Motion_Task` | 1024 | Normal | 备用运动任务（已注释，未激活） |
+| `StartHostMotionTestTask` | 4096 | Normal | 调试用运动任务（已注释，功能合并到 Host_Task） |
+| `StartPickPlaceTestTask` | 2048 | Normal | Pick&Place 测试（已注释，功能合并到 Host_Task） |
+| `StartMotorTestTask` | 1024 | Normal | TMC2209 测试（已注释） |
 
 **任务间通信：**
 - `motor_event_queue` (32深度) — CAN 中断 → CAN_Process_Task / vMotorTestTask
 - `motion_cmd_queue` (20深度) — Host_Task → MotionTask_Func
-- `host_pkt_queue` — 视觉回调/串口解析 → Host_Task
+- `host_pkt_queue` (64深) — 已弃用，Host_Task 改用 UART_PeekData 直接读取
 - `evtAxesDone` 事件组 — CAN_Process_Task 通知到位
 - `keyEventQueue` (16深) — Key_Task → KeyController → TouchGFX 按键事件
 - `dataTransferQueue` (16深) — 主系统 Task → Model::processQueue() → UI 数据同步
@@ -157,15 +161,15 @@ pnp_1/
 ## 六、关键数据流
 
 ```
-上位机 --[USART1 CSV]--> Host_UartRecvCallback → host_pkt_queue → Host_Task
-                                                            │
-                                              解析CSV → 元件数组 g_components[]
-                                                            │
-                                             ┌── Vision_SendCmd(process2) → 摄像头
-                                             │   摄像头返回 Mark 点 → 计算对齐偏移
-                                             │
-                                        for each component:
-                                             │   Vision_SendCmd(process1) → 找元件
+上位机 --[USART1]--> DMA+空闲中断 → data_ready=true
+                          │
+            Host_Task 主循环 (~100Hz):
+              UART_Driver_Process()  → DMA→app缓冲
+              UART_PeekData()        → 读app缓冲（任务上下文）
+              LineParser_Feed()      → 行解析（任务上下文，FPU安全）
+                ├─ 运动/调试命令 → handle_debug_cmd()
+                ├─ RAW_LINE(DEBUG/INIT) → 切换 HOST_DOWNLOADING
+                └─ RAW_LINE(DOWNLOADING) → 解析CSV → g_components[]
                                              │   Vision_SendCmd(process3) → 偏移修正
                                              │   motion_cmd_queue → MotionTask_Func
                                              │       │
@@ -210,12 +214,11 @@ pnp_1/
 4. **`motor_send_move_cmd` 函数体冗余：** 该函数的 buffer 填充逻辑与 `positionMode3Run` 重复，实际调用也是转发到后者。建议移除冗余逻辑或直接废弃此函数。
 
 ### 9.3 功能性问题（待完善）
-5. **正式运动任务未激活：** `PnP_Motion_Task` 线程在 `app_freertos.c` 中被注释。当前运动指令由 `vMotorTestTask` 执行，后者是硬编码的测试序列。正式生产需要激活 `PnP_Motion_Task`。
+5. **正式运动任务（已解决，见 §9.8）：** `PnP_Motion_Task` 已由 `Host_Task` 取代，`Host_Task` 统一处理调试命令和 PnP 流程。
 6. **MOTION_CMD_PICK/PLACE 缺少 XY 移动到吸嘴/贴装位置：** `pick_component()` 和 `place_component()` 直接操作 Z 轴舵机，但调用前需要上层先发送 `MOTION_CMD_MOVE_TO` 到达目标位置。
-7. **连续移动（MOVE_*_START）仅打印日志：** 调试模式的连续移动命令处理逻辑未实现实际的持续运动控制。
-8. **R 轴控制：** `r_axis_rotate` 使用虚拟地址 `R_AXIS_ADDR=0x04` 通过 `positionMode3Run` 发送，但该地址没有实际电机，实际 R 轴由 TMC2209 通过 UART3 控制，两套系统未对接。
+7. **连续移动（已解决，见 §9.8）：** `Host_Task` 的 `handle_debug_cmd` 已实现完整的 JOG 控制（同步模式+positionMode3Run+motorSyncTrigger）。
+8. **R 轴控制：** `r_axis_rotate` 通过 `TMC_SetSpeed`（VACTUAL 寄存器）直接驱动 TMC2209（UART3），已对接。R 轴使用「使能→旋转→关闭」模式，`TMC_Init()` 初始化后驱动默认关闭，`r_axis_rotate` 内部自动使能/关闭。详见 §9.9 和 §16.7。
 9. **LPUART1 未配置 DMA 接收：** `hdmarx = NULL`，仅用作 TMC2209 半双工阻塞通信。如果该通道用于其他用途需重新配置。
-
 ### 9.4 代码质量
 10. 暂无
 11. **`driver_motor.c runFail/runOK` 死循环：** 两个函数都是 `while(1){}` 空循环，无实际错误处理逻辑。
@@ -243,9 +246,60 @@ pnp_1/
 
 **3. TIM5 HAL State 共享限制（已在 driver_servo.c 中绕过）：** TIM5_CH1 先启动导致 State=BUSY，阻塞 CH3 的 HAL_TIM_PWM_Start。通过临时恢复 State 绕过。
 
+### 9.9 TMC2209 使能/关闭设计（2026-06-11~12）
+
+**设计原则：** TMC2209 驱动仅在 R 轴需要旋转时使能，其余时间关闭（ENN=HIGH），防止电机持续通电发热。
+
+**关键改动：**
+
+| 文件 | 改动 |
+|------|------|
+| `driver_tmc2209.h` | 新增 `TMC_ENABLE_DELAY_MS 50` 宏，统一上电稳定延时 |
+| `driver_tmc2209.c:365` | `TMC_Init()` 末尾加 `TMC_SetEnable(false)`，初始化后自动关闭 |
+| `app_motion.c:r_axis_rotate` | 入口使能+延时→设 VACTUAL→运行→停止→关闭 |
+| `app_test.c:StartMotorTestTask` | 循环内每次使能→运行 2s→停止→关闭→反转重复 |
+| `app_host.c` | 启动时 `TMC_SetEnable(false)` 确保驱动关闭 |
+| `app_test.c:StartCamTestTask` | 启动时 `TMC_SetEnable(false)`（本任务不使用 R 轴） |
+
+**CubeMX 默认值陷阱：** PD15(TMC1_EN) 在 CubeMX 中配置为 GPIO_Output，默认初始电平 LOW。ENN 低有效，因此从 boot 起 TMC2209 即为使能状态。如果没有任何任务调用 `TMC_SetEnable(false)`（例如 Host_Task 被注释），TMC2209 将持续通电。**任何不使用 R 轴的任务必须显式调用 `TMC_SetEnable(false)`。**
+
+**调用模式：** 所有 TMC2209 使用点统一遵循：
+```
+TMC_SetEnable(true) → vTaskDelay(TMC_ENABLE_DELAY_MS) → TMC_SetSpeed(...) → 运行 → TMC_SetSpeed(0) → vTaskDelay(停稳) → TMC_SetEnable(false)
+```
+
 **4. TMC2209 VACTUAL 启动扭矩不足：** 直接跳全速时静摩擦卡住电机，需用速度斜坡（5000→80000 µstep/s，每级 +8000，40ms/级）。
 
 **5. DRV8803 24V 端口为低端开关：** Port_24VO1(PA6) 等 24V 端口负载串在 24V 电源和 OUT 之间，PA6=LOW 时 OUT 拉 GND 负载导通，逻辑与 12V 端口相反。
+
+
+### 9.8 已完成的架构改进（2026-06-10）
+
+**1. Host_Task 启动不再发送 DOWNLOAD_READY：** 上位机协议规定 `DEBUG_MODE` 解锁调试按钮，`DOWNLOAD_READY` 进入文件下载模式。原代码启动时同时发送两者，导致上位机被 `DOWNLOAD_READY` 带入下载模式，调试按钮被重新锁定。修复：启动只发 `DEBUG_MODE\n`，`DOWNLOAD_READY` 仅在下载完成或退出调试时发送。
+
+**2. 命令解析从 ISR 移至任务上下文（UART_PeekData 架构）：** 原架构 `HAL_UARTEx_RxEventCallback(ISR)` → `Host_UartRecvCallback(ISR)` → `LineParser_Feed`(含 `strtof` 浮点) → `host_pkt_queue` → `Host_Task`。Cortex-M4F 在 ISR 中使用 FPU 浮点运算可能导致静默失败，且 `g_parser` 被 ISR 和任务同时使用存在竞态。修复：`Host_UartRecvCallback` 改为空函数（仅保留 `(void)data; (void)len;`），`Host_Task` 主循环改用 `UART_PeekData` + `LineParser_Feed`（全部在任务上下文执行），`host_pkt_queue` 弃用。
+
+**3. move_xy_relative 进入等待循环前加 UART_ClearData：** `UART_PeekData` 只读不清 `data_ready` 标志。外层主循环读完后标志仍置位，导致 `move_xy_relative` 内部等待循环中的 `UART_PeekData` 检测到残留数据，立即返回 -3（误判为中断命令）。修复：等待循环前调用 `UART_ClearData(UART_CH1)` 刷新标志。此 bug 导致 `MOVE_TO`/`SET_ORIGIN` 等阻塞式运动无效。
+
+**4. HAL_TIM_PWM_Start CCER 不生效（改用 CMSIS API）：** 对 TIM2 调用 `HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3)` 返回 HAL_OK 但 CCER 寄存器维持 0x00，CH3 输出未使能。根因未明确定位（疑似 HAL 库版本或编译优化问题）。修复：使用 CMSIS 级 `TIM_CCxChannelCmd(htim->Instance, TIM_CHANNEL_3, TIM_CCx_ENABLE)` + `__HAL_TIM_ENABLE(htim)`，并正确维护 `htim->State`（设为 BUSY → 操作 → 恢复）。此方案同时兼容 TIM5 的多通道 HAL State 锁问题。`driver_servo.c` 中相关注释已更新。
+
+**5. TMC2209 ENN 引脚为低有效，Host_Task 用 TMC_SetEnable(false) 禁用：** PD15(TMC1_EN) 连接 TMC2209 Pin17 ENN（Enable Not）。LOW=驱动开启，HIGH=驱动关闭。CubeMX 初始化为 LOW（配合 TMC_Init 使用）。`Host_Task` 启动时调用 `TMC_SetEnable(false)` 关闭驱动，防止 R 轴电机在未初始化时发热。
+
+**6. Servo_Init + DRV8803 初始化加入 Host_Task：** 原先缺少 `Servo_Init(&htim2)` 和 `DRV8803_Init()`，导致 `SET_SERVO` 命令无效（`servo_handles[2].initialized=false`），且 Z 轴舵机因 DRV8803 输出状态不确定而发热。修复：Host_Task 启动流程包含 `DRV8803_Init → EnableChip(1) → Servo_Init(&htim2) → SetOutput(12VO4) → Servo_SetAngle(Z_SERVO_CH, 120°)`。
+
+**7. 常量语义化拆分：** 原 `JOG_SPEED`/`JOG_ACC` 被离散移动、MOVE_TO 和 JOG 共用，命名误导。拆分为三层：`DEBUG_SPEED`/`DEBUG_ACC`（MOVE_UP/DOWN/LEFT/RIGHT、MOVE_TO）、`JOG_SPEED`/`JOG_ACC`（MOVE_*_START 连续 JOG）、`PNP_SPEED`/`PNP_ACC`（Mark/找元件/贴装流程）。舵机通道号定义为 `#define Z_SERVO_CH 2`，消除魔法数字。
+
+**8. parse_header 越界修复：** `while (p <= end)` 在空行时 `p == end` 多读一字节。改为 `p < end`。
+
+**9. Vision_Init 重复调用清理：** 原先 `app_freertos.c` 和 `Host_Task` 各调用一次，导致 `[VISION] Init done` 打印两次。已从 `app_freertos.c` 移除。
+
+**10. 主循环冗余 osDelay 清理：** 原主循环 switch 后有额外 `osDelay(5)`，导致 HOST_DEBUG 态每循环 15ms 而非预期的 10ms。已移除。
+
+**11. HOST_DONE/HOST_ERROR 不再自动发 DOWNLOAD_READY：** 任务完成或出错恢复后不再发送 `DOWNLOAD_READY`，避免触发上位机进入文件下载模式锁定调试按钮。
+
+**12. 运动命令不受 g_state 限制：** `handle_debug_cmd` 调用条件从 `if (g_state == HOST_DEBUG)` 改为 `if (cmd != RAW_LINE/NONE/UNKNOWN)`，确保即使状态意外切换（如被 CSV 数据误触 HOST_DOWNLOADING），运动命令仍能正常处理。
+
+**13. Host_UartRecvCallback 重复注释头清理：** 移除旧的 `/* === Host_UartRecvCallback — UART ISR 中调用 === */` 注释块，只保留"已弃用队列模式"版本。
 
 ### 10.1 常用 GPIO 引脚速查
 | 功能 | 引脚 | 备注 |
@@ -267,7 +321,7 @@ pnp_1/
 | SPI4_SCK/MISO/MOSI | PE2/PE5/PE6 | ESP32 |
 | SPI4_CS | PE3 | ESP32 片选 |
 | ESP32_RESET | PC13 | ESP32 硬复位 |
-| TMC1_EN | PD15 | R轴使能 |
+| TMC1_EN (ENN) | PD15 | R轴使能（低有效：LOW=开启，HIGH=关闭） |
 | TMC2_EN | PD14 | 预留 |
 | KEY1/KEY2 | PC6/PC7 | 低有效 |
 | CW/CCW/PUSH | PA8/PC8/PC9 | 低有效 |
@@ -1162,7 +1216,59 @@ ENN=HIGH 时 LDO 关断，数字逻辑掉电，UART 不工作，所有配置写�
 4. 此 TMC2209 模组使用 7 字节应答格式 + 非标准 CRC，但数据和读写功能正常
 5. huart3.hdmarx/hdmatx 必须在 TMC 使用前置 NULL，否则 UART_Error_Handler 会重启 DMA 偷走数据
 
+
+### 16.7 TMC2209 使能/关闭设计模式（2026-06-11~12）
+
+**背景：** §16.2 解决了 TMC2209 通信层的所有问题（DMA 干扰、ORE、应答格式、初始化时序），
+但遗留了一个系统级问题：`TMC_Init()` 完成后 TMC2209 驱动一直保持使能状态（ENN=LOW），
+即使 R 轴不旋转，电机线圈也持续通电，导致发热和潜在噪声。
+
+**设计决策：** 采取「用到才开，用完即关」策略。
+
+**`TMC_Init()` 行为变更：** 写完全部配置寄存器后调用 `TMC_SetEnable(false)` 关闭驱动。
+调用方无需额外操作——初始化完成时 TMC2209 已处于安全关闭状态。
+
+**`TMC_ENABLE_DELAY_MS` 宏：** 定义在 `driver_tmc2209.h`，值 50ms。
+取代之前散落在各处的硬编码延时（200ms、10ms 不统一），所有调用点统一引用。
+
+**`r_axis_rotate` 包裹模式：**
+```
+TMC_SetEnable(true) → vTaskDelay(TMC_ENABLE_DELAY_MS)
+  → TMC_SetSpeed(vactual) → vTaskDelay(run_time_ms)
+  → TMC_SetSpeed(0) → vTaskDelay(R_ACCEL_DELAY)
+  → TMC_SetEnable(false)
+```
+提前返回路径（`fabsf(delta) < 0.5f`）安全：此时 TMC2209 处于关闭状态。
+
+**CubeMX PD15 默认值陷阱：** PD15(TMC1_EN) 在 CubeMX 中为 GPIO_Output，默认 LOW。
+ENN 低有效 → 从 boot 起 TMC2209 使能。之前依赖 `Host_Task` 在启动时拉高 PD15，
+但 `Host_Task` 可能被注释（如运行 `StartCamTestTask` 时）。**任何不使用 R 轴的任务必须在启动时调用 `TMC_SetEnable(false)`。**
+
+**各任务 TMC2209 状态速查：**
+
+| 任务 | TMC2209 状态 | 机制 |
+|------|-------------|------|
+| `Host_Task` | 启动时关闭 | `TMC_SetEnable(false)` |
+| `StartCamTestTask` | 启动时关闭 | `TMC_SetEnable(false)` |
+| `StartPickPlaceTestTask` | `TMC_Init` 后自动关闭 | `TMC_Init()` 末尾关闭 |
+| `MotionTask_Func` | `TMC_Init` 后自动关闭 | `TMC_Init()` 末尾关闭 |
+| `StartMotorTestTask` | 循环内每次开→用→关 | 显式包裹 |
+| `r_axis_rotate` (通用) | 每次调用开→用→关 | 函数内包裹 |
+
+**风格统一：** 所有延时统一使用 `vTaskDelay(pdMS_TO_TICKS(...))`，不再混用 `osDelay`。
+
+**涉及文件：**
+| 文件 | 改动 |
+|------|------|
+| `driver_tmc2209.h` | 新增 `TMC_ENABLE_DELAY_MS 50` |
+| `driver_tmc2209.c` | `TMC_Init()` 末尾关闭 + 延时改宏 |
+| `app_motion.c` | `r_axis_rotate` 包裹使能/关闭 + 延时改宏 + `osDelay`→`vTaskDelay` |
+| `app_test.c` | `StartMotorTestTask` 包裹 + `StartCamTestTask` 关闭 |
+| `app_host.c` | 裸 GPIO 写 → `TMC_SetEnable(false)` |
+
 ## 十七、PickPlace 联合测试任务（2026-06-04~10）
+
+> **状态：已弃用。** 此测试任务的功能（Z 轴舵机、DRV8803、TMC2209）已合并到 `Host_Task` 的初始化流程中（见 §9.8-5/6）。`StartPickPlaceTestTask` 在 `app_freertos.c` 中处于注释状态。
 
 ### 17.1 概述
 
