@@ -64,8 +64,7 @@ void can_filter_mask_config(FDCAN_HandleTypeDef *hfdcan)
     // 全局滤波器, 直接拒绝不符合规则的标准数据帧, 扩展数据帧, 标准遥控帧, 扩展遥控帧
 //    HAL_FDCAN_ConfigGlobalFilter(hfdcan, FDCAN_REJECT, FDCAN_REJECT, FDCAN_FILTER_REMOTE, FDCAN_FILTER_REMOTE);
 
-    // 启动CAN中断与总线
-    HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_BUS_OFF | FDCAN_IT_ERROR_PASSIVE | FDCAN_IT_ARB_PROTOCOL_ERROR | FDCAN_IT_DATA_PROTOCOL_ERROR, 0);
+    // 中断激活已移至 CAN_Init 中 HAL_FDCAN_Start 之后
 }
 
 /**
@@ -83,14 +82,14 @@ void CAN_Init(FDCAN_HandleTypeDef *hfdcan, CAN_Callback Callback_Function)
     }
     
 
-    can_filter_mask_config(hfdcan);// 这行只负责配置滤波器，不再激活中断
+    can_filter_mask_config(hfdcan);   // 仅配置滤波器（中断激活在 HAL_FDCAN_Start 之后）
 
     HAL_FDCAN_Start(hfdcan);
 		    // 启动后再激活中断
-//    HAL_FDCAN_ActivateNotification(hfdcan,
-//        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_BUS_OFF |
-//        FDCAN_IT_ERROR_PASSIVE | FDCAN_IT_ARB_PROTOCOL_ERROR |
-//        FDCAN_IT_DATA_PROTOCOL_ERROR, 0);
+    HAL_FDCAN_ActivateNotification(hfdcan,
+        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_BUS_OFF |
+        FDCAN_IT_ERROR_PASSIVE | FDCAN_IT_ARB_PROTOCOL_ERROR |
+        FDCAN_IT_DATA_PROTOCOL_ERROR, 0);
 }
 
 /**
@@ -138,7 +137,7 @@ uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t 
     tx_header.FDFormat = FDCAN_CLASSIC_CAN;
     tx_header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_header.MessageMarker = 0;
-#ifdef DEBUG_CAN_ISR
+#if 0  // DEBUG_CAN_ISR — 已永久禁用（TX日志刷屏）
 	     // ---- 调试打印（暂时加入）----
     PrintDebug("TX ID=%d LEN=%d DATA:", can_id, total_len);
     for (int i = 0; i < total_len; i++) {

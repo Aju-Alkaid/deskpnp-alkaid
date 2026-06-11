@@ -20,6 +20,9 @@ typedef enum {
     /* 坐标系 */
     HCMD_SET_ORIGIN,
     HCMD_SET_SERVO,     // 舵机角度设定
+    HCMD_SET_R_AXIS,    // R轴旋转角度
+    HCMD_PUMP_ON,       // 开启气泵
+    HCMD_PUMP_OFF,      // 关闭气泵
     HCMD_MOVE_TO,       // 运动至指定坐标
     /* 退出调试 */
     HCMD_EXIT_DEBUG,

@@ -231,12 +231,12 @@ void StartDrv8803TestTask(void *argument)
     DRV8803_EnableChip(1, true);
     DRV8803_EnableChip(2, true);   /* U13 24V 芯片使能（电磁阀） */
     /* U13 上电后给 IN5 一个跳变确保输出状态 */
-    GPIOA->BSRR = GPIO_PIN_6;                   /* PA6 HIGH */
+    Valve_Off();                            /* 阀关断 PA6 LOW */
     vTaskDelay(pdMS_TO_TICKS(2));
-    GPIOA->BSRR = (uint32_t)GPIO_PIN_6 << 16;   /* PA6 LOW (阀初始关闭) */
+    Valve_On();                             /* 阀导通 PA6 HIGH */
     
 
-    DRV8803_SetOutput(&Port_12VO1, true);
+    Pump_On();
     PrintDebug("12VO1 (PE11) 真空泵已开启.\r\n");
 
     const TickType_t faultCheckPeriod = pdMS_TO_TICKS(100);
@@ -247,7 +247,7 @@ void StartDrv8803TestTask(void *argument)
             PrintDebug("[FAULT] U12 fault! Attempt recovery...\r\n");
             DRV8803_HandleFault_RTOS(1);
             DRV8803_EnableChip(1, true);
-            DRV8803_SetOutput(&Port_12VO1, true);
+            Pump_On();
             PrintDebug("U12 re-enabled, 12VO1 vacuum pump restored.\r\n");
         }
         vTaskDelay(faultCheckPeriod);
@@ -378,10 +378,6 @@ int wait_motors_done(const uint8_t *motors, int num, uint32_t timeout_ms) {
 void vMotorTestTask(void *pvParameters)   {
     /* ---------- 1. 启动 CAN 并激活中断 ---------- */
     CAN_Init(&hfdcan1, NULL);
-    HAL_FDCAN_ActivateNotification(&hfdcan1,
-        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_BUS_OFF |
-        FDCAN_IT_ERROR_PASSIVE | FDCAN_IT_ARB_PROTOCOL_ERROR |
-        FDCAN_IT_DATA_PROTOCOL_ERROR, 0);
     osDelay(500);
 
     /* ---------- 2. 广播初始化 X1/X2/Y 的基础状态 ---------- */
@@ -548,7 +544,7 @@ void axis_stop(int32_t addr)
 {
     uint8_t tx[8] = {0};
     tx[0] = 0xF5;
-    tx[3] = 0x00;
+    tx[3] = 255;  // 最大减速度
     CAN_Transmit_Data(&hfdcan1, addr, tx, 7);
 }
 /**
@@ -558,12 +554,21 @@ void axis_stop(int32_t addr)
  */
 void disable_sync_stop(void)
 {
+    // 重开同步，使后续 0xF5 进入缓存（覆盖电机当前执行的命令）
+    motorSyncEnable(1);
+    osDelay(5);
+
+    // 三轴急停（缓存到同步缓冲区，acc=255 最大减速度）
     axis_stop(X1_ADDR);
     axis_stop(X2_ADDR);
     axis_stop(Y_ADDR);
     osDelay(5);
+
+    // 触发同步执行 → 三轴同时最大减速度停止
     motorSyncTrigger(0);
     osDelay(10);
+
+    // 重开同步（trigger 消耗后需恢复）
     motorSyncEnable(1);
     osDelay(10);
 }
@@ -874,11 +879,11 @@ static void pickplace_pick(void)
                PICKPLACE_PICK_ANGLE);
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PICK_ANGLE);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
-    DRV8803_SetOutput(PICKPLACE_PUMP_PORT, true);
+    Pump_On();
     /* 阀是低端开关：OUT5拉GND才导通。先HIGH再LOW确保锁存 */
-    GPIOA->BSRR = GPIO_PIN_6;                   /* PA6 HIGH */
+    Valve_Off();                            /* 阀关断 PA6 LOW */
     vTaskDelay(pdMS_TO_TICKS(2));
-    GPIOA->BSRR = (uint32_t)GPIO_PIN_6 << 16;   /* PA6 LOW → 阀ON */
+    Valve_On();                             /* 阀导通 */
 }
 /**
  * @brief Z轴舵机贴装：关阀 → 关泵 → 转到贴装角
@@ -887,9 +892,8 @@ static void pickplace_place(void)
 {
     PrintDebug("[PickPlace] 贴装: 阀OFF + 泵OFF + 舵机→%.0f°\r\n",
                PICKPLACE_PLACE_ANGLE);
-    /* 阀关断 → PA6=HIGH */
-    GPIOA->BSRR = GPIO_PIN_6;  /* BS6 → PA6 HIGH */
-    DRV8803_SetOutput(PICKPLACE_PUMP_PORT, false);
+    Valve_Off();                            /* 阀关断 */
+    Pump_Off();
     vTaskDelay(pdMS_TO_TICKS(100));
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
@@ -1049,7 +1053,7 @@ void StartPickPlaceTestTask(void *argument)
 /* 偏移→步数换算系数 (需根据相机 FOV 实测标定！) */
 #define CAM_PX_TO_STEPS       (STEPS_PER_MM / 1000.0f)   /* 像素 → 步数 */
 #define CAM_MM10000_TO_STEPS  (STEPS_PER_MM / 10000.0f)  /* mm*10000 → 步数 */
-#define CAM_MOVE_SPEED        300
+#define CAM_MOVE_SPEED        100
 #define CAM_MOVE_ACC          25
 
 /**
@@ -1094,14 +1098,14 @@ static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
                 int32_t dx_s = 0, dy_s = 0;
 
                 if (cmd == VCMD_P2) {
-                    dx_s = (int32_t)(r->dx * CAM_MM10000_TO_STEPS);
-                    dy_s = (int32_t)(r->dy * CAM_MM10000_TO_STEPS);
+                    dx_s = (int32_t)(r->dy * CAM_MM10000_TO_STEPS);
+                    dy_s = (int32_t)(r->dx * CAM_MM10000_TO_STEPS);
                     PrintDebug("[CAM_TEST]   Mark%d/%d: dx=%ld dy=%ld mm10000 -> move(%ld,%ld)\r\n",
                                (int)r->mark_index, (int)r->mark_count,
                                (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
                 } else {
-                    dx_s = (int32_t)(r->dx * CAM_PX_TO_STEPS);
-                    dy_s = (int32_t)(r->dy * CAM_PX_TO_STEPS);
+                    dx_s = (int32_t)(r->dy * CAM_PX_TO_STEPS);
+                    dy_s = (int32_t)(r->dx * CAM_PX_TO_STEPS);
                     if (r->angle_x100 != 0 || r->class_name[0] != '\0') {
                         PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px ang=%ld.%02ld cls=%s -> move(%ld,%ld)\r\n",
                                    (long)r->dx, (long)r->dy,
@@ -1156,10 +1160,6 @@ void StartCamTestTask(void *argument) {
 
     /* ---- 1. CAN + 电机初始化 ---- */
     CAN_Init(&hfdcan1, NULL);
-    HAL_FDCAN_ActivateNotification(&hfdcan1,
-        FDCAN_IT_RX_FIFO0_NEW_MESSAGE | FDCAN_IT_BUS_OFF |
-        FDCAN_IT_ERROR_PASSIVE | FDCAN_IT_ARB_PROTOCOL_ERROR |
-        FDCAN_IT_DATA_PROTOCOL_ERROR, 0);
     osDelay(200);
     Motor_Init();
     osDelay(200);

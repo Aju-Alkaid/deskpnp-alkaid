@@ -24,6 +24,7 @@ extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 #define PNP_ACC          25
 #define PICK_DELAY_MS    300
 #define PLACE_DELAY_MS   300
+#define PUMP_BLOW_MS    1000          /* 关气泵后电磁阀吹气时长(ms) */
 #define Z_SERVO_CH       2            /* 舵机通道号 */
 
 /* ================================================================
@@ -50,7 +51,12 @@ static int32_t g_cur_x = 0;
 static int32_t g_cur_y = 0;
 
 /* JOG 状态 */
+static bool g_during_cmd = false;  /* 正在执行命令时置位，用于屏蔽回显 */
 static bool g_jog_active = false;
+/* 命令去重：连续两次相同 cmd+param 直接丢弃（中间有别的命令会复位） */
+static HostCmd_t    g_last_cmd = HCMD_NONE;
+static float        g_last_param = 0.0f;
+
 
 /* 行解析器 */
 static LineParser_t g_parser;
@@ -206,45 +212,48 @@ static void download_done(void) {
  * ================================================================ */
 static void handle_debug_cmd(HostParsed_t *cmd) {
     int32_t steps;
+    /* 状态去重：连续两次完全相同的命令直接丢弃
+     * 相比时间窗口防抖，此方案不依赖 tick 精度，中间有别的命令自动复位 */
+    if (cmd->cmd == g_last_cmd && cmd->param == g_last_param) {
+        return;
+    }
+    g_last_cmd  = cmd->cmd;
+    g_last_param = cmd->param;
+    g_during_cmd = true;
+
 
     switch (cmd->cmd) {
-    case HCMD_MOVE_UP:
-        steps = (int32_t)(cmd->param * STEPS_PER_MM);
-        move_xy_relative(steps, 0, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
-        g_jog_active = false;
-        PrintDebug("[HOST] MOVE_UP %.1fmm→(%ld,%ld)\r\n",
-                   cmd->param, g_cur_x, g_cur_y);
-        break;
-
+    case HCMD_MOVE_UP:    /* fall through — 离散移动四方向统一处理 */
     case HCMD_MOVE_DOWN:
-        steps = (int32_t)(-cmd->param * STEPS_PER_MM);
-        move_xy_relative(steps, 0, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
-        g_jog_active = false;
-        PrintDebug("[HOST] MOVE_DOWN %.1fmm→(%ld,%ld)\r\n",
-                   cmd->param, g_cur_x, g_cur_y);
-        break;
-
     case HCMD_MOVE_LEFT:
-        steps = (int32_t)(cmd->param * STEPS_PER_MM);
-        move_xy_relative(0, steps, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
-        g_jog_active = false;
-        PrintDebug("[HOST] MOVE_LEFT %.1fmm→(%ld,%ld)\r\n",
-                   cmd->param, g_cur_x, g_cur_y);
-        break;
-
     case HCMD_MOVE_RIGHT:
-        steps = (int32_t)(-cmd->param * STEPS_PER_MM);
-        move_xy_relative(0, steps, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
+    {
+        /* 查表：{dx_sign, dy_sign} 映射到 (X步数, Y步数) */
+        static const struct { int8_t sx; int8_t sy; const char *name; } tbl[] = {
+            [HCMD_MOVE_UP    - HCMD_MOVE_UP] = { 1, 0, "MOVE_UP"    },
+            [HCMD_MOVE_DOWN  - HCMD_MOVE_UP] = {-1, 0, "MOVE_DOWN"  },
+            [HCMD_MOVE_LEFT  - HCMD_MOVE_UP] = { 0, 1, "MOVE_LEFT"  },
+            [HCMD_MOVE_RIGHT - HCMD_MOVE_UP] = { 0,-1, "MOVE_RIGHT" },
+        };
+        uint8_t idx = (uint8_t)(cmd->cmd - HCMD_MOVE_UP);
+        int32_t steps_mm = (int32_t)(cmd->param * STEPS_PER_MM);
+        int32_t dx = tbl[idx].sx * steps_mm;
+        int32_t dy = tbl[idx].sy * steps_mm;
+        int ret = move_xy_relative(dx, dy, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
         g_jog_active = false;
-        PrintDebug("[HOST] MOVE_RIGHT %.1fmm→(%ld,%ld)\r\n",
-                   cmd->param, g_cur_x, g_cur_y);
+        if (ret < 0) {
+            PrintDebug("[HOST] %s %.1fmm INTERRUPTED(ret=%d) pos=(%ld,%ld)\r\n",
+                       tbl[idx].name, cmd->param, ret, g_cur_x, g_cur_y);
+        } else {
+            PrintDebug("[HOST] %s %.1fmm -> (%ld,%ld)\r\n",
+                       tbl[idx].name, cmd->param, g_cur_x, g_cur_y);
+        }
         break;
+    }
 
     case HCMD_MOVE_UP_START:
         if (g_jog_active) disable_sync_stop();
         g_jog_active = true;
-        motorSyncEnable(1);          /* 确保同步缓存模式 */
-        osDelay(5);
         positionMode3Run(X1_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         positionMode3Run(X2_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         motorSyncTrigger(0);
@@ -254,8 +263,6 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
     case HCMD_MOVE_DOWN_START:
         if (g_jog_active) disable_sync_stop();
         g_jog_active = true;
-        motorSyncEnable(1);          /* 确保同步缓存模式 */
-        osDelay(5);
         positionMode3Run(X1_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         positionMode3Run(X2_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         motorSyncTrigger(0);
@@ -265,8 +272,6 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
     case HCMD_MOVE_LEFT_START:
         if (g_jog_active) disable_sync_stop();
         g_jog_active = true;
-        motorSyncEnable(1);          /* 确保同步缓存模式 */
-        osDelay(5);
         positionMode3Run(Y_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         motorSyncTrigger(0);
         PrintDebug("[HOST] JOG LEFT %.1f\r\n", cmd->param);
@@ -275,8 +280,6 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
     case HCMD_MOVE_RIGHT_START:
         if (g_jog_active) disable_sync_stop();
         g_jog_active = true;
-        motorSyncEnable(1);          /* 确保同步缓存模式 */
-        osDelay(5);
         positionMode3Run(Y_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         motorSyncTrigger(0);
         PrintDebug("[HOST] JOG RIGHT %.1f\r\n", cmd->param);
@@ -321,6 +324,30 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         }
         break;
 
+    case HCMD_SET_R_AXIS:
+        /* R 轴旋转角度 (0~360) */
+        {
+            float angle = cmd->param;
+            if (angle < 0.0f) angle = 0.0f;
+            if (angle > 360.0f) angle = 360.0f;
+            r_axis_rotate(angle, R_SPEED_RPM);
+            PrintDebug("[HOST] SET_R_AXIS %.1f deg\r\n", angle);
+        }
+        break;
+
+    case HCMD_PUMP_ON:
+        Pump_On();
+        PrintDebug("[HOST] PUMP_ON\r\n");
+        break;
+
+    case HCMD_PUMP_OFF:
+        Pump_Off();                         /* 关气泵 */
+        Valve_On();                         /* 开电磁阀吹气 (PA6=HIGH) */
+        osDelay(PUMP_BLOW_MS);              /* 吹气 1s */
+        Valve_Off();                        /* 关电磁阀 (PA6=LOW) */
+        PrintDebug("[HOST] PUMP_OFF done\r\n");
+        break;
+
     case HCMD_EXIT_DEBUG:
         g_state = HOST_INIT;
         g_jog_active = false;
@@ -333,6 +360,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
     default:
         break;
     }
+    g_during_cmd = false;
 }
 
 /* ================================================================
@@ -533,9 +561,10 @@ void Host_Task(void *argument) {
     /* 舵机 + DRV8803 初始化 */
     DRV8803_Init();
     DRV8803_EnableChip(1, true);   /* U12 12V 芯片使能 */
+    DRV8803_EnableChip(2, true);   /* U13 24V 芯片使能（电磁阀等） */
     Servo_Init(&htim2);            /* Z轴舵机 TIM2_CH3 */
     DRV8803_SetOutput(&Port_12VO4, true);  /* 舵机上电 (12VO4) */
-    Servo_SetAngle(Z_SERVO_CH, 120.0f);     /* 初始位置：贴装角（吸嘴上升） */
+    Valve_Off();                        /* 电磁阀初始关断 (PA6=LOW) */
     osDelay(300);
 
     /* TMC2209 (R轴) 未初始化，拉高 ENN 禁用驱动（ENN 低有效，HIGH=关闭） */
@@ -572,8 +601,18 @@ void Host_Task(void *argument) {
                             continue;
                         }
 
-                        /* 调试模式：CSV 数据 → 切换到下载模式 */
-                        if ((g_state == HOST_DEBUG || g_state == HOST_INIT) && parsed.cmd == HCMD_RAW_LINE) {
+                        /* 调试模式：RAW_LINE → 切换到文件下载模式
+                         * 过滤回显：跳过调试输出和握手消息的环回
+                         *   - 以 [ 开头 → PrintDebug 回显（"[HOST] ..."）
+                         * 命令执行期间的 RAW_LINE = 回显，直接丢弃 */
+                        if (g_during_cmd && parsed.cmd == HCMD_RAW_LINE) continue;
+                        if ((g_state == HOST_DEBUG || g_state == HOST_INIT)
+                            && parsed.cmd == HCMD_RAW_LINE
+                            && parsed.raw_len > 0
+                            && parsed.raw[0] != '['
+                            && !(parsed.raw_len == 10 && memcmp(parsed.raw, "DEBUG_MODE", 10) == 0)
+                            && !(parsed.raw_len == 14 && memcmp(parsed.raw, "DOWNLOAD_READY", 14) == 0)
+                            && !(parsed.raw_len == 15 && memcmp(parsed.raw, "EXIT_DEBUG_MODE", 15) == 0)) {
                             g_state = HOST_DOWNLOADING;
                             g_comp_count = 0;
                             g_header_parsed = false;

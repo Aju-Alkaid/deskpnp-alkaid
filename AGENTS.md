@@ -34,7 +34,7 @@
 | 温度传感器 | PF9 / PA3, DS18B20 |
 | 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM) |
 | 吸嘴气泵 | PE11 (12VO1, DRV8803 U12 OUT1 开关) |
-| 电磁阀 | PA6 (24VO1, DRV8803 U13 OUT5 低端开关, PA6=LOW时导通) |
+| 电磁阀 | PA6 (24VO1, DRV8803 U13 OUT5, PA6=HIGH时导通 — 标准DRV8803: IN=HIGH→OUT=LOW) |
 | BOOT0 | PB8, 启动选择 |
 | LCD_LED | PD8, LCD 背光 |
 ## 三、目录结构
@@ -87,10 +87,15 @@ pnp_1/
 - **物理层：** 115200, 8N1, DMA+空闲中断
 - **协议格式：** 行文本协议，`COMMAND arg\n`
 - **命令列表：**
-  - `MOVE_UP/MOVE_DOWN/MOVE_LEFT/MOVE_RIGHT [步长mm]` — 调试单步移动
-  - `MOVE_UP_START/MOVE_DOWN_START/MOVE_LEFT_START/MOVE_RIGHT_START [速度]` — 调试连续移动(开始)
+  - `MOVE_UP/DOWN/LEFT/RIGHT <步长mm>` — 离散移动（0.3/0.5/1/5/10）
+  - `MOVE_*_START <速度mm/s>` — 连续移动开始（1~50），第二次点击自动发 `MOVE_STOP`
   - `MOVE_STOP` — 停止连续移动
-  - `SET_ORIGIN` — 设置当前点为原点
+  - `MOVE_TO <x> <y>` — 运动至绝对坐标 (mm)
+  - `SET_ORIGIN` — 当前位置设为零点
+  - `SET_SERVO <角度>` — Z 轴舵机 (0~180°)
+  - `SET_R_AXIS <角度>` — R 轴旋转 (0~360°)
+  - `PUMP_ON` — 开启气泵
+  - `PUMP_OFF` — 关闭气泵 + 电磁阀吹气 1s 后关阀
   - `EXIT_DEBUG_MODE` — 退出调试模式
 - **文件下载流程：**
   1. G4 发送 `DOWNLOAD_READY\n` 给上位机
@@ -270,7 +275,7 @@ TMC_SetEnable(true) → vTaskDelay(TMC_ENABLE_DELAY_MS) → TMC_SetSpeed(...) �
 
 **4. TMC2209 VACTUAL 启动扭矩不足：** 直接跳全速时静摩擦卡住电机，需用速度斜坡（5000→80000 µstep/s，每级 +8000，40ms/级）。
 
-**5. DRV8803 24V 端口为低端开关：** Port_24VO1(PA6) 等 24V 端口负载串在 24V 电源和 OUT 之间，PA6=LOW 时 OUT 拉 GND 负载导通，逻辑与 12V 端口相反。
+**5. DRV8803 24V 端口为低端开关：** Port_24VO1(PA6) 等 24V 端口为标准 DRV8803 低端驱动：IN=HIGH→OUT=LOW→负载导通，IN=LOW→OUT=高阻→负载断开。与 12V 端口逻辑一致。早期文档「PA6=LOW时导通」为错误记录，已修正。
 
 
 ### 9.8 已完成的架构改进（2026-06-10）
@@ -300,6 +305,113 @@ TMC_SetEnable(true) → vTaskDelay(TMC_ENABLE_DELAY_MS) → TMC_SetSpeed(...) �
 **12. 运动命令不受 g_state 限制：** `handle_debug_cmd` 调用条件从 `if (g_state == HOST_DEBUG)` 改为 `if (cmd != RAW_LINE/NONE/UNKNOWN)`，确保即使状态意外切换（如被 CSV 数据误触 HOST_DOWNLOADING），运动命令仍能正常处理。
 
 **13. Host_UartRecvCallback 重复注释头清理：** 移除旧的 `/* === Host_UartRecvCallback — UART ISR 中调用 === */` 注释块，只保留"已弃用队列模式"版本。
+
+### 9.10 UART DMA 架构改进（2026-06-12）
+
+**背景：** 上位机输出日志重复、命令被多次执行。经排查发现三重根因：
+
+#### 根因 1：ISR 内立即重启 DMA 与任务侧竞态
+
+原 `HAL_UARTEx_RxEventCallback` ISR 在置 `data_ready` 后立即调用 `UART_StartReceive_DMA` 重启 DMA。但此时 `UART_Driver_Process` 尚未拷贝数据，DMA 缓冲区被新传输覆盖；同时 `HAL_UART_DMAStop` 可能触发虚假空闲中断，改写 `data_len`。
+
+**修复：** ISR 行为按通道可配置。引入 `UART_Channel_t.isr_restart` 字段：
+
+| 通道 | `isr_restart` | 策略 |
+|------|--------------|------|
+| UART_CH1 (上位机) | `false` | ISR 不重启 DMA，由 `UART_Driver_Process` 统一重启 |
+| UART_CH2 (摄像头) | `true` | ISR 立即重启，保证帧数据不丢 |
+| UART_CH3 (TMC2209) | `true` | ISR 立即重启 |
+| UART_CH4 (LPUART1) | `true` | ISR 立即重启（预留） |
+
+初始化在 `UART_Driver_Init()` 中显式赋值，长期维护只需改一行。
+
+#### 根因 2：data_ready/data_len 被 ISR 和任务共享
+
+原架构 `UART_Driver_Process` 拷贝数据后不清 `data_ready`，依赖外部 `UART_ClearData` 来清。PrintDebug 输出的 TX→RX 硬件环回触发 ISR 在 `UART_PeekData` 和 `UART_ClearData` 之间修改 `data_len`，导致 app buffer 内容和长度字段脱钩。
+
+**修复：** 引入独立字段 `rx_app_len`（任务侧，ISR 不触及）。
+
+```
+ISR 侧                任务侧（UART_Driver_Process 临界区内原子操作）
+data_ready ─┐         ┌─ rx_app_len（任务只读）
+data_len   ─┤  解耦   ├─ rx_app_buf
+            ┘         └─ 拷贝 + 清零 data_ready/data_len
+```
+
+`UART_PeekData` / `UART_HasData` / `UART_GetRxCount` 全部改用 `rx_app_len`。
+`UART_ClearData` 同时清零 `rx_app_len`、`data_ready`、`data_len`，兼容 `move_xy_relative` 的中断检测。
+
+#### 根因 3：CAN TX 调试打印刷屏
+
+`driver_can.c:139` 的 TX 调试打印被 `#ifdef DEBUG_CAN_ISR` 包裹，但 Keil 工程可能定义了该宏。每次 CAN 发送产生 3 行日志，一个 JOG 指令触发 ~9 次 CAN TX = 27 行日志。
+
+**修复：** `#ifdef DEBUG_CAN_ISR` → `#if 0`，永久禁用。
+
+#### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `driver_uart.c` | `rx_app_len` 字段 + `isr_restart` 字段 + `UART_Driver_Process` 原子消费 + `UART_ClearData` 三清 |
+| `driver_can.c` | CAN TX 调试 `#if 0` |
+
+
+### 9.11 命令处理架构改进（2026-06-12）
+
+#### 状态去重
+
+`handle_debug_cmd` 入口加入状态去重：连续两次 cmd+param 完全相同的命令直接丢弃。
+
+```
+MOVE_DOWN_START 10 → 执行 (g_last=MOVE_DOWN_START, param=10)
+MOVE_DOWN_START 10 → 丢弃 (cmd==g_last && param==g_last_param)
+MOVE_STOP          → 执行 (cmd!=g_last，自动复位)
+```
+
+相比时间窗口防抖，不依赖 tick 精度，中间有其他命令介入自动复位。
+
+#### RAW_LINE 回显过滤
+
+主循环中 RAW_LINE 处理增加四重过滤，防止 PrintDebug 输出和握手消息的 TX→RX 环回误触发下载模式：
+
+1. 命令执行期间（`g_during_cmd=true`）的 RAW_LINE → 直接 `continue`
+2. 以 `[` 开头的行（PrintDebug 回显）
+3. 精确匹配 `DEBUG_MODE`（10 字节）
+4. 精确匹配 `DOWNLOAD_READY`（14 字节）
+5. 精确匹配 `EXIT_DEBUG_MODE`（15 字节）
+
+#### 离散移动合并
+
+`HCMD_MOVE_UP/DOWN/LEFT/RIGHT` 四个 case 合并为 fall-through + 静态查表驱动，同时加入 `move_xy_relative` 返回值检测（中断时日志标记 INTERRUPTED）。
+
+#### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `app_host.c` | 状态去重 + `g_during_cmd` 守卫 + 四重过滤 + 离散移动合并 |
+
+
+### 9.12 泵阀控制语义化（2026-06-12）
+
+**背景：** 电磁阀实际硬件行为为 PA6=HIGH→导通（标准 DRV8803），与早期文档记录相反。`DRV8803_Init` 中 12V/24V 端口统一初始化为 LOW（关断）。
+
+**语义化接口：** 在 `driver_drv8803.h` 中新增内联函数：
+
+```c
+static inline void Pump_On(void)   { DRV8803_SetOutput(&Port_12VO1, true);  }
+static inline void Pump_Off(void)  { DRV8803_SetOutput(&Port_12VO1, false); }
+static inline void Valve_On(void)  { DRV8803_SetOutput(&Port_24VO1, true);  }  // PA6=HIGH→导通
+static inline void Valve_Off(void) { DRV8803_SetOutput(&Port_24VO1, false); }  // PA6=LOW→关断
+```
+
+**PUMP_OFF 时序：** 关泵 → Valve_On() → osDelay(1000ms) → Valve_Off()。其余时间阀常关。
+
+**涉及文件：**
+| 文件 | 改动 |
+|------|------|
+| `driver_drv8803.h` | 新增 Pump_On/Off、Valve_On/Off 内联函数 |
+| `driver_drv8803.c` | `DRV8803_Init` 12V/24V 统一初态 LOW |
+| `app_host.c` | `handle_debug_cmd` PUMP_ON/OFF 改用语义化接口 |
+| `app_test.c` | 所有 BSRR 直写 PA6 改为 `DRV8803_SetOutput(VALVE_PORT, ...)` |
 
 ### 10.1 常用 GPIO 引脚速查
 | 功能 | 引脚 | 备注 |
@@ -1294,8 +1406,7 @@ ENN 低有效 → 从 boot 起 TMC2209 使能。之前依赖 `Host_Task` 在启�
 
 **R 轴速度斜坡：** TMC2209 VACTUAL 模式无极变速/加速斜坡。直接跳全速时静摩擦力会卡住电机，需从 5000 µstep/s 起步，每级 +8000，40ms/级，逐步提升至 80000。
 
-**电磁阀控制：** 24V O1(PA6) 是 DRV8803 U13 的低端开关。PA6=LOW 时 OUT5 拉 GND，阀两端 24V 压差导通。PA6=HIGH 时 OUT5 拉 24V，阀两端同电位关断。代码用 `GPIOA->BSRR` 直写寄存器，先 HIGH 再 LOW 确保 DRV8803 锁存状态变化。
-
+**电磁阀控制：** 已修正为通过语义化接口 `Valve_On()/Valve_Off()` 控制（见 §9.12）。实际硬件为标准 DRV8803：IN=HIGH→OUT=LOW→导通。不再使用 BSRR 直写。
 **调试开关：**
 - `PICKPLACE_VERBOSE`（app_test.c）— 开启 VACTUAL/DRV_STATUS 读回校验
 - `SERVO_DEBUG`（driver_servo.h）— 开启 TIM 寄存器诊断输出

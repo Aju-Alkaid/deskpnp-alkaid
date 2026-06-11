@@ -18,6 +18,7 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     /* 命令匹配表 */
     #define MATCH(s) (cmd_len == sizeof(s)-1 && memcmp(line, s, cmd_len) == 0)
 
+    // MATCH 通过长度+内容双重校验，排序不影响正确性（如 MOVE_UP 不会误匹配 MOVE_UP_START）
     if (MATCH("MOVE_UP")) {
         if (space) *param = (float)strtof(space + 1, NULL);
         return HCMD_MOVE_UP;
@@ -64,6 +65,16 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("SET_SERVO")) {
         if (space) *param = (float)strtof(space + 1, NULL);
         return HCMD_SET_SERVO;
+    }
+    if (MATCH("SET_R_AXIS")) {
+        if (space) *param = (float)strtof(space + 1, NULL);
+        return HCMD_SET_R_AXIS;
+    }
+    if (MATCH("PUMP_ON")) {
+        return HCMD_PUMP_ON;
+    }
+    if (MATCH("PUMP_OFF")) {
+        return HCMD_PUMP_OFF;
     }
     if (MATCH("SET_ORIGIN")) {
         return HCMD_SET_ORIGIN;

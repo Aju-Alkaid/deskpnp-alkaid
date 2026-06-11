@@ -41,7 +41,9 @@ typedef struct {
     
     volatile uint16_t last_ndtr;    // 上次 NDTR (用于调试或复用)
     volatile uint16_t data_len;     // 当前待处理数据长度
+    volatile uint16_t rx_app_len;   // 应用层有效数据长度（任务侧，ISR不触及）
     volatile bool data_ready;       // 数据就绪标志
+    volatile bool isr_restart;    // true=ISR内重启DMA, false=由Driver_Process重启
     
     volatile bool is_rx_active;     // 接收是否正在运行
     volatile uint32_t overflow_count;
@@ -183,7 +185,13 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
         ch->data_ready = true;
         if (huart == &huart1 && hostMotionTaskHandle != NULL) { osThreadFlagsSet(hostMotionTaskHandle, 0x01); }
 
-    }	
+        /* 按通道配置决定 ISR 内是否重启 DMA */
+        if (ch->isr_restart) {
+            ch->is_rx_active = false;
+            UART_StartReceive_DMA(ch);
+        }
+
+    }
 
 }
 
@@ -223,21 +231,25 @@ void UART_Driver_Init(void)
     uart_channels[UART_CH1].huart = &huart1;
     uart_channels[UART_CH1].hdmarx = &hdma_usart1_rx;
     uart_channels[UART_CH1].is_rx_active = false;
+    uart_channels[UART_CH1].isr_restart = false;  // 上位机：由 Driver_Process 重启
     huart1.gState = HAL_UART_STATE_READY; 
     // 配置 UART2
     uart_channels[UART_CH2].huart = &huart2;
     uart_channels[UART_CH2].hdmarx = &hdma_usart2_rx;
+    uart_channels[UART_CH2].isr_restart = true;   // 摄像头：ISR 立即重启
     uart_channels[UART_CH2].is_rx_active = false;
     huart2.gState = HAL_UART_STATE_READY; 
     // 配置 UART3
     uart_channels[UART_CH3].huart = &huart3;
     uart_channels[UART_CH3].hdmarx = &hdma_usart3_rx;
+    uart_channels[UART_CH3].isr_restart = true;   // TMC2209
     uart_channels[UART_CH3].is_rx_active = false;
     huart3.gState = HAL_UART_STATE_READY; 
     //配置 LPUART1
     uart_channels[UART_CH4].huart = &hlpuart1;
     uart_channels[UART_CH4].hdmarx = NULL;
     uart_channels[UART_CH4].is_rx_active = false;
+    uart_channels[UART_CH4].isr_restart = true;   // LPUART1 预留
     hlpuart1.gState = HAL_UART_STATE_READY; 
 
     // TX DMA 句柄绑定
@@ -351,23 +363,18 @@ void UART_Driver_Process(void)
         UART_Channel_t *ch = &uart_channels[i];
 
         if (ch->data_ready) {
-            // 进入临界区保护
             taskENTER_CRITICAL();
-
             uint16_t current_len = ch->data_len;
             if (current_len > 0 && current_len <= RX_BUFFER_SIZE) {
-                // 拷贝到应用缓冲区（注意：不清除 data_ready 标志，
                 memcpy(ch->rx_app_buf, ch->rx_dma_buf, current_len);
-                // data_len 保留，供上层读取）
+                ch->rx_app_len = current_len;  // 任务侧有效长度
             } else {
-                // 异常长度，放弃本次数据（将 data_ready 置 false）
-                ch->data_ready = false;
-                ch->data_len = 0;
+                ch->rx_app_len = 0;
             }
-
+            ch->data_ready = false;  // 同步清零 ISR 侧标志
+            ch->data_len   = 0;
             taskEXIT_CRITICAL();
 
-            // 重新启动 DMA 接收（DMA 缓冲区已被拷贝，可安全覆盖）
             if (ch->huart->gState != HAL_UART_STATE_BUSY_RX) {
                 UART_StartReceive_DMA(ch);
             }
@@ -384,9 +391,9 @@ void UART_Driver_Process(void)
 uint16_t UART_GetRxCount(Uart_Id_t id) 
 {
     if ((int)id >= UART_DRIVER_COUNT) return 0;
-    // 仅在 data_ready 时有效，否则返回 0 或实时计算 NDTR
-    if (uart_channels[id].data_ready) {
-        return uart_channels[id].data_len;
+    // 返回任务侧应用层有效长度（ISR 已通过 UART_Driver_Process 同步）
+    if (uart_channels[id].rx_app_len > 0) {
+        return uart_channels[id].rx_app_len;
     }
     return 0;
 }
@@ -539,7 +546,7 @@ void UART_ResumeRX(Uart_Id_t id) {
 bool UART_HasData(Uart_Id_t id)
 {
     if ((int)id >= UART_DRIVER_COUNT) return false;
-    return uart_channels[id].data_ready;
+    return uart_channels[id].rx_app_len > 0;
 }
 
 bool UART_PeekData(Uart_Id_t id, const uint8_t **data, uint16_t *len)
@@ -548,10 +555,10 @@ bool UART_PeekData(Uart_Id_t id, const uint8_t **data, uint16_t *len)
         return false;
 
     UART_Channel_t *ch = &uart_channels[id];
-    if (!ch->data_ready) return false;
+    if (ch->rx_app_len == 0) return false;
 
     *data = ch->rx_app_buf;
-    *len = ch->data_len;
+    *len = ch->rx_app_len;
     return true;
 }
 
@@ -559,6 +566,7 @@ void UART_ClearData(Uart_Id_t id)
 {
     if ((int)id >= UART_DRIVER_COUNT) return;
     UART_Channel_t *ch = &uart_channels[id];
-    ch->data_ready = false;
-    ch->data_len = 0;
+    ch->rx_app_len = 0;
+    ch->data_ready = false;  // 同步清除 ISR 侧标志，兼容 move_xy_relative 中断检测
+    ch->data_len   = 0;
 }

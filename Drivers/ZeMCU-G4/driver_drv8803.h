@@ -84,12 +84,12 @@ static inline void Pump_Off(void) {
     DRV8803_SetOutput(&Port_12VO1, false);
 }
 
-/** @brief 电磁阀开启（24VO1/PA6） */
+/** @brief 电磁阀开启（24VO1/PA6, 实际电路: PA6=HIGH→导通） */
 static inline void Valve_On(void) {
     DRV8803_SetOutput(&Port_24VO1, true);
 }
 
-/** @brief 电磁阀关闭（24VO1/PA6） */
+/** @brief 电磁阀关闭（24VO1/PA6, 实际电路: PA6=LOW→断开） */
 static inline void Valve_Off(void) {
     DRV8803_SetOutput(&Port_24VO1, false);
 }

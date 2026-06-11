@@ -79,7 +79,7 @@ static const PowerPort_t * const g_all_ports[] = {
  */
 HAL_StatusTypeDef DRV8803_Init(void)
 {
-    // 所有输出端口引脚初始化为低电平
+    // 所有端口初始化为低电平（12V/24V 统一：HIGH=导通，LOW=断开）
     for (int i = 0; i < 8; i++) {
         for (int j = 0; j < g_all_ports[i]->num_pins; j++) {
             HAL_GPIO_WritePin(g_all_ports[i]->pins[j].port,

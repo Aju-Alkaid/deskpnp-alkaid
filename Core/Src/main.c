@@ -128,7 +128,7 @@ int main(void)
 
   init_finished = true;
 	Servo_Init(&htim5); 
-	Motor_Init();
+	// Motor_Init ÒÑÒÆÖÁ¸÷ÈÎÎñÖÐµ÷ÓÃ£¨CAN Æô¶¯ºó£©
   /* USER CODE END 2 */
 
   /* Init scheduler */
@@ -213,7 +213,7 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   /* USER CODE BEGIN Callback 0 */
     if (htim->Instance == TIM2) {
-        // Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½?
+        // Ã¿ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿?
         overflow_count++;
     }
 
