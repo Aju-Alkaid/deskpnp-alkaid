@@ -34,7 +34,7 @@ void Servo_Init(TIM_HandleTypeDef *htim)
     uint16_t max_cmp = (uint16_t)(SERVO_PWM_MAX_US * pulse_per_us);
     uint16_t mid_cmp = (min_cmp + max_cmp) / 2;
 
-    /* ---- 通道 2 = TIM_CHANNEL_3 = PE8 ---- */
+    /* ---- 通道 2 = TIM_CHANNEL_3（TIM2→PB10 或 TIM5→PE8） ---- */
     uint8_t idx = 2;
     servo_handles[idx].htim        = htim;
     servo_handles[idx].channel     = TIM_CHANNEL_3;
@@ -56,21 +56,18 @@ void Servo_Init(TIM_HandleTypeDef *htim)
     }
 
     /* ------------------------------------------------------------
-     *  修复 ：绕过 HAL 对同一定时器多通道的限制
-     *
-     *  TIM5_CH1 (PB2, 24V_C1) 先被 HAL_TIM_PWM_Start 启动，
-     *  htim5.State 变为 BUSY。之后调 HAL_TIM_PWM_Start(&htim5,
-     *  TIM_CHANNEL_3) 时 HAL 检测到 State != READY → 返回
-     *  HAL_ERROR，CC3E (CCER bit8) 不会被置位。
-     *
-     *  解决：临时恢复 State = READY → 走 HAL → 还原 State。
-     *  安全：此操作在任务启动阶段，无并发；TIM5 是通用定时器，
-     *  无 MOE/刹车，额外使能 CH3 不影响已运行的 CH1。
+     *  HAL_TIM_PWM_Start 对 TIM2 返回 HAL_OK 但不设置 CCER（疑似
+     *  HAL 库兼容性问题）。改用 CMSIS 级 TIM_CCxChannelCmd +
+     *  __HAL_TIM_ENABLE，同时正确维护 htim->State 保持 HAL 契约。
+     *  此方案同时兼容 TIM5 的多通道 HAL State 锁问题。
      * ------------------------------------------------------------ */
     {
         HAL_TIM_StateTypeDef prev_state = htim->State;
-        htim->State = HAL_TIM_STATE_READY;
-        HAL_TIM_PWM_Start(htim, TIM_CHANNEL_3);
+        htim->State = HAL_TIM_STATE_BUSY;
+        TIM_CCxChannelCmd(htim->Instance, TIM_CHANNEL_3, TIM_CCx_ENABLE);
+        if ((htim->Instance->CR1 & TIM_CR1_CEN) == 0) {
+            __HAL_TIM_ENABLE(htim);
+        }
         htim->State = prev_state;
     }
 
@@ -93,9 +90,6 @@ void Servo_Init(TIM_HandleTypeDef *htim)
                   (uint32_t)__HAL_TIM_GET_COUNTER(htim),
                   (uint32_t)htim->Instance->CCER,
                   ((htim->Instance->CCER >> 8) & 1UL));
-                  (uint32_t)htim->Instance->CCER,
-                  ((htim->Instance->CCER >> 8) & 1),
-                  (uint32_t)htim->Instance->CCMR2);
     }
 #endif
 }
