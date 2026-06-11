@@ -5,6 +5,9 @@
 #include "driver_motor.h"
 #include "driver_servo.h"
 #include "driver_drv8803.h"
+#include "driver_tmc2209.h"
+
+extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -12,13 +15,16 @@
 /* ================================================================
  *  常量
  * ================================================================ */
-#define JOG_SPEED        300
-#define JOG_ACC          25
+#define DEBUG_SPEED     300            /* 调试模式离散移动速度 */
+#define DEBUG_ACC       25             /* 调试模式加速度 */
+#define JOG_SPEED        300            /* 连续移动速度 (RPM) */
+#define JOG_ACC          25             /* 连续移动加速度 */
 #define JOG_MMS_TO_RPM  12.0f   /* mm/s → RPM: STEPS_PER_MM/16384*60 */
 #define PNP_SPEED        300
 #define PNP_ACC          25
 #define PICK_DELAY_MS    300
 #define PLACE_DELAY_MS   300
+#define Z_SERVO_CH       2            /* 舵机通道号 */
 
 /* ================================================================
  *  任务内全局状态
@@ -48,8 +54,6 @@ static bool g_jog_active = false;
 
 /* 行解析器 */
 static LineParser_t g_parser;
-
-/* 队列句柄 (在 app_freertos.c 中创建，此处为 extern 引用) */
 
 
 /* Mark 对齐累计偏移 */
@@ -82,7 +86,7 @@ static void parse_header(const char *line, uint16_t len) {
     const char *p = line;
     const char *end = line + len;
 
-    while (p <= end) {
+    while (p < end) {
         const char *next = memchr(p, ',', (uint16_t)(end - p));
         uint16_t flen = next ? (uint16_t)(next - p) : (uint16_t)(end - p);
 
@@ -206,7 +210,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
     switch (cmd->cmd) {
     case HCMD_MOVE_UP:
         steps = (int32_t)(cmd->param * STEPS_PER_MM);
-        move_xy_relative(steps, 0, JOG_SPEED, JOG_ACC, &g_cur_x, &g_cur_y);
+        move_xy_relative(steps, 0, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
         g_jog_active = false;
         PrintDebug("[HOST] MOVE_UP %.1fmm→(%ld,%ld)\r\n",
                    cmd->param, g_cur_x, g_cur_y);
@@ -214,7 +218,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
 
     case HCMD_MOVE_DOWN:
         steps = (int32_t)(-cmd->param * STEPS_PER_MM);
-        move_xy_relative(steps, 0, JOG_SPEED, JOG_ACC, &g_cur_x, &g_cur_y);
+        move_xy_relative(steps, 0, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
         g_jog_active = false;
         PrintDebug("[HOST] MOVE_DOWN %.1fmm→(%ld,%ld)\r\n",
                    cmd->param, g_cur_x, g_cur_y);
@@ -222,7 +226,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
 
     case HCMD_MOVE_LEFT:
         steps = (int32_t)(cmd->param * STEPS_PER_MM);
-        move_xy_relative(0, steps, JOG_SPEED, JOG_ACC, &g_cur_x, &g_cur_y);
+        move_xy_relative(0, steps, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
         g_jog_active = false;
         PrintDebug("[HOST] MOVE_LEFT %.1fmm→(%ld,%ld)\r\n",
                    cmd->param, g_cur_x, g_cur_y);
@@ -230,7 +234,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
 
     case HCMD_MOVE_RIGHT:
         steps = (int32_t)(-cmd->param * STEPS_PER_MM);
-        move_xy_relative(0, steps, JOG_SPEED, JOG_ACC, &g_cur_x, &g_cur_y);
+        move_xy_relative(0, steps, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
         g_jog_active = false;
         PrintDebug("[HOST] MOVE_RIGHT %.1fmm→(%ld,%ld)\r\n",
                    cmd->param, g_cur_x, g_cur_y);
@@ -290,7 +294,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         if (g_jog_active) { disable_sync_stop(); g_jog_active = false; }
         int32_t dx = tx - g_cur_x;
         int32_t dy = ty - g_cur_y;
-        move_xy_relative(dx, dy, JOG_SPEED, JOG_ACC, &g_cur_x, &g_cur_y);
+        move_xy_relative(dx, dy, DEBUG_SPEED, DEBUG_ACC, &g_cur_x, &g_cur_y);
         PrintDebug("[HOST] MOVE_TO (%.1f,%.1f)→(%ld,%ld)\r\n",
                    cmd->param, cmd->param2, g_cur_x, g_cur_y);
         break;
@@ -312,7 +316,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
             float angle = cmd->param;
             if (angle < 0.0f) angle = 0.0f;
             if (angle > 180.0f) angle = 180.0f;
-            Servo_SetAngle(2, angle);
+            Servo_SetAngle(Z_SERVO_CH, angle);
             PrintDebug("[HOST] SET_SERVO %.1f deg\r\n", angle);
         }
         break;
@@ -491,19 +495,16 @@ static void offset_check_step(void) {
 /* ================================================================
  *  Host_UartRecvCallback — UART ISR 中调用
  * ================================================================ */
+/* ================================================================
+ *  Host_UartRecvCallback — UART ISR 中调用（已弃用队列模式）
+ *  仅保留 data_ready 标记，命令解析移至 Host_Task 主循环。
+ * ================================================================ */
 void Host_UartRecvCallback(uint8_t *data, int len) {
-    if (host_pkt_queue == NULL) return;
-
-    for (int i = 0; i < len; i++) {
-        HostParsed_t parsed;
-        if (LineParser_Feed(&g_parser, data[i], &parsed)) {
-            HostMsg_t msg;
-            msg.type = MSG_HOST_CMD;
-            msg.host_cmd = parsed;
-            osMessageQueuePut(host_pkt_queue, &msg, 0, 0);
-        }
-    }
+    (void)data; (void)len;
+    /* 命令解析已移至 Host_Task 主循环（UART_PeekData），
+     * 避免 ISR 中 FPU 浮点运算及 g_parser 竞态。 */
 }
+
 
 /* ================================================================
  *  Host_Task — 统一主任务
@@ -529,12 +530,23 @@ void Host_Task(void *argument) {
     Motor_Init();
     osDelay(200);
 
+    /* 舵机 + DRV8803 初始化 */
+    DRV8803_Init();
+    DRV8803_EnableChip(1, true);   /* U12 12V 芯片使能 */
+    Servo_Init(&htim2);            /* Z轴舵机 TIM2_CH3 */
+    DRV8803_SetOutput(&Port_12VO4, true);  /* 舵机上电 (12VO4) */
+    Servo_SetAngle(Z_SERVO_CH, 120.0f);     /* 初始位置：贴装角（吸嘴上升） */
+    osDelay(300);
+
+    /* TMC2209 (R轴) 未初始化，拉高 ENN 禁用驱动（ENN 低有效，HIGH=关闭） */
+    TMC_SetEnable(false);   /* 确保 TMC2209 驱动关闭，用到时再开 */
+
+
     PrintDebug("[HOST] Task started.\r\n");
 
     /* 启动握手：发送 DEBUG_MODE，进入调试模式 */
     UART_SendString(UART_CH1, "DEBUG_MODE\n");
     osDelay(50);
-    UART_SendString(UART_CH1, "DOWNLOAD_READY\n");
     g_state = HOST_DEBUG;
 
 
@@ -544,44 +556,49 @@ void Host_Task(void *argument) {
         /* ---- 1. 驱动 UART DMA 接收 ---- */
         UART_Driver_Process();
 
-        /* ---- 2. 从队列读取 ISR 回调已解析的命令 ---- */
+        /* ---- 2. 直接读取 UART 数据（任务上下文解析，避免 ISR FPU 问题） ---- */
         {
-            HostMsg_t msg;
-            while (osMessageQueueGet(host_pkt_queue, &msg, NULL, 0) == osOK) {
-                if (msg.type != MSG_HOST_CMD) continue;
-                HostParsed_t *parsed = &msg.host_cmd;
+            const uint8_t *rx_data = NULL;
+            uint16_t rx_len = 0;
+            if (UART_PeekData(UART_CH1, &rx_data, &rx_len)) {
+                for (uint16_t i = 0; i < rx_len; i++) {
+                    HostParsed_t parsed;
+                    if (LineParser_Feed(&g_parser, rx_data[i], &parsed)) {
 
-                /* 调试模式：CSV 数据 → 切换到下载模式 */
-                if ((g_state == HOST_DEBUG || g_state == HOST_INIT) && parsed->cmd == HCMD_RAW_LINE) {
-                    g_state = HOST_DOWNLOADING;
-                    g_comp_count = 0;
-                    g_header_parsed = false;
-                    PrintDebug("[HOST] Download started (from debug).\r\n");
-                }
-
-                /* 下载模式：处理 CSV 行 */
-                if (g_state == HOST_DOWNLOADING) {
-                    if (parsed->cmd == HCMD_RAW_LINE) {
-                        g_last_line_tick = osKernelGetTickCount();
-                        if (!g_header_parsed) {
-                            parse_header(parsed->raw, parsed->raw_len);
-                            g_header_parsed = true;
-                        } else {
-                            parse_csv_line(parsed->raw, parsed->raw_len);
+                        /* 运动/调试命令：不受状态限制，始终处理 */
+                        if (parsed.cmd != HCMD_RAW_LINE && parsed.cmd != HCMD_NONE &&
+                            parsed.cmd != HCMD_UNKNOWN) {
+                            handle_debug_cmd(&parsed);
+                            continue;
                         }
-                    } else {
-                        PrintDebug("[HOST] WARN: non-CSV cmd %d dropped in download\r\n",
-                                   (int)parsed->cmd);
-                    }
-                    continue;
-                }
 
-                /* 调试模式：处理运动命令 */
-                if (g_state == HOST_DEBUG) {
-                    handle_debug_cmd(parsed);
+                        /* 调试模式：CSV 数据 → 切换到下载模式 */
+                        if ((g_state == HOST_DEBUG || g_state == HOST_INIT) && parsed.cmd == HCMD_RAW_LINE) {
+                            g_state = HOST_DOWNLOADING;
+                            g_comp_count = 0;
+                            g_header_parsed = false;
+                            PrintDebug("[HOST] Download started (from debug).\r\n");
+                        }
+
+                        /* 下载模式：处理 CSV 行 */
+                        if (g_state == HOST_DOWNLOADING) {
+                            if (parsed.cmd == HCMD_RAW_LINE) {
+                                g_last_line_tick = osKernelGetTickCount();
+                                if (!g_header_parsed) {
+                                    parse_header(parsed.raw, parsed.raw_len);
+                                    g_header_parsed = true;
+                                } else {
+                                    parse_csv_line(parsed.raw, parsed.raw_len);
+                                }
+                            } else {
+                                PrintDebug("[HOST] WARN: non-CSV cmd %d dropped in download\r\n",
+                                           (int)parsed.cmd);
+                            }
+                            continue;
+                        }
+                    }
                 }
             }
-            /* 消费 ISR 已处理的数据，释放 UART 环形缓冲区 */
             UART_ClearData(UART_CH1);
         }
         /* ---- 3. 下载超时检测 ---- */
@@ -667,7 +684,7 @@ void Host_Task(void *argument) {
             PrintDebug("[HOST] All %u components placed!\r\n", g_comp_count);
             g_comp_count = 0;
             osDelay(200);
-            host_send("DOWNLOAD_READY");
+            /* 不再自动发 DOWNLOAD_READY，避免锁调试按钮 */
             g_state = HOST_DEBUG;
             break;
 
@@ -676,14 +693,12 @@ void Host_Task(void *argument) {
             g_comp_count = 0;
             g_comp_index = 0;
             osDelay(500);
-            host_send("DOWNLOAD_READY");
+            /* 不再自动发 DOWNLOAD_READY，避免锁调试按钮 */
             g_state = HOST_DEBUG;
             break;
 
         default:
             break;
         }
-
-        osDelay(5);
     }
 }
