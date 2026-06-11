@@ -87,6 +87,7 @@ typedef enum {
 /* 超时/重试 */
 #define TMC_UART_TIMEOUT       50          // ms
 #define TMC_MUTEX_WAIT_TIME    100         // ms
+#define TMC_ENABLE_DELAY_MS    50          /* ENN 拉低后上电稳定延时 */
 
 /* ========== 错误码 ========== */
 typedef enum {

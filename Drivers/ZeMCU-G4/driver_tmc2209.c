@@ -1,4 +1,4 @@
-#include "driver_tmc2209.h"
+﻿#include "driver_tmc2209.h"
 #include "main.h"
 #include <string.h>
 #include <math.h>
@@ -311,7 +311,7 @@ bool TMC_Init(void) {
     /* 先使能 TMC2209，再写寄存器。
        部分模组 VCCIO 由内部 LDO 供电，ENN=HIGH 时 LDO 关断 → 数字逻辑掉电 → UART 不工作。 */
     TMC_SetEnable(true);
-    vTaskDelay(pdMS_TO_TICKS(200));  /* 延长上电稳定时间 */
+    vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));  /* 上电稳定 */
 
     /* 1. GCONF */    /* 1. GCONF */
     uint32_t gconf = GCONF_PDN_DISABLE | GCONF_MSTEP_REG_SELECT | GCONF_I_SCALE_ANALOG | GCONF_EN_SPREADCYCLE;  /* spreadCycle = 更高扭矩 */
@@ -361,6 +361,6 @@ bool TMC_Init(void) {
     /* 6. 等待稳定 */
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    PrintDebug("TMC2209 Full-Duplex Initialized\r\n");
+    TMC_SetEnable(false);   /* 初始化完成后关闭驱动，用到时再开 */
     return true;
 }
