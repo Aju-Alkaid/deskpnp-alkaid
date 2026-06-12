@@ -1,607 +1,582 @@
-# PnP ÌùÆ¬»úÇ¶ÈëÊ½¹Ì¼þ ¡ª ÏîÄ¿ËµÃ÷Êé
+# PnP è´´ç‰‡æœºåµŒå…¥å¼å›ºä»¶ â€” é¡¹ç›®è¯´æ˜Žä¹¦
 
-## Ò»¡¢ÏîÄ¿¸ÅÀÀ
+## ä¸€ã€é¡¹ç›®æ¦‚è§ˆ
 
-×ÀÃæ¼¶ÌùÆ¬»ú£¬Ö÷¿Ø STM32G474VETx£¨170MHz Cortex-M4F£©£¬»ùÓÚ STM32CubeMX Éú³É HAL ¿â¹¤³Ì£¬FreeRTOS ¶àÈÎÎñµ÷¶È¡£
+æ¡Œé¢çº§è´´ç‰‡æœºï¼Œä¸»æŽ§ STM32G474VETxï¼ˆ170MHz Cortex-M4Fï¼‰ï¼ŒåŸºäºŽ STM32CubeMX ç”Ÿæˆ HAL åº“å·¥ç¨‹ï¼ŒFreeRTOS å¤šä»»åŠ¡è°ƒåº¦ã€‚
 
-¹¦ÄÜ£º½ÓÊÕÉÏÎ»»ú×ø±êÎÄ¼þ ¡ú Ë«Ä¿ÊÓ¾õ¶¨Î»Ôª¼þ ¡ú CAN ×ÜÏß¿ØÖÆÈýÖáÔË¶¯ ¡ú Îü×ìÊ°È¡/·ÅÖÃ ¡ú ¼ÓÈÈÌ¨¿ØÎÂ¡£
+åŠŸèƒ½ï¼šæŽ¥æ”¶ä¸Šä½æœºåæ ‡æ–‡ä»¶ â†’ åŒç›®è§†è§‰å®šä½å…ƒä»¶ â†’ CAN æ€»çº¿æŽ§åˆ¶ä¸‰è½´è¿åŠ¨ â†’ å¸å˜´æ‹¾å–/æ”¾ç½® â†’ åŠ çƒ­å°æŽ§æ¸©ã€‚
 
-**ÍÅ¶Ó·Ö¹¤£º** ±¾²Ö¿âÎªÇ¶ÈëÊ½¹Ì¼þ£¨C ÓïÑÔ£©£¬ÊÓ¾õ/Ó²¼þ/GUI£¨TouchGFX£©ÓÉÆäËûÈË¸ºÔð¡£
+**å›¢é˜Ÿåˆ†å·¥ï¼š** æœ¬ä»“åº“ä¸ºåµŒå…¥å¼å›ºä»¶ï¼ˆC è¯­è¨€ï¼‰ï¼Œè§†è§‰/ç¡¬ä»¶/GUIï¼ˆTouchGFXï¼‰ç”±å…¶ä»–äººè´Ÿè´£ã€‚
 
-## ¶þ¡¢Ó²¼þÆ½Ì¨
+## äºŒã€ç¡¬ä»¶å¹³å°
 
-| ×ÊÔ´ | ÏêÇé |
+| èµ„æº | è¯¦æƒ… |
 |------|------|
-| MCU | STM32G474VETx, HSE 16MHz ¡ú PLL 170MHz |
-| µ÷ÊÔ½Ó¿Ú | SWD (NRST=PG10) |
-| ´®¿Ú1 (USART1) | PE0(TX) / PE1(RX), 115200, DMA, Á¬½ÓÉÏÎ»»ú |
-| ´®¿Ú2 (USART2) | PD5(TX) / PD6(RX), 115200, DMA, Á¬½Ó MaixCam ÉãÏñÍ· |
-| ´®¿Ú3 (USART3) | PB9(TX) / PB11(RX), 115200, DMA, Á¬½Ó TMC2209(RÖá) |
-| LPUART1 | PC1(TX) / PC0(RX), 115200, °ëË«¹¤, Ô¤Áô |
-| CAN (FDCAN1) | PA12(TX) / PA11(RX), 1Mbps, Á¬½Ó 3 Ì¨ MKS SERVO42D ×ÜÏßËÅ·þµç»ú (ID=0x01 X1, ID=0x02 X2, ID=0x03 Y) |
-| SPI2 | PB13(SCK) / PB15(MOSI), CS=PD10, DC/RS=PD9, RST=PD8, Á¬½Ó LCD(ST7306) |
-| SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, Á¬½Ó W25Q64 Flash |
-| SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, Á¬½Ó ESP32 Í¨ÐÅÄ£¿é |
-| TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) ZÖá¶æ»ú PWM (50Hz) / 32Î»Ê±¼ä´Á»ù×¼ |
+| MCU | STM32G474VETx, HSE 16MHz â†’ PLL 170MHz |
+| è°ƒè¯•æŽ¥å£ | SWD (NRST=PG10) |
+| ä¸²å£1 (USART1) | PE0(TX) / PE1(RX), 115200, DMA, è¿žæŽ¥ä¸Šä½æœº |
+| ä¸²å£2 (USART2) | PD5(TX) / PD6(RX), 115200, DMA, è¿žæŽ¥ MaixCam æ‘„åƒå¤´ |
+| ä¸²å£3 (USART3) | PB9(TX) / PB11(RX), 115200, DMA, è¿žæŽ¥ TMC2209(Rè½´) |
+| LPUART1 | PC1(TX) / PC0(RX), 115200, åŠåŒå·¥, é¢„ç•™ |
+| CAN (FDCAN1) | PA12(TX) / PA11(RX), 1Mbps, è¿žæŽ¥ 3 å° MKS SERVO42D æ€»çº¿ä¼ºæœç”µæœº (ID=0x01 X1, ID=0x02 X2, ID=0x03 Y) |
+| SPI2 | PB13(SCK) / PB15(MOSI), CS=PD10, DC/RS=PD9, RST=PD8, è¿žæŽ¥ LCD(ST7306) |
+| SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, è¿žæŽ¥ W25Q64 Flash |
+| SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, è¿žæŽ¥ ESP32 é€šä¿¡æ¨¡å— |
+| TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) Zè½´èˆµæœº PWM (50Hz) / 32ä½æ—¶é—´æˆ³åŸºå‡† |
 | TIM5 | CH1(PB2) 24V_C1 PWM / CH3(PE8) 12V_C2 PWM (50Hz) |
-| TIM6 | HAL ÏµÍ³Ê±»ù |
-| CRC | Ó²¼þ CRC Ð£Ñé |
-| GPIO °´¼ü | KEY1(PC6) / KEY2(PC7) / CW(PA8) / CCW(PC8) / PUSH(PC9), µÍµçÆ½ÓÐÐ§ |
-| DRV8803¡Á2 | U12(12V Çý¶¯): PE9(EN)/PE10(RST)/PE15(FAULT) ; Êä³ö¶Ë¿Ú¼û ¡ì10.4 |
-|  | U13(24V Çý¶¯): PA4(EN)/PB0(RST)/PA6(IN5)/PA7(IN6)/PC4(IN7)/PC5(IN8)/PA5(FAULT) |
-| TMC2209 | UART3 Í¨ÐÅ, PD15(TMC1_EN) / PD14(TMC2_EN Ô¤Áô) |
-| ¼ÓÈÈÌ¨ | CAN ID 0x10(ÃüÁî) / 0x11(×´Ì¬), ¶ÀÁ¢¿ØÖÆ |
-| ÎÂ¶È´«¸ÐÆ÷ | PF9 / PA3, DS18B20 |
-| ¶æ»ú(ZÖá) | PB10, TIM2_CH3, MG995 (50Hz PWM) |
-| Îü×ìÆø±Ã | PE11 (12VO1, DRV8803 U12 OUT1 ¿ª¹Ø) |
-| µç´Å·§ | PA6 (24VO1, DRV8803 U13 OUT5, PA6=HIGHÊ±µ¼Í¨ ¡ª ±ê×¼DRV8803: IN=HIGH¡úOUT=LOW) |
-| BOOT0 | PB8, Æô¶¯Ñ¡Ôñ |
-| LCD_LED | PD8, LCD ±³¹â |
-## Èý¡¢Ä¿Â¼½á¹¹
+| TIM6 | HAL ç³»ç»Ÿæ—¶åŸº |
+| CRC | ç¡¬ä»¶ CRC æ ¡éªŒ |
+| GPIO æŒ‰é”® | KEY1(PC6) / KEY2(PC7) / CW(PA8) / CCW(PC8) / PUSH(PC9), ä½Žç”µå¹³æœ‰æ•ˆ |
+| DRV8803Ã—2 | U12(12V é©±åŠ¨): PE9(EN)/PE10(RST)/PE15(FAULT) ; è¾“å‡ºç«¯å£è§ Â§10.4 |
+|  | U13(24V é©±åŠ¨): PA4(EN)/PB0(RST)/PA6(IN5)/PA7(IN6)/PC4(IN7)/PC5(IN8)/PA5(FAULT) |
+| TMC2209 | UART3 é€šä¿¡, PD15(TMC1_EN) / PD14(TMC2_EN é¢„ç•™) |
+| åŠ çƒ­å° | CAN ID 0x10(å‘½ä»¤) / 0x11(çŠ¶æ€), ç‹¬ç«‹æŽ§åˆ¶ |
+| æ¸©åº¦ä¼ æ„Ÿå™¨ | PF9 / PA3, DS18B20 |
+| èˆµæœº(Zè½´) | PB10, TIM2_CH3, MG995 (50Hz PWM) |
+| å¸å˜´æ°”æ³µ | PE11 (12VO1, DRV8803 U12 OUT1 å¼€å…³) |
+| ç”µç£é˜€ | PA6 (24VO1, DRV8803 U13 OUT5, PA6=HIGHæ—¶å¯¼é€š â€” æ ‡å‡†DRV8803: IN=HIGHâ†’OUT=LOW) |
+| BOOT0 | PB8, å¯åŠ¨é€‰æ‹© |
+| LCD_LED | PD8, LCD èƒŒå…‰ |
+## ä¸‰ã€ç›®å½•ç»“æž„
 
 ```
 pnp_1/
-©À©¤©¤ Core/                        # CubeMX Éú³É£¨ÐÞ¸ÄºóÖØÐÂÉú³É»á¸²¸Ç£¡£©
-©¦   ©À©¤©¤ Inc/                     # main.h, usart.h, gpio.h, tim.h, spi.h, fdcan.h...
-©¦   ©¸©¤©¤ Src/                     # main.c, usart.c, stm32g4xx_it.c, app_freertos.c...
-©À©¤©¤ Drivers/
-©¦   ©À©¤©¤ STM32G4xx_HAL_Driver/    # HAL ¿â£¨½ûÖ¹ÐÞ¸Ä£©
-©¦   ©À©¤©¤ CMSIS/                   # CMSIS ºËÐÄ£¨½ûÖ¹ÐÞ¸Ä£©
-©¦   ©¸©¤©¤ ZeMCU-G4/                # ¡ï ×Ô¶¨ÒåÇý¶¯²ã ¡ï
-©¦       ©À©¤©¤ driver_uart.c/h      # UART DMA+¿ÕÏÐÖÐ¶Ï 4Í¨µÀÇý¶¯£¨UART_CH1~4£©
-©¦       ©À©¤©¤ driver_can.c/h       # FDCAN ÊÕ·¢ + ÂË²¨Æ÷ + CRC_SUM8 + ÖÐ¶Ï
-©¦       ©À©¤©¤ driver_motor.c/h     # MKS ËÅ·þµç»ú CAN ¿ØÖÆ£¨0xF5/0xF3/0x82/0x92/0x4A/0x4B µÈ£©
-©¦       ©À©¤©¤ driver_tmc2209.c/h   # TMC2209 UART ¼Ä´æÆ÷¶ÁÐ´ (RÖá)
-©¦       ©À©¤©¤ driver_servo.c/h     # MG995 ¶æ»ú PWM ¿ØÖÆ£¨TIM5_CH3 / PE8£©
-©¦       ©À©¤©¤ driver_drv8803.c/h   # DRV8803 Ë«Ð¾Æ¬ 8Í¨µÀÇý¶¯£¨12V+24V£©
-©¦       ©À©¤©¤ driver_heater.c/h    # ¼ÓÈÈÌ¨ CAN Í¨ÐÅ (CAN ID 0x10/0x11)
-©¦       ©À©¤©¤ driver_timer.c/h     # ¶¨Ê±Æ÷¹¤¾ß
-©¦       ©À©¤©¤ driver_spiflash_w25q64.c/h  # SPI Flash (W25Q64)
-©¦       ©À©¤©¤ tmc_protocol.c/h     # TMC2209 Ð­Òé²ã
-©¦       ©À©¤©¤ pid.c/h              # Í¨ÓÃ PID ¿ØÖÆÆ÷£¨Î»ÖÃ/ËÙ¶ÈÄ£Ê½£©
-©¦       ©À©¤©¤ motor.c/h            # 32²½½øµç»ú¿ØÖÆ (TMC2209+PID)
-©¦       ©À©¤©¤ ringbuf.c/h          # »·ÐÎ»º³åÇø (CAM_RING=1024, HOST_RING=4096)
-©¦       ©À©¤©¤ key.c/h              # 5¼üÉ¨Ãè£¨20ms Ïû¶¶ + ÊÂ¼þÐÍ£©
-©¦       ©À©¤©¤ timestamp.c/h        # TIM2 32Î»Ê±¼ä´Á£¬overflow_count È«¾ÖÒç³ö¼ÆÊý
-©¦       ©À©¤©¤ app_motor.h          # µç»úÓ¦ÓÃ²ãÍ·ÎÄ¼þ£¨Õ¼Î»£©
-©¦       ©¸©¤©¤ driver_CH340.c/h     # ´®¿ÚÎÄ¼þ×ª´æ£¨CH340 USB×ª´®¿Ú£¬Î´ÊµÏÖ£©
-©À©¤©¤ Task/                        # ¡ï FreeRTOS Ó¦ÓÃ²ãÈÎÎñ ¡ï
-©¦   ©À©¤©¤ app_host.c/h             # ÉÏÎ»»úÍ¨ÐÅÈÎÎñ + CSV½âÎö + ÊÓ¾õÐ­µ÷ + µ÷ÊÔÄ£Ê½
-©¦   ©À©¤©¤ app_uart_parser.c/h      # ÉÏÎ»»úÐÐÐ­Òé½âÎöÆ÷£¨COMMAND arg\n ¸ñÊ½£©
-©¦   ©À©¤©¤ app_vision.c/h           # ÉãÏñÍ· 0x7E/0x7F Ð­Òé½âÎö£¨process1/2/3£©
-©¦   ©À©¤©¤ app_motion.c/h           # ÔË¶¯¿ØÖÆº¯Êý + CAN_Process_Task + MotionTask_Func
-©¦   ©À©¤©¤ app_test.c/h             # ²âÊÔÈÎÎñ (vMotorTestTask) + PrintDebug º¯Êý
-©¦   ©¸©¤©¤ Task_Init.c/h            # ÈÎÎñ´´½¨¿ò¼Ü£¨Tasks_Create£¬µ±Ç°Î´¼¤»î£©
-©À©¤©¤ TouchGFX/                    # GUI Í¼ÐÎ½çÃæ£¨ÒÑÒÆÖ²£¬FreeRTOS ÈÎÎñÇý¶¯£©
-©À©¤©¤ Middlewares/                  # FreeRTOS + TouchGFX ÖÐ¼ä¼þ£¨ÏµÍ³Éú³É£¬½ûÖ¹ÐÞ¸Ä£©
-©À©¤©¤ MDK-ARM/                     # Keil MDK ¹¤³ÌÎÄ¼þ
-©À©¤©¤ build/                       # CMake ¹¹½¨Êä³ö
-©À©¤©¤ CMakeLists.txt               # CMake ¹¹½¨ÅäÖÃ
-©À©¤©¤ pnp_1.ioc                    # CubeMX ¹¤³ÌÎÄ¼þ
-©¸©¤©¤ STM32G474XX_FLASH.ld         # Á´½Ó½Å±¾
+â”œâ”€â”€ Core/                        # CubeMX ç”Ÿæˆï¼ˆä¿®æ”¹åŽé‡æ–°ç”Ÿæˆä¼šè¦†ç›–ï¼ï¼‰
+â”‚   â”œâ”€â”€ Inc/                     # main.h, usart.h, gpio.h, tim.h, spi.h, fdcan.h...
+â”‚   â””â”€â”€ Src/                     # main.c, usart.c, stm32g4xx_it.c, app_freertos.c...
+â”œâ”€â”€ Drivers/
+â”‚   â”œâ”€â”€ STM32G4xx_HAL_Driver/    # HAL åº“ï¼ˆç¦æ­¢ä¿®æ”¹ï¼‰
+â”‚   â”œâ”€â”€ CMSIS/                   # CMSIS æ ¸å¿ƒï¼ˆç¦æ­¢ä¿®æ”¹ï¼‰
+â”‚   â””â”€â”€ ZeMCU-G4/                # â˜… è‡ªå®šä¹‰é©±åŠ¨å±‚ â˜…
+â”‚       â”œâ”€â”€ driver_uart.c/h      # UART DMA+ç©ºé—²ä¸­æ–­ 4é€šé“é©±åŠ¨ï¼ˆUART_CH1~4ï¼‰
+â”‚       â”œâ”€â”€ driver_can.c/h       # FDCAN æ”¶å‘ + æ»¤æ³¢å™¨ + CRC_SUM8 + ä¸­æ–­
+â”‚       â”œâ”€â”€ driver_motor.c/h     # MKS ä¼ºæœç”µæœº CAN æŽ§åˆ¶ï¼ˆ0xF5/0xF3/0x82/0x92/0x4A/0x4B ç­‰ï¼‰
+â”‚       â”œâ”€â”€ driver_tmc2209.c/h   # TMC2209 UART å¯„å­˜å™¨è¯»å†™ (Rè½´)
+â”‚       â”œâ”€â”€ driver_servo.c/h     # MG995 èˆµæœº PWM æŽ§åˆ¶ï¼ˆTIM5_CH3 / PE8ï¼‰
+â”‚       â”œâ”€â”€ driver_drv8803.c/h   # DRV8803 åŒèŠ¯ç‰‡ 8é€šé“é©±åŠ¨ï¼ˆ12V+24Vï¼‰
+â”‚       â”œâ”€â”€ driver_heater.c/h    # åŠ çƒ­å° CAN é€šä¿¡ (CAN ID 0x10/0x11)
+â”‚       â”œâ”€â”€ driver_timer.c/h     # å®šæ—¶å™¨å·¥å…·
+â”‚       â”œâ”€â”€ driver_spiflash_w25q64.c/h  # SPI Flash (W25Q64)
+â”‚       â”œâ”€â”€ tmc_protocol.c/h     # TMC2209 åè®®å±‚
+â”‚       â”œâ”€â”€ pid.c/h              # é€šç”¨ PID æŽ§åˆ¶å™¨ï¼ˆä½ç½®/é€Ÿåº¦æ¨¡å¼ï¼‰
+â”‚       â”œâ”€â”€ motor.c/h            # 32æ­¥è¿›ç”µæœºæŽ§åˆ¶ (TMC2209+PID)
+â”‚       â”œâ”€â”€ ringbuf.c/h          # çŽ¯å½¢ç¼“å†²åŒº (CAM_RING=1024, HOST_RING=4096)
+â”‚       â”œâ”€â”€ key.c/h              # 5é”®æ‰«æï¼ˆ20ms æ¶ˆæŠ– + äº‹ä»¶åž‹ï¼‰
+â”‚       â”œâ”€â”€ timestamp.c/h        # TIM2 32ä½æ—¶é—´æˆ³ï¼Œoverflow_count å…¨å±€æº¢å‡ºè®¡æ•°
+â”‚       â”œâ”€â”€ app_motor.h          # ç”µæœºåº”ç”¨å±‚å¤´æ–‡ä»¶ï¼ˆå ä½ï¼‰
+â”‚       â””â”€â”€ driver_CH340.c/h     # ä¸²å£æ–‡ä»¶è½¬å­˜ï¼ˆCH340 USBè½¬ä¸²å£ï¼Œæœªå®žçŽ°ï¼‰
+â”œâ”€â”€ Task/                        # â˜… FreeRTOS åº”ç”¨å±‚ä»»åŠ¡ â˜…
+â”‚   â”œâ”€â”€ app_host.c/h             # ä¸Šä½æœºé€šä¿¡ä»»åŠ¡ + CSVè§£æž + è§†è§‰åè°ƒ + è°ƒè¯•æ¨¡å¼
+â”‚   â”œâ”€â”€ app_uart_parser.c/h      # ä¸Šä½æœºè¡Œåè®®è§£æžå™¨ï¼ˆCOMMAND arg\n æ ¼å¼ï¼‰
+â”‚   â”œâ”€â”€ app_vision.c/h           # æ‘„åƒå¤´ 0x7E/0x7F åè®®è§£æžï¼ˆprocess1/2/3ï¼‰
+â”‚   â”œâ”€â”€ app_motion.c/h           # è¿åŠ¨æŽ§åˆ¶å‡½æ•° + CAN_Process_Task + MotionTask_Func
+â”‚   â”œâ”€â”€ app_test.c/h             # æµ‹è¯•ä»»åŠ¡ (vMotorTestTask) + PrintDebug å‡½æ•°
+â”‚   â””â”€â”€ Task_Init.c/h            # ä»»åŠ¡åˆ›å»ºæ¡†æž¶ï¼ˆTasks_Createï¼Œå½“å‰æœªæ¿€æ´»ï¼‰
+â”œâ”€â”€ TouchGFX/                    # GUI å›¾å½¢ç•Œé¢ï¼ˆå·²ç§»æ¤ï¼ŒFreeRTOS ä»»åŠ¡é©±åŠ¨ï¼‰
+â”œâ”€â”€ Middlewares/                  # FreeRTOS + TouchGFX ä¸­é—´ä»¶ï¼ˆç³»ç»Ÿç”Ÿæˆï¼Œç¦æ­¢ä¿®æ”¹ï¼‰
+â”œâ”€â”€ MDK-ARM/                     # Keil MDK å·¥ç¨‹æ–‡ä»¶
+â”œâ”€â”€ build/                       # CMake æž„å»ºè¾“å‡º
+â”œâ”€â”€ CMakeLists.txt               # CMake æž„å»ºé…ç½®
+â”œâ”€â”€ pnp_1.ioc                    # CubeMX å·¥ç¨‹æ–‡ä»¶
+â””â”€â”€ STM32G474XX_FLASH.ld         # é“¾æŽ¥è„šæœ¬
 ```
 
-## ËÄ¡¢Í¨ÐÅÐ­Òé
+## å››ã€é€šä¿¡åè®®
 
-### 4.1 ÉÏÎ»»ú ? G4 (USART1, PE0/PE1)
-- **ÎïÀí²ã£º** 115200, 8N1, DMA+¿ÕÏÐÖÐ¶Ï
-- **Ð­Òé¸ñÊ½£º** ÐÐÎÄ±¾Ð­Òé£¬`COMMAND arg\n`
-- **ÃüÁîÁÐ±í£º**
-  - `MOVE_UP/DOWN/LEFT/RIGHT <²½³¤mm>` ¡ª ÀëÉ¢ÒÆ¶¯£¨0.3/0.5/1/5/10£©
-  - `MOVE_*_START <ËÙ¶Èmm/s>` ¡ª Á¬ÐøÒÆ¶¯¿ªÊ¼£¨1~50£©£¬µÚ¶þ´Îµã»÷×Ô¶¯·¢ `MOVE_STOP`
-  - `MOVE_STOP` ¡ª Í£Ö¹Á¬ÐøÒÆ¶¯
-  - `MOVE_TO <x> <y>` ¡ª ÔË¶¯ÖÁ¾ø¶Ô×ø±ê (mm)
-  - `SET_ORIGIN` ¡ª µ±Ç°Î»ÖÃÉèÎªÁãµã
-  - `SET_SERVO <½Ç¶È>` ¡ª Z Öá¶æ»ú (0~180¡ã)
-  - `SET_R_AXIS <½Ç¶È>` ¡ª R ÖáÐý×ª (0~360¡ã)
-  - `PUMP_ON` ¡ª ¿ªÆôÆø±Ã
-  - `PUMP_OFF` ¡ª ¹Ø±ÕÆø±Ã + µç´Å·§´µÆø 1s ºó¹Ø·§
-  - `EXIT_DEBUG_MODE` ¡ª ÍË³öµ÷ÊÔÄ£Ê½
-- **ÎÄ¼þÏÂÔØÁ÷³Ì£º**
-  1. G4 ·¢ËÍ `DOWNLOAD_READY\n` ¸øÉÏÎ»»ú
-  2. ÉÏÎ»»úÖðÐÐ·¢ËÍ CSV Êý¾Ý£¨Ã¿ÐÐÒÔ `\n` ½áÎ²£©
-  3. Ê×ÐÐ×÷Îª±íÍ·½âÎö£¨Ê¶±ð X/Y/Rotation/SMD ÁÐ£©
-  4. 300ms ³¬Ê±ÎÞÐÂÐÐ ¡ú ÏÂÔØÍê³É£¬×Ô¶¯½øÈë Mark µã¶ÔÆëÁ÷³Ì
-  5. CSV ¸ñÊ½£º`ID,Name,X(mm),Y(mm),Rotation(deg),SMD`
-- **ÎÞÐ£Ñé£º** ´¿ÎÄ±¾Ð­Òé£¬ÒÀÀµ UART Ó²¼þ¿É¿¿ÐÔ
+### 4.1 ä¸Šä½æœº ? G4 (USART1, PE0/PE1)
+- **ç‰©ç†å±‚ï¼š** 115200, 8N1, DMA+ç©ºé—²ä¸­æ–­
+- **åè®®æ ¼å¼ï¼š** è¡Œæ–‡æœ¬åè®®ï¼Œ`COMMAND arg\n`
+- **å‘½ä»¤åˆ—è¡¨ï¼š**
+  - `MOVE_UP/DOWN/LEFT/RIGHT <æ­¥é•¿mm>` â€” ç¦»æ•£ç§»åŠ¨ï¼ˆ0.3/0.5/1/5/10ï¼‰
+  - `MOVE_*_START <é€Ÿåº¦mm/s>` â€” è¿žç»­ç§»åŠ¨å¼€å§‹ï¼ˆ1~50ï¼‰ï¼Œç¬¬äºŒæ¬¡ç‚¹å‡»è‡ªåŠ¨å‘ `MOVE_STOP`
+  - `MOVE_STOP` â€” åœæ­¢è¿žç»­ç§»åŠ¨
+  - `MOVE_TO <x> <y>` â€” è¿åŠ¨è‡³ç»å¯¹åæ ‡ (mm)
+  - `SET_ORIGIN` â€” å½“å‰ä½ç½®è®¾ä¸ºé›¶ç‚¹
+  - `SET_SERVO <è§’åº¦>` â€” Z è½´èˆµæœº (0~180Â°)
+  - `SET_R_AXIS <è§’åº¦>` â€” R è½´æ—‹è½¬ (0~360Â°)
+  - `PUMP_ON` â€” å¼€å¯æ°”æ³µ
+  - `PUMP_OFF` â€” å…³é—­æ°”æ³µ + ç”µç£é˜€å¹æ°” 1s åŽå…³é˜€
+  - `EXIT_DEBUG_MODE` â€” é€€å‡ºè°ƒè¯•æ¨¡å¼
+- **æ–‡ä»¶ä¸‹è½½æµç¨‹ï¼š**
+  1. G4 å‘é€ `DOWNLOAD_READY\n` ç»™ä¸Šä½æœº
+  2. ä¸Šä½æœºé€è¡Œå‘é€ CSV æ•°æ®ï¼ˆæ¯è¡Œä»¥ `\n` ç»“å°¾ï¼‰
+  3. é¦–è¡Œä½œä¸ºè¡¨å¤´è§£æžï¼ˆè¯†åˆ« X/Y/Rotation/SMD åˆ—ï¼‰
+  4. 300ms è¶…æ—¶æ— æ–°è¡Œ â†’ ä¸‹è½½å®Œæˆï¼Œè‡ªåŠ¨è¿›å…¥ Mark ç‚¹å¯¹é½æµç¨‹
+  5. CSV æ ¼å¼ï¼š`ID,Name,X(mm),Y(mm),Rotation(deg),SMD`
+- **æ— æ ¡éªŒï¼š** çº¯æ–‡æœ¬åè®®ï¼Œä¾èµ– UART ç¡¬ä»¶å¯é æ€§
 
-### 4.2 G4 ? MaixCam ÉãÏñÍ· (USART2, PD5/PD6)
-- **ÎïÀí²ã£º** 115200, 8N1, DMA+¿ÕÏÐÖÐ¶Ï
-- **Ð­Òé¸ñÊ½£º** `0x7E ... 0x7F` Ö¡¶¨½ç£¬Ö¡ÄÚÎª UTF-8 ×Ö·û´®×Ö¶Î£¨°´ 0x7F ·Ö¸ô£©
-- **Ö¡½á¹¹£º** `7E begin 7F field1 7F field2 7F ... 7F end 7F`
-- **ÃüÁî£¨G4¡úÉãÏñÍ·£©£º**
-  - `process1` ¡ª É¢ÁÏÇø¼ì²âÔª¼þ
-  - `process2` ¡ª Mark µã¼ì²â
-  - `process3` ¡ª Ôª¼þÆ«ÒÆ¼ì²â
-- **·µ»Ø¸ñÊ½£¨ÉãÏñÍ·¡úG4£©£º**
-  - process1 ³É¹¦£º`begin, x_offset, y_offset, comp_info, end`
-  - process2 ³É¹¦£º`begin, mark1_x, mark1_y, mark2_x, mark2_y, end`
-  - process3 ³É¹¦£º`begin, x_offset, y_offset, end`
-  - Ê§°Ü£º°üº¬ `err1`/`err2`/`err3` ×Ö¶Î
+### 4.2 G4 ? MaixCam æ‘„åƒå¤´ (USART2, PD5/PD6)
+- **ç‰©ç†å±‚ï¼š** 115200, 8N1, DMA+ç©ºé—²ä¸­æ–­
+- **åè®®æ ¼å¼ï¼š** `0x7E ... 0x7F` å¸§å®šç•Œï¼Œå¸§å†…ä¸º UTF-8 å­—ç¬¦ä¸²å­—æ®µï¼ˆæŒ‰ 0x7F åˆ†éš”ï¼‰
+- **å¸§ç»“æž„ï¼š** `7E begin 7F field1 7F field2 7F ... 7F end 7F`
+- **å‘½ä»¤ï¼ˆG4â†’æ‘„åƒå¤´ï¼‰ï¼š**
+  - `process1` â€” æ•£æ–™åŒºæ£€æµ‹å…ƒä»¶
+  - `process2` â€” Mark ç‚¹æ£€æµ‹
+  - `process3` â€” å…ƒä»¶åç§»æ£€æµ‹
+- **è¿”å›žæ ¼å¼ï¼ˆæ‘„åƒå¤´â†’G4ï¼‰ï¼š**
+  - process1 æˆåŠŸï¼š`begin, x_offset, y_offset, comp_info, end`
+  - process2 æˆåŠŸï¼š`begin, mark1_x, mark1_y, mark2_x, mark2_y, end`
+  - process3 æˆåŠŸï¼š`begin, x_offset, y_offset, end`
+  - å¤±è´¥ï¼šåŒ…å« `err1`/`err2`/`err3` å­—æ®µ
 
-### 4.3 G4 ? MKS SERVO42D µç»ú (CAN, FDCAN1)
-- **ÎïÀí²ã£º** CAN 2.0A, 1Mbps, ±ê×¼Ö¡(11Î»ID)
-- **Ð£Ñé£º** SUM8 CRC£¨ID+Êý¾Ý×Ö½ÚÀÛ¼ÓÈ¡µÍ8Î»£©
-- **Êý¾Ý³¤¶ÈÏÞÖÆ£º** ¡Ü7 ×Ö½ÚÓÐÐ§Êý¾Ý + 1 ×Ö½Ú CRC = ×î¶à8×Ö½Ú
-- **µç»ú ID£º** X1=0x01, X2=0x02, Y=0x03, ¹ã²¥=0x00
-- **Ö÷Òª¹¦ÄÜÂë£º**
-  - `0xF5` ×ø±ê¾ø¶ÔÔË¶¯£¨ËÙ¶È=2B+¼ÓËÙ¶È=1B+×ø±ê=3B£¬¹²7×Ö½Ú+CRC£©
-  - `0xF3` Ê¹ÄÜ/È¥Ê¹ÄÜ
-  - `0x82` ÉèÖÃ¹¤×÷Ä£Ê½£¨SR_vFOC=0x05£©
-  - `0x92` ÉèÎªÁãµã
-  - `0x4A` Í¬²½±êÖ¾¿ª¹Ø
-  - `0x4B` Í¬²½Ö´ÐÐ´¥·¢
-  - `0x95` ÉèÖÃµ½Î»ãÐÖµ
-- **×´Ì¬Âë£¨µç»ú¡úG4£©£º**
-  - `0x01` ÔËÐÐÖÐ
-  - `0x02` ÔËÐÐÍê³É£¨µ½Î»£©
-  - `0x03` ÏÞÎ»Í£Ö¹/¶Â×ª
+### 4.3 G4 ? MKS SERVO42D ç”µæœº (CAN, FDCAN1)
+- **ç‰©ç†å±‚ï¼š** CAN 2.0A, 1Mbps, æ ‡å‡†å¸§(11ä½ID)
+- **æ ¡éªŒï¼š** SUM8 CRCï¼ˆID+æ•°æ®å­—èŠ‚ç´¯åŠ å–ä½Ž8ä½ï¼‰
+- **æ•°æ®é•¿åº¦é™åˆ¶ï¼š** â‰¤7 å­—èŠ‚æœ‰æ•ˆæ•°æ® + 1 å­—èŠ‚ CRC = æœ€å¤š8å­—èŠ‚
+- **ç”µæœº IDï¼š** X1=0x01, X2=0x02, Y=0x03, å¹¿æ’­=0x00
+- **ä¸»è¦åŠŸèƒ½ç ï¼š**
+  - `0xF5` åæ ‡ç»å¯¹è¿åŠ¨ï¼ˆé€Ÿåº¦=2B+åŠ é€Ÿåº¦=1B+åæ ‡=3Bï¼Œå…±7å­—èŠ‚+CRCï¼‰
+  - `0xF3` ä½¿èƒ½/åŽ»ä½¿èƒ½
+  - `0x82` è®¾ç½®å·¥ä½œæ¨¡å¼ï¼ˆSR_vFOC=0x05ï¼‰
+  - `0x92` è®¾ä¸ºé›¶ç‚¹
+  - `0x4A` åŒæ­¥æ ‡å¿—å¼€å…³
+  - `0x4B` åŒæ­¥æ‰§è¡Œè§¦å‘
+  - `0x95` è®¾ç½®åˆ°ä½é˜ˆå€¼
+- **çŠ¶æ€ç ï¼ˆç”µæœºâ†’G4ï¼‰ï¼š**
+  - `0x01` è¿è¡Œä¸­
+  - `0x02` è¿è¡Œå®Œæˆï¼ˆåˆ°ä½ï¼‰
+  - `0x03` é™ä½åœæ­¢/å µè½¬
 
-## Îå¡¢ÈÎÎñ¼Ü¹¹
+## äº”ã€ä»»åŠ¡æž¶æž„
 
-| ÈÎÎñ | Õ»´óÐ¡ | ÓÅÏÈ¼¶ | ¹¦ÄÜ |
+| ä»»åŠ¡ | æ ˆå¤§å° | ä¼˜å…ˆçº§ | åŠŸèƒ½ |
 |------|--------|--------|------|
-| `Host_Task` | 1024 | Normal | ¡ï Ö÷ÈÎÎñ£ºÉÏÎ»»úÍ¨ÐÅ + µ÷ÊÔÃüÁî + CSV½âÎö + ÊÓ¾õÐ­µ÷ + PnPÁ÷³Ì |
-| `CAN_Process_Task` | 512 | Normal | ´Ó motor_event_queue È¡ CAN ±¨ÎÄ£¬ÉèÊÂ¼þ×é±êÖ¾ |
-| `vMotorTestTask` | 1024 | Normal | MKS µç»ú²âÊÔÈÎÎñ£¨ÒÑ×¢ÊÍ£© |
-| `TouchGFX_Task` | 8192 | Normal | GUI Í¼ÐÎ½çÃæäÖÈ¾ + VSYNC + °´¼ü´¦Àí |
-| `Key_Task` | 256 | Normal | Ó²¼þ°´¼üÉ¨Ãè£¨10ms£©+ Ïû¶¶ ¡ú keyEventQueue |
-| `ESP_Task` | 512 | Normal | ESP32 Í¨ÐÅ + WiFi ×´Ì¬¹ÜÀí |
-| `PnP_Motion_Task` | 1024 | Normal | ±¸ÓÃÔË¶¯ÈÎÎñ£¨ÒÑ×¢ÊÍ£¬Î´¼¤»î£© |
-| `StartHostMotionTestTask` | 4096 | Normal | µ÷ÊÔÓÃÔË¶¯ÈÎÎñ£¨ÒÑ×¢ÊÍ£¬¹¦ÄÜºÏ²¢µ½ Host_Task£© |
-| `StartPickPlaceTestTask` | 2048 | Normal | Pick&Place ²âÊÔ£¨ÒÑ×¢ÊÍ£¬¹¦ÄÜºÏ²¢µ½ Host_Task£© |
-| `StartMotorTestTask` | 1024 | Normal | TMC2209 ²âÊÔ£¨ÒÑ×¢ÊÍ£© |
+| `Host_Task` | 1024 | Normal | â˜… ä¸»ä»»åŠ¡ï¼šä¸Šä½æœºé€šä¿¡ + è°ƒè¯•å‘½ä»¤ + CSVè§£æž + è§†è§‰åè°ƒ + PnPæµç¨‹ |
+| `CAN_Process_Task` | 512 | Normal | ä»Ž motor_event_queue å– CAN æŠ¥æ–‡ï¼Œè®¾äº‹ä»¶ç»„æ ‡å¿— |
+| `vMotorTestTask` | 1024 | Normal | MKS ç”µæœºæµ‹è¯•ä»»åŠ¡ï¼ˆå·²æ³¨é‡Šï¼‰ |
+| `TouchGFX_Task` | 8192 | Normal | GUI å›¾å½¢ç•Œé¢æ¸²æŸ“ + VSYNC + æŒ‰é”®å¤„ç† |
+| `Key_Task` | 256 | Normal | ç¡¬ä»¶æŒ‰é”®æ‰«æï¼ˆ10msï¼‰+ æ¶ˆæŠ– â†’ keyEventQueue |
+| `ESP_Task` | 512 | Normal | ESP32 é€šä¿¡ + WiFi çŠ¶æ€ç®¡ç† |
+| `PnP_Motion_Task` | 1024 | Normal | å¤‡ç”¨è¿åŠ¨ä»»åŠ¡ï¼ˆå·²æ³¨é‡Šï¼Œæœªæ¿€æ´»ï¼‰ |
+| `StartHostMotionTestTask` | 4096 | Normal | è°ƒè¯•ç”¨è¿åŠ¨ä»»åŠ¡ï¼ˆå·²æ³¨é‡Šï¼ŒåŠŸèƒ½åˆå¹¶åˆ° Host_Taskï¼‰ |
+| `StartPickPlaceTestTask` | 2048 | Normal | Pick&Place æµ‹è¯•ï¼ˆå·²æ³¨é‡Šï¼ŒåŠŸèƒ½åˆå¹¶åˆ° Host_Taskï¼‰ |
+| `StartMotorTestTask` | 1024 | Normal | TMC2209 æµ‹è¯•ï¼ˆå·²æ³¨é‡Šï¼‰ |
 
-**ÈÎÎñ¼äÍ¨ÐÅ£º**
-- `motor_event_queue` (32Éî¶È) ¡ª CAN ÖÐ¶Ï ¡ú CAN_Process_Task / vMotorTestTask
-- `motion_cmd_queue` (20Éî¶È) ¡ª Host_Task ¡ú MotionTask_Func
-- `host_pkt_queue` (64Éî) ¡ª ÒÑÆúÓÃ£¬Host_Task ¸ÄÓÃ UART_PeekData Ö±½Ó¶ÁÈ¡
-- `evtAxesDone` ÊÂ¼þ×é ¡ª CAN_Process_Task Í¨Öªµ½Î»
-- `keyEventQueue` (16Éî) ¡ª Key_Task ¡ú KeyController ¡ú TouchGFX °´¼üÊÂ¼þ
-- `dataTransferQueue` (16Éî) ¡ª Ö÷ÏµÍ³ Task ¡ú Model::processQueue() ¡ú UI Êý¾ÝÍ¬²½
-- `vsync_queue` (1Éî) ¡ª TIM7 ISR ¡ú TouchGFX äÖÈ¾Ñ­»·
-- `frame_buffer_sem` ¡ª TouchGFX Ö¡»º³å»¥³âËø
-- `semX1Done/semX2Done/semYDone` ÐÅºÅÁ¿ ¡ª ÈýÖá¶ÀÁ¢µ½Î»ÐÅºÅ
+**ä»»åŠ¡é—´é€šä¿¡ï¼š**
+- `motor_event_queue` (32æ·±åº¦) â€” CAN ä¸­æ–­ â†’ CAN_Process_Task / vMotorTestTask
+- `motion_cmd_queue` (20æ·±åº¦) â€” Host_Task â†’ MotionTask_Func
+- `host_pkt_queue` (64æ·±) â€” å·²å¼ƒç”¨ï¼ŒHost_Task æ”¹ç”¨ UART_PeekData ç›´æŽ¥è¯»å–
+- `evtAxesDone` äº‹ä»¶ç»„ â€” CAN_Process_Task é€šçŸ¥åˆ°ä½
+- `keyEventQueue` (16æ·±) â€” Key_Task â†’ KeyController â†’ TouchGFX æŒ‰é”®äº‹ä»¶
+- `dataTransferQueue` (16æ·±) â€” ä¸»ç³»ç»Ÿ Task â†’ Model::processQueue() â†’ UI æ•°æ®åŒæ­¥
+- `vsync_queue` (1æ·±) â€” TIM7 ISR â†’ TouchGFX æ¸²æŸ“å¾ªçŽ¯
+- `frame_buffer_sem` â€” TouchGFX å¸§ç¼“å†²äº’æ–¥é”
+- `semX1Done/semX2Done/semYDone` ä¿¡å·é‡ â€” å·²åºŸå¼ƒï¼Œç»Ÿä¸€ä½¿ç”¨ evtAxesDone äº‹ä»¶ç»„ï¼ˆè§ Â§9.6-5ï¼‰
 
-## Áù¡¢¹Ø¼üÊý¾ÝÁ÷
+## å…­ã€å…³é”®æ•°æ®æµ
 
 ```
-ÉÏÎ»»ú --[USART1]--> DMA+¿ÕÏÐÖÐ¶Ï ¡ú data_ready=true
-                          ©¦
-            Host_Task Ö÷Ñ­»· (~100Hz):
-              UART_Driver_Process()  ¡ú DMA¡úapp»º³å
-              UART_PeekData()        ¡ú ¶Áapp»º³å£¨ÈÎÎñÉÏÏÂÎÄ£©
-              LineParser_Feed()      ¡ú ÐÐ½âÎö£¨ÈÎÎñÉÏÏÂÎÄ£¬FPU°²È«£©
-                ©À©¤ ÔË¶¯/µ÷ÊÔÃüÁî ¡ú handle_debug_cmd()
-                ©À©¤ RAW_LINE(DEBUG/INIT) ¡ú ÇÐ»» HOST_DOWNLOADING
-                ©¸©¤ RAW_LINE(DOWNLOADING) ¡ú ½âÎöCSV ¡ú g_components[]
-                                             ©¦   Vision_SendCmd(process3) ¡ú Æ«ÒÆÐÞÕý
-                                             ©¦   motion_cmd_queue ¡ú MotionTask_Func
-                                             ©¦       ©¦
-                                             ©¦   CAN ¡ú µç»úÔË¶¯µ½Î»
-                                             ©¦   ZÖá¶æ»ú Ê°È¡/·ÅÖÃ
-                                             ©¦
-                                             ©¸©¤©¤ Íê³É ¡ú host_send("DOWNLOAD_COMPLETE")
+ä¸Šä½æœº --[USART1]--> DMA+ç©ºé—²ä¸­æ–­ â†’ data_ready=true
+                          â”‚
+            Host_Task ä¸»å¾ªçŽ¯ (~100Hz):
+              UART_Driver_Process()  â†’ DMAâ†’appç¼“å†²
+              UART_PeekData()        â†’ è¯»appç¼“å†²ï¼ˆä»»åŠ¡ä¸Šä¸‹æ–‡ï¼‰
+              LineParser_Feed()      â†’ è¡Œè§£æžï¼ˆä»»åŠ¡ä¸Šä¸‹æ–‡ï¼ŒFPUå®‰å…¨ï¼‰
+                â”œâ”€ è¿åŠ¨/è°ƒè¯•å‘½ä»¤ â†’ handle_debug_cmd()
+                â”œâ”€ RAW_LINE(DEBUG/INIT) â†’ åˆ‡æ¢ HOST_DOWNLOADING
+                â””â”€ RAW_LINE(DOWNLOADING) â†’ è§£æžCSV â†’ g_components[]
+                                             â”‚   Vision_SendCmd(process3) â†’ åç§»ä¿®æ­£
+                                             â”‚   motion_cmd_queue â†’ MotionTask_Func
+                                             â”‚       â”‚
+                                             â”‚   CAN â†’ ç”µæœºè¿åŠ¨åˆ°ä½
+                                             â”‚   Zè½´èˆµæœº æ‹¾å–/æ”¾ç½®
+                                             â”‚
+                                             â””â”€â”€ å®Œæˆ â†’ host_send("DOWNLOAD_COMPLETE")
 ```
 
-## Æß¡¢¹Ø¼üÊý¾Ý½á¹¹
+## ä¸ƒã€å…³é”®æ•°æ®ç»“æž„
 
-| ½á¹¹Ìå | ËùÔÚÎÄ¼þ | ÓÃÍ¾ | ¹Ø¼ü×Ö¶Î |
+| ç»“æž„ä½“ | æ‰€åœ¨æ–‡ä»¶ | ç”¨é€” | å…³é”®å­—æ®µ |
 |--------|----------|------|----------|
-| `Component_t` | app_host.h | Ìù×°Ôª¼þÐÅÏ¢ | id, target_x/y/angle, feeder_id, placed |
-| `HostParsed_t` | app_uart_parser.h | ÉÏÎ»»úÐÐ½âÎö½á¹û | cmd, param(float), raw[512] |
-| `CamData_t` | app_vision.h | ÉãÏñÍ··µ»ØÊý¾Ý | result, x/y_offset, mark1/2_x/y |
-| `MotionCmd_t` | app_motion.h | ÔË¶¯Ö¸Áî | cmd_type, target_x/y/r, speed, acc |
-| `CAN_Rx_Packet_t` | driver_can.h | CAN Êý¾Ý°ü | ID, FuncCode, Status, Data[8], Timestamp |
-| `RingBuf_t` | ringbuf.h | »·ÐÎ»º³åÇø | buffer, size, head(Ð´)/tail(¶Á) |
-| `LineParser_t` | app_uart_parser.h | ÐÐ½âÎöÆ÷×´Ì¬»ú | buf[512], idx, complete |
-| `UART_Channel_t` | driver_uart.c(ÄÚ²¿) | UART Í¨µÀ¿ØÖÆ¿é | huart/hdmarx, Ë«»º³å, data_ready/is_rx_active/overflow_count |
-| `MotorState_t` | driver_motor.h | µç»ú×´Ì¬Ã¶¾Ù | IDLE/SENDING/WAITING/COMPLETE/ERROR |
+| `Component_t` | app_host.h | è´´è£…å…ƒä»¶ä¿¡æ¯ | id, target_x/y/angle, feeder_id, placed |
+| `HostParsed_t` | app_uart_parser.h | ä¸Šä½æœºè¡Œè§£æžç»“æžœ | cmd, param(float), raw[512] |
+| `CamData_t` | app_vision.h | æ‘„åƒå¤´è¿”å›žæ•°æ® | result, x/y_offset, mark1/2_x/y |
+| `MotionCmd_t` | app_motion.h | è¿åŠ¨æŒ‡ä»¤ | cmd_type, target_x/y/r, speed, acc |
+| `CAN_Rx_Packet_t` | driver_can.h | CAN æ•°æ®åŒ… | ID, FuncCode, Status, Data[8], Timestamp |
+| `RingBuf_t` | ringbuf.h | çŽ¯å½¢ç¼“å†²åŒº | buffer, size, head(å†™)/tail(è¯») |
+| `LineParser_t` | app_uart_parser.h | è¡Œè§£æžå™¨çŠ¶æ€æœº | buf[512], idx, complete |
+| `UART_Channel_t` | driver_uart.c(å†…éƒ¨) | UART é€šé“æŽ§åˆ¶å— | huart/hdmarx, åŒç¼“å†², data_ready/is_rx_active/overflow_count |
+| `MotorState_t` | driver_motor.h | ç”µæœºçŠ¶æ€æžšä¸¾ | IDLE/SENDING/WAITING/COMPLETE/ERROR |
 
-## °Ë¡¢±àÂë¹æ·¶ÓëÔ¼Êø
+## å…«ã€ç¼–ç è§„èŒƒä¸Žçº¦æŸ
 
-1. **ÎÄ¼þ±àÂë£º** ËùÓÐ `.c/.h` ÎÄ¼þÊ¹ÓÃ **GBK** ±àÂë¡£¶ÁÐ´Ê±±ØÐëÖ¸¶¨ `[Text.Encoding]::GetEncoding(''GBK'')`
-2. **CubeMX ÓÃ»§´úÂëÇø£º** ×Ô¶¨Òå´úÂëÖ»ÄÜÐ´ÔÚ `USER CODE BEGIN/END` ±ê¼ÇÖ®¼ä£¬·ñÔòÖØÐÂÉú³ÉÊ±»á±»¸²¸Ç
-3. **½ûÖ¹ÅúÁ¿É¾³ý£º** ½ûÖ¹ `del /s`, `rd /s`, `Remove-Item -Recurse` µÈÅúÁ¿É¾³ýÃüÁî
-4. **ÖÐÎÄ×¢ÊÍ£º** ÏîÄ¿±ê×¼Ê¹ÓÃÖÐÎÄ×¢ÊÍ
-5. **ÐÞ¸ÄÉóÅú£º** AI Ìá³öÎÊÌâ/½¨Òé ¡ú ÓÃ»§ÉóºË ¡ú Åú×¼ºóÐÞ¸Ä
-6. **ÖÐ¶Ï°²È«£º** ISR ÄÚ½ûÖ¹×èÈûµ÷ÓÃ£¨Èç PrintDebug ÖÐµÄ `HAL_UART_Transmit`£©£¬½ûÖ¹ `osDelay`
-7. **Õ»Òç³ö·À»¤£º** Ã¿¸öÈÎÎñÕ»´óÐ¡ÒÑÔÚ app_freertos.c ¶¨Òå£¬Ôö¼Ó printf Ààº¯ÊýÐèÔö´óÕ»£¨ÖÁÉÙ 512£©
+1. **æ–‡ä»¶ç¼–ç ï¼š** æ‰€æœ‰ `.c/.h` æ–‡ä»¶ä½¿ç”¨ **GBK** ç¼–ç ã€‚è¯»å†™æ—¶å¿…é¡»æŒ‡å®š `[Text.Encoding]::GetEncoding(''GBK'')`
+2. **CubeMX ç”¨æˆ·ä»£ç åŒºï¼š** è‡ªå®šä¹‰ä»£ç åªèƒ½å†™åœ¨ `USER CODE BEGIN/END` æ ‡è®°ä¹‹é—´ï¼Œå¦åˆ™é‡æ–°ç”Ÿæˆæ—¶ä¼šè¢«è¦†ç›–
+3. **ç¦æ­¢æ‰¹é‡åˆ é™¤ï¼š** ç¦æ­¢ `del /s`, `rd /s`, `Remove-Item -Recurse` ç­‰æ‰¹é‡åˆ é™¤å‘½ä»¤
+4. **ä¸­æ–‡æ³¨é‡Šï¼š** é¡¹ç›®æ ‡å‡†ä½¿ç”¨ä¸­æ–‡æ³¨é‡Š
+5. **ä¿®æ”¹å®¡æ‰¹ï¼š** AI æå‡ºé—®é¢˜/å»ºè®® â†’ ç”¨æˆ·å®¡æ ¸ â†’ æ‰¹å‡†åŽä¿®æ”¹
+6. **ä¸­æ–­å®‰å…¨ï¼š** ISR å†…ç¦æ­¢é˜»å¡žè°ƒç”¨ï¼ˆå¦‚ PrintDebug ä¸­çš„ `HAL_UART_Transmit`ï¼‰ï¼Œç¦æ­¢ `osDelay`
+7. **æ ˆæº¢å‡ºé˜²æŠ¤ï¼š** æ¯ä¸ªä»»åŠ¡æ ˆå¤§å°å·²åœ¨ app_freertos.c å®šä¹‰ï¼Œå¢žåŠ  printf ç±»å‡½æ•°éœ€å¢žå¤§æ ˆï¼ˆè‡³å°‘ 512ï¼‰
 
-## ¾Å¡¢ÒÑÖªÎÊÌâÓë×¢ÒâÊÂÏî
+## ä¹ã€å·²çŸ¥é—®é¢˜ä¸Žæ³¨æ„äº‹é¡¹
 
-### 9.1 ÑÏÖØÎÊÌâ£¨Ðè¹Ø×¢£©
-1. ÔÝÎÞ
+### 9.2 è­¦å‘Šé—®é¢˜ï¼ˆå»ºè®®ä¿®å¤ï¼‰
+2. **CAN ISR ä¸­è°ƒç”¨ PrintDebugï¼ˆå·²ä¿®å¤ï¼Œè§ Â§9.6-2ï¼‰ï¼š** `HAL_FDCAN_RxFifo0Callback` ä¸­ PrintDebug è°ƒç”¨å·²ç”¨ `#ifdef DEBUG_CAN_ISR` åŒ…è£¹ã€‚
+3. **`CAN_Transmit_Data` ä¸­è°ƒè¯•æ‰“å°ï¼ˆå·²ä¿®å¤ï¼Œè§ Â§9.6-2ï¼‰ï¼š** æ¯æ¬¡ CAN å‘é€çš„ TX æ—¥å¿—åŒæ ·ç”¨ `#ifdef DEBUG_CAN_ISR` åŒ…è£¹ã€‚
+4. **`motor_send_move_cmd` å‡½æ•°ä½“å†—ä½™ï¼š** è¯¥å‡½æ•°çš„ buffer å¡«å……é€»è¾‘ä¸Ž `positionMode3Run` é‡å¤ï¼Œå®žé™…è°ƒç”¨ä¹Ÿæ˜¯è½¬å‘åˆ°åŽè€…ã€‚å»ºè®®ç§»é™¤å†—ä½™é€»è¾‘æˆ–ç›´æŽ¥åºŸå¼ƒæ­¤å‡½æ•°ã€‚
 
-### 9.2 ¾¯¸æÎÊÌâ£¨½¨ÒéÐÞ¸´£©
-2. **CAN ISR ÖÐµ÷ÓÃ PrintDebug£¨ÒÑÐÞ¸´£¬¼û ¡ì9.6-2£©£º** `HAL_FDCAN_RxFifo0Callback` ÖÐ PrintDebug µ÷ÓÃÒÑÓÃ `#ifdef DEBUG_CAN_ISR` °ü¹ü¡£
-3. **`CAN_Transmit_Data` ÖÐµ÷ÊÔ´òÓ¡£¨ÒÑÐÞ¸´£¬¼û ¡ì9.6-2£©£º** Ã¿´Î CAN ·¢ËÍµÄ TX ÈÕÖ¾Í¬ÑùÓÃ `#ifdef DEBUG_CAN_ISR` °ü¹ü¡£
-4. **`motor_send_move_cmd` º¯ÊýÌåÈßÓà£º** ¸Ãº¯ÊýµÄ buffer Ìî³äÂß¼­Óë `positionMode3Run` ÖØ¸´£¬Êµ¼Êµ÷ÓÃÒ²ÊÇ×ª·¢µ½ºóÕß¡£½¨ÒéÒÆ³ýÈßÓàÂß¼­»òÖ±½Ó·ÏÆú´Ëº¯Êý¡£
+### 9.3 åŠŸèƒ½æ€§é—®é¢˜ï¼ˆéƒ¨åˆ†å·²è§£å†³ï¼‰
+5. **æ­£å¼è¿åŠ¨ä»»åŠ¡ï¼ˆå·²è§£å†³ï¼Œè§ Â§9.8ï¼‰ï¼š** `PnP_Motion_Task` å·²ç”± `Host_Task` å–ä»£ï¼Œ`Host_Task` ç»Ÿä¸€å¤„ç†è°ƒè¯•å‘½ä»¤å’Œ PnP æµç¨‹ã€‚
+6. **MOTION_CMD_PICK/PLACE ç¼ºå°‘ XY ç§»åŠ¨åˆ°å¸å˜´/è´´è£…ä½ç½®ï¼š** `pick_component()` å’Œ `place_component()` ç›´æŽ¥æ“ä½œ Z è½´èˆµæœºï¼Œä½†è°ƒç”¨å‰éœ€è¦ä¸Šå±‚å…ˆå‘é€ `MOTION_CMD_MOVE_TO` åˆ°è¾¾ç›®æ ‡ä½ç½®ã€‚
+7. **è¿žç»­ç§»åŠ¨ï¼ˆå·²è§£å†³ï¼Œè§ Â§9.8ï¼‰ï¼š** `Host_Task` çš„ `handle_debug_cmd` å·²å®žçŽ°å®Œæ•´çš„ JOG æŽ§åˆ¶ï¼ˆåŒæ­¥æ¨¡å¼+positionMode3Run+motorSyncTriggerï¼‰ã€‚
+8. **R è½´æŽ§åˆ¶ï¼š** `r_axis_rotate` é€šè¿‡ `TMC_SetSpeed`ï¼ˆVACTUAL å¯„å­˜å™¨ï¼‰ç›´æŽ¥é©±åŠ¨ TMC2209ï¼ˆUART3ï¼‰ï¼Œå·²å¯¹æŽ¥ã€‚R è½´ä½¿ç”¨ã€Œä½¿èƒ½â†’æ—‹è½¬â†’å…³é—­ã€æ¨¡å¼ï¼Œ`TMC_Init()` åˆå§‹åŒ–åŽé©±åŠ¨é»˜è®¤å…³é—­ï¼Œ`r_axis_rotate` å†…éƒ¨è‡ªåŠ¨ä½¿èƒ½/å…³é—­ã€‚è¯¦è§ Â§16.7ã€‚
+9. **LPUART1 æœªé…ç½® DMA æŽ¥æ”¶ï¼š** `hdmarx = NULL`ï¼Œä»…ç”¨ä½œ TMC2209 åŠåŒå·¥é˜»å¡žé€šä¿¡ã€‚å¦‚æžœè¯¥é€šé“ç”¨äºŽå…¶ä»–ç”¨é€”éœ€é‡æ–°é…ç½®ã€‚
+### 9.4 ä»£ç è´¨é‡
+10. **`driver_motor.c runFail/runOK` æ­»å¾ªçŽ¯ï¼š** ä¸¤ä¸ªå‡½æ•°éƒ½æ˜¯ `while(1){}` ç©ºå¾ªçŽ¯ï¼Œæ— å®žé™…é”™è¯¯å¤„ç†é€»è¾‘ã€‚
+11. **æœªä½¿ç”¨çš„å…¨å±€å˜é‡ï¼š** `CAN1_0x1fe_Tx_Data` ç­‰ 7 ä¸ª 8 å­—èŠ‚æ•°ç»„ï¼ˆå…± 56 å­—èŠ‚ï¼‰ã€`CAN_RxDone`ã€`CAN_ID`ã€`realTimeLocation` ç­‰ï¼Œéƒ¨åˆ†æ¥è‡ªæ—©æœŸä»£ç æ®‹ç•™ã€‚`can_rx_queue` å·²åˆ é™¤ã€‚
+12. **`app_test.h` ä¸Ž `app_motion.h` é‡å¤å£°æ˜Žï¼ˆå·²ä¿®å¤ï¼Œè§ Â§9.6-5ï¼‰ï¼š** é‡å¤çš„ `semX1Done`ã€`evtAxesDone` ç­‰ extern å£°æ˜Žå·²ä»Ž `app_test.h` ç§»é™¤ã€‚
+### 9.5 ç¼–è¯‘ä¸Žæž„å»º
+14. **Keil MDK å·¥ç¨‹ï¼š** ä¸»è¦ä½¿ç”¨ MDK-ARM ç›®å½•ä¸‹çš„ Keil å·¥ç¨‹ç¼–è¯‘ã€‚CMakeLists.txt ä¹Ÿå¯ç”¨äºŽæž„å»ºã€‚
+15. **`overflow_count` å”¯ä¸€å£°æ˜Žåœ¨ `timestamp.c`ï¼š** `timestamp.h` æœ‰ `extern volatile`ï¼Œ`main.c` é€šè¿‡åŒ…å« `timestamp.h` ä½¿ç”¨ï¼Œä¸å¾—åœ¨ main.c ä¸­é‡å¤å®šä¹‰ã€‚
 
-### 9.3 ¹¦ÄÜÐÔÎÊÌâ£¨´ýÍêÉÆ£©
-5. **ÕýÊ½ÔË¶¯ÈÎÎñ£¨ÒÑ½â¾ö£¬¼û ¡ì9.8£©£º** `PnP_Motion_Task` ÒÑÓÉ `Host_Task` È¡´ú£¬`Host_Task` Í³Ò»´¦Àíµ÷ÊÔÃüÁîºÍ PnP Á÷³Ì¡£
-6. **MOTION_CMD_PICK/PLACE È±ÉÙ XY ÒÆ¶¯µ½Îü×ì/Ìù×°Î»ÖÃ£º** `pick_component()` ºÍ `place_component()` Ö±½Ó²Ù×÷ Z Öá¶æ»ú£¬µ«µ÷ÓÃÇ°ÐèÒªÉÏ²ãÏÈ·¢ËÍ `MOTION_CMD_MOVE_TO` µ½´ïÄ¿±êÎ»ÖÃ¡£
-7. **Á¬ÐøÒÆ¶¯£¨ÒÑ½â¾ö£¬¼û ¡ì9.8£©£º** `Host_Task` µÄ `handle_debug_cmd` ÒÑÊµÏÖÍêÕûµÄ JOG ¿ØÖÆ£¨Í¬²½Ä£Ê½+positionMode3Run+motorSyncTrigger£©¡£
-8. **R Öá¿ØÖÆ£º** `r_axis_rotate` Í¨¹ý `TMC_SetSpeed`£¨VACTUAL ¼Ä´æÆ÷£©Ö±½ÓÇý¶¯ TMC2209£¨UART3£©£¬ÒÑ¶Ô½Ó¡£R ÖáÊ¹ÓÃ¡¸Ê¹ÄÜ¡úÐý×ª¡ú¹Ø±Õ¡¹Ä£Ê½£¬`TMC_Init()` ³õÊ¼»¯ºóÇý¶¯Ä¬ÈÏ¹Ø±Õ£¬`r_axis_rotate` ÄÚ²¿×Ô¶¯Ê¹ÄÜ/¹Ø±Õ¡£Ïê¼û ¡ì9.9 ºÍ ¡ì16.7¡£
-9. **LPUART1 Î´ÅäÖÃ DMA ½ÓÊÕ£º** `hdmarx = NULL`£¬½öÓÃ×÷ TMC2209 °ëË«¹¤×èÈûÍ¨ÐÅ¡£Èç¹û¸ÃÍ¨µÀÓÃÓÚÆäËûÓÃÍ¾ÐèÖØÐÂÅäÖÃ¡£
-### 9.4 ´úÂëÖÊÁ¿
-10. ÔÝÎÞ
-11. **`driver_motor.c runFail/runOK` ËÀÑ­»·£º** Á½¸öº¯Êý¶¼ÊÇ `while(1){}` ¿ÕÑ­»·£¬ÎÞÊµ¼Ê´íÎó´¦ÀíÂß¼­¡£
-12. **Î´Ê¹ÓÃµÄÈ«¾Ö±äÁ¿£º** `CAN1_0x1fe_Tx_Data` µÈ 7 ¸ö 8 ×Ö½ÚÊý×é£¨¹² 56 ×Ö½Ú£©¡¢`CAN_RxDone`¡¢`CAN_ID`¡¢`realTimeLocation` µÈ£¬²¿·ÖÀ´×ÔÔçÆÚ´úÂë²ÐÁô¡£`can_rx_queue` ÒÑÉ¾³ý¡£
-13. **`app_test.h` Óë `app_motion.h` ÖØ¸´ÉùÃ÷£¨ÒÑÐÞ¸´£¬¼û ¡ì9.6-5£©£º** ÖØ¸´µÄ `semX1Done`¡¢`evtAxesDone` µÈ extern ÉùÃ÷ÒÑ´Ó `app_test.h` ÒÆ³ý¡£
-### 9.5 ±àÒëÓë¹¹½¨
-14. **Keil MDK ¹¤³Ì£º** Ö÷ÒªÊ¹ÓÃ MDK-ARM Ä¿Â¼ÏÂµÄ Keil ¹¤³Ì±àÒë¡£CMakeLists.txt Ò²¿ÉÓÃÓÚ¹¹½¨¡£
-15. **`overflow_count` Î¨Ò»ÉùÃ÷ÔÚ `timestamp.c`£º** `timestamp.h` ÓÐ `extern volatile`£¬`main.c` Í¨¹ý°üº¬ `timestamp.h` Ê¹ÓÃ£¬²»µÃÔÚ main.c ÖÐÖØ¸´¶¨Òå¡£
-
-### 9.6 ÒÑÍê³ÉµÄ¼Ü¹¹¸Ä½ø£¨2026-05£©
-1. **ÒÑ´´½¨ `host_pkt_queue`£º** 16 Éî¶È `HostMsg_t` ¶ÓÁÐ£¬UART ¿ÕÏÐÖÐ¶Ï»Øµ÷ ¡ú ¶ÓÁÐ ¡ú Host_Task¡£ÐÞ¸´ÁËÔ­ÏÈ¶ÓÁÐÎ´´´½¨µ¼ÖÂ NULL Ð´ÈëµÄÔËÐÐÊ± Bug¡£
-2. **ÒÑÌí¼Ó `g_debug_mutex` + `DEBUG_CAN_ISR` Ìõ¼þ±àÒë£º** »¥³âËø±£»¤ÈÎÎñÉÏÏÂÎÄ `PrintDebug` µÄ¾²Ì¬ `s_debug_buf`£¬½â¾ö¶àÈÎÎñ²¢·¢ÈÕÖ¾½»´í¡£ISR ÖÐ PrintDebug ÓÉ `DEBUG_CAN_ISR` ºê¿ØÖÆ£¨Ä¬ÈÏ¹Ø±Õ£©£¬³¹µ×Ïû³ý ISR ×èÈû UART ÎÊÌâ¡£
-3. **`StartHostMotionTestTask` ÒÑ¸ÄÎªÊÂ¼þÇý¶¯£º** Ô­Ö÷Ñ­»· `vTaskDelay(10ms)` ÂÖÑ¯¸ÄÎª `osThreadFlagsWait` ×èÈûµÈ´ý¡£UART ¿ÕÏÐÖÐ¶ÏÍ¨¹ý `osThreadFlagsSet(hostMotionTaskHandle, ...)` »½ÐÑÈÎÎñ£¬ÑÓ³Ù´Ó ¡Ü10ms ½µÖÁ <1ms¡£
-4. **`Key_Task` ÒÑ¸ÄÓÃ `osDelayUntil`£º** Ô­ `osDelay(10)` ¸ÄÎª `osDelayUntil`£¬Ïû³ýÈÎÎñÖ´ÐÐÊ±¼äµ¼ÖÂµÄÖÜÆÚÆ¯ÒÆ£¬±£Ö¤¾«È· 10ms É¨Ãè¼ä¸ô¡£
-5. **ÒÑÉ¾³ýÎ´Ê¹ÓÃµÄ FreeRTOS ¶ÔÏó£º** `semX1Done`¡¢`semX2Done`¡¢`semYDone`¡¢`semEmergency`£¨ÐÅºÅÁ¿£©ºÍ `can_rx_queue`£¨¶ÓÁÐ£©ÒÑ´ÓÔ´ÂëÖÐÒÆ³ý¡£µ½Î»Í¨ÖªÍ³Ò»Ê¹ÓÃ `evtAxesDone` ÊÂ¼þ×é¡£
+### 9.6 å·²å®Œæˆçš„æž¶æž„æ”¹è¿›ï¼ˆ2026-05ï¼‰
+1. **å·²åˆ›å»º `host_pkt_queue`ï¼š** 16 æ·±åº¦ `HostMsg_t` é˜Ÿåˆ—ï¼ŒUART ç©ºé—²ä¸­æ–­å›žè°ƒ â†’ é˜Ÿåˆ— â†’ Host_Taskã€‚ä¿®å¤äº†åŽŸå…ˆé˜Ÿåˆ—æœªåˆ›å»ºå¯¼è‡´ NULL å†™å…¥çš„è¿è¡Œæ—¶ Bugã€‚
+2. **å·²æ·»åŠ  `g_debug_mutex` + `DEBUG_CAN_ISR` æ¡ä»¶ç¼–è¯‘ï¼š** äº’æ–¥é”ä¿æŠ¤ä»»åŠ¡ä¸Šä¸‹æ–‡ `PrintDebug` çš„é™æ€ `s_debug_buf`ï¼Œè§£å†³å¤šä»»åŠ¡å¹¶å‘æ—¥å¿—äº¤é”™ã€‚ISR ä¸­ PrintDebug ç”± `DEBUG_CAN_ISR` å®æŽ§åˆ¶ï¼ˆé»˜è®¤å…³é—­ï¼‰ï¼Œå½»åº•æ¶ˆé™¤ ISR é˜»å¡ž UART é—®é¢˜ã€‚
+3. **`StartHostMotionTestTask` å·²æ”¹ä¸ºäº‹ä»¶é©±åŠ¨ï¼š** åŽŸä¸»å¾ªçŽ¯ `vTaskDelay(10ms)` è½®è¯¢æ”¹ä¸º `osThreadFlagsWait` é˜»å¡žç­‰å¾…ã€‚UART ç©ºé—²ä¸­æ–­é€šè¿‡ `osThreadFlagsSet(hostMotionTaskHandle, ...)` å”¤é†’ä»»åŠ¡ï¼Œå»¶è¿Ÿä»Ž â‰¤10ms é™è‡³ <1msã€‚
+4. **`Key_Task` å·²æ”¹ç”¨ `osDelayUntil`ï¼š** åŽŸ `osDelay(10)` æ”¹ä¸º `osDelayUntil`ï¼Œæ¶ˆé™¤ä»»åŠ¡æ‰§è¡Œæ—¶é—´å¯¼è‡´çš„å‘¨æœŸæ¼‚ç§»ï¼Œä¿è¯ç²¾ç¡® 10ms æ‰«æé—´éš”ã€‚
+5. **å·²åˆ é™¤æœªä½¿ç”¨çš„ FreeRTOS å¯¹è±¡ï¼š** `semX1Done`ã€`semX2Done`ã€`semYDone`ã€`semEmergency`ï¼ˆä¿¡å·é‡ï¼‰å’Œ `can_rx_queue`ï¼ˆé˜Ÿåˆ—ï¼‰å·²ä»Žæºç ä¸­ç§»é™¤ã€‚åˆ°ä½é€šçŸ¥ç»Ÿä¸€ä½¿ç”¨ `evtAxesDone` äº‹ä»¶ç»„ã€‚
 
 
-## Ê®¡¢¿ìËÙ²Î¿¼
+## åã€å¿«é€Ÿå‚è€ƒ
 
-### 9.7 ÒÑÍê³ÉµÄ¸Ä½ø£¨2026-06£©
+### 9.7 å·²å®Œæˆçš„æ”¹è¿›ï¼ˆ2026-06ï¼‰
 
-**1. TIM2 ÆµÂÊµ÷Õû£º** CubeMX ÖÐ TIM2 ARR ´Ó 1000 ¸ÄÎª 19999£¬Ê¹ CH3(PB10) ²úÉú 50Hz PWM ÓÃÓÚ Z Öá¶æ»ú¡£CH1(PA0, 12V_C1) ÆµÂÊÍ¬²½½µÖÁ 50Hz£¬µ«ÓÉÓÚ pulse ÖµÔ¶³¬ ARR Êµ¼ÊÖ»×ö¿ª¹Ø¿ØÖÆ£¬²»ÊÜÓ°Ïì¡£
+> æ­¤ä¸‰é¡¹æ”¹è¿›çš„è¯¦ç»†è®°å½•å·²ç§»è‡³ Â§18ï¼ˆèˆµæœºé©±åŠ¨æ”¹è¿›è®°å½•ï¼‰ï¼Œæ­¤å¤„ä»…ä¿ç•™ç´¢å¼•ï¼š
+3. TIM5 HAL State ç»•è¿‡ â†’ Â§18.2
+2. CubeMX PE8 AF Bug ä¿®å¤ â†’ Â§18.1
+1. TIM2 é¢‘çŽ‡è°ƒæ•´ â†’ Â§18.3
 
-**2. CubeMX PE8 AF Bug£¨ÒÑÔÚ driver_servo.c ÖÐÐÞ¸´£©£º** CubeMX Éú³ÉµÄ TIM5_CH3(PE8) AF ÊÇ AF1£¬µ« STM32G474 ÕýÈ·ÖµÊÇ AF2¡£Servo_Init() ÖÐ¼ì²â TIM5 Ê±×Ô¶¯ÐÞ¸´¡£
+### 9.9 TMC2209 ä½¿èƒ½/å…³é—­è®¾è®¡ï¼ˆ2026-06-11~12ï¼‰
 
-**3. TIM5 HAL State ¹²ÏíÏÞÖÆ£¨ÒÑÔÚ driver_servo.c ÖÐÈÆ¹ý£©£º** TIM5_CH1 ÏÈÆô¶¯µ¼ÖÂ State=BUSY£¬×èÈû CH3 µÄ HAL_TIM_PWM_Start¡£Í¨¹ýÁÙÊ±»Ö¸´ State ÈÆ¹ý¡£
+> æ­¤è®¾è®¡çš„å®Œæ•´æ–‡æ¡£å·²ç§»è‡³ Â§16.7ï¼Œæ­¤å¤„ä»…ä¿ç•™ä¸Ž TMC2209 ä½¿èƒ½/å…³é—­ä¸»è®¾è®¡æ— å…³çš„è¾¹ç¼˜è¯´æ˜Žã€‚
 
-### 9.9 TMC2209 Ê¹ÄÜ/¹Ø±ÕÉè¼Æ£¨2026-06-11~12£©
+**è¡¥å…… 2 â€” DRV8803 24V ç«¯å£ä¸ºä½Žç«¯å¼€å…³ï¼š** Port_24VO1(PA6) ç­‰ä¸ºæ ‡å‡† DRV8803 ä½Žç«¯é©±åŠ¨ï¼ˆIN=HIGHâ†’OUT=LOWâ†’è´Ÿè½½å¯¼é€šï¼Œä¸Ž 12V ç«¯å£é€»è¾‘ä¸€è‡´ï¼‰ã€‚è¯¦è§ Â§10.4ã€‚
+**è¡¥å…… 1 â€” VACTUAL å¯åŠ¨æ‰­çŸ©ä¸è¶³ï¼š** ç›´æŽ¥è·³å…¨é€Ÿæ—¶é™æ‘©æ“¦å¡ä½ç”µæœºï¼Œéœ€ç”¨é€Ÿåº¦æ–œå¡ï¼ˆ5000â†’80000 Î¼step/sï¼Œæ¯çº§ +8000ï¼Œ40ms/çº§ï¼‰ã€‚è¯¦è§ Â§16.3ã€‚
 
-**Éè¼ÆÔ­Ôò£º** TMC2209 Çý¶¯½öÔÚ R ÖáÐèÒªÐý×ªÊ±Ê¹ÄÜ£¬ÆäÓàÊ±¼ä¹Ø±Õ£¨ENN=HIGH£©£¬·ÀÖ¹µç»ú³ÖÐøÍ¨µç·¢ÈÈ¡£
+### 9.8 å·²å®Œæˆçš„æž¶æž„æ”¹è¿›ï¼ˆ2026-06-10ï¼‰
 
-**¹Ø¼ü¸Ä¶¯£º**
+**1. Host_Task å¯åŠ¨ä¸å†å‘é€ DOWNLOAD_READYï¼š** ä¸Šä½æœºåè®®è§„å®š `DEBUG_MODE` è§£é”è°ƒè¯•æŒ‰é’®ï¼Œ`DOWNLOAD_READY` è¿›å…¥æ–‡ä»¶ä¸‹è½½æ¨¡å¼ã€‚åŽŸä»£ç å¯åŠ¨æ—¶åŒæ—¶å‘é€ä¸¤è€…ï¼Œå¯¼è‡´ä¸Šä½æœºè¢« `DOWNLOAD_READY` å¸¦å…¥ä¸‹è½½æ¨¡å¼ï¼Œè°ƒè¯•æŒ‰é’®è¢«é‡æ–°é”å®šã€‚ä¿®å¤ï¼šå¯åŠ¨åªå‘ `DEBUG_MODE\n`ï¼Œ`DOWNLOAD_READY` ä»…åœ¨ä¸‹è½½å®Œæˆæˆ–é€€å‡ºè°ƒè¯•æ—¶å‘é€ã€‚
 
-| ÎÄ¼þ | ¸Ä¶¯ |
-|------|------|
-| `driver_tmc2209.h` | ÐÂÔö `TMC_ENABLE_DELAY_MS 50` ºê£¬Í³Ò»ÉÏµçÎÈ¶¨ÑÓÊ± |
-| `driver_tmc2209.c:365` | `TMC_Init()` Ä©Î²¼Ó `TMC_SetEnable(false)`£¬³õÊ¼»¯ºó×Ô¶¯¹Ø±Õ |
-| `app_motion.c:r_axis_rotate` | Èë¿ÚÊ¹ÄÜ+ÑÓÊ±¡úÉè VACTUAL¡úÔËÐÐ¡úÍ£Ö¹¡ú¹Ø±Õ |
-| `app_test.c:StartMotorTestTask` | Ñ­»·ÄÚÃ¿´ÎÊ¹ÄÜ¡úÔËÐÐ 2s¡úÍ£Ö¹¡ú¹Ø±Õ¡ú·´×ªÖØ¸´ |
-| `app_host.c` | Æô¶¯Ê± `TMC_SetEnable(false)` È·±£Çý¶¯¹Ø±Õ |
-| `app_test.c:StartCamTestTask` | Æô¶¯Ê± `TMC_SetEnable(false)`£¨±¾ÈÎÎñ²»Ê¹ÓÃ R Öá£© |
+**2. å‘½ä»¤è§£æžä»Ž ISR ç§»è‡³ä»»åŠ¡ä¸Šä¸‹æ–‡ï¼ˆUART_PeekData æž¶æž„ï¼‰ï¼š** åŽŸæž¶æž„ `HAL_UARTEx_RxEventCallback(ISR)` â†’ `Host_UartRecvCallback(ISR)` â†’ `LineParser_Feed`(å« `strtof` æµ®ç‚¹) â†’ `host_pkt_queue` â†’ `Host_Task`ã€‚Cortex-M4F åœ¨ ISR ä¸­ä½¿ç”¨ FPU æµ®ç‚¹è¿ç®—å¯èƒ½å¯¼è‡´é™é»˜å¤±è´¥ï¼Œä¸” `g_parser` è¢« ISR å’Œä»»åŠ¡åŒæ—¶ä½¿ç”¨å­˜åœ¨ç«žæ€ã€‚ä¿®å¤ï¼š`Host_UartRecvCallback` æ”¹ä¸ºç©ºå‡½æ•°ï¼ˆä»…ä¿ç•™ `(void)data; (void)len;`ï¼‰ï¼Œ`Host_Task` ä¸»å¾ªçŽ¯æ”¹ç”¨ `UART_PeekData` + `LineParser_Feed`ï¼ˆå…¨éƒ¨åœ¨ä»»åŠ¡ä¸Šä¸‹æ–‡æ‰§è¡Œï¼‰ï¼Œ`host_pkt_queue` å¼ƒç”¨ã€‚
 
-**CubeMX Ä¬ÈÏÖµÏÝÚå£º** PD15(TMC1_EN) ÔÚ CubeMX ÖÐÅäÖÃÎª GPIO_Output£¬Ä¬ÈÏ³õÊ¼µçÆ½ LOW¡£ENN µÍÓÐÐ§£¬Òò´Ë´Ó boot Æð TMC2209 ¼´ÎªÊ¹ÄÜ×´Ì¬¡£Èç¹ûÃ»ÓÐÈÎºÎÈÎÎñµ÷ÓÃ `TMC_SetEnable(false)`£¨ÀýÈç Host_Task ±»×¢ÊÍ£©£¬TMC2209 ½«³ÖÐøÍ¨µç¡£**ÈÎºÎ²»Ê¹ÓÃ R ÖáµÄÈÎÎñ±ØÐëÏÔÊ½µ÷ÓÃ `TMC_SetEnable(false)`¡£**
+**3. move_xy_relative è¿›å…¥ç­‰å¾…å¾ªçŽ¯å‰åŠ  UART_ClearDataï¼š** `UART_PeekData` åªè¯»ä¸æ¸… `data_ready` æ ‡å¿—ã€‚å¤–å±‚ä¸»å¾ªçŽ¯è¯»å®ŒåŽæ ‡å¿—ä»ç½®ä½ï¼Œå¯¼è‡´ `move_xy_relative` å†…éƒ¨ç­‰å¾…å¾ªçŽ¯ä¸­çš„ `UART_PeekData` æ£€æµ‹åˆ°æ®‹ç•™æ•°æ®ï¼Œç«‹å³è¿”å›ž -3ï¼ˆè¯¯åˆ¤ä¸ºä¸­æ–­å‘½ä»¤ï¼‰ã€‚ä¿®å¤ï¼šç­‰å¾…å¾ªçŽ¯å‰è°ƒç”¨ `UART_ClearData(UART_CH1)` åˆ·æ–°æ ‡å¿—ã€‚æ­¤ bug å¯¼è‡´ `MOVE_TO`/`SET_ORIGIN` ç­‰é˜»å¡žå¼è¿åŠ¨æ— æ•ˆã€‚
 
-**µ÷ÓÃÄ£Ê½£º** ËùÓÐ TMC2209 Ê¹ÓÃµãÍ³Ò»×ñÑ­£º
-```
-TMC_SetEnable(true) ¡ú vTaskDelay(TMC_ENABLE_DELAY_MS) ¡ú TMC_SetSpeed(...) ¡ú ÔËÐÐ ¡ú TMC_SetSpeed(0) ¡ú vTaskDelay(Í£ÎÈ) ¡ú TMC_SetEnable(false)
-```
+**4. HAL_TIM_PWM_Start CCER ä¸ç”Ÿæ•ˆï¼ˆæ”¹ç”¨ CMSIS APIï¼‰ï¼š** å¯¹ TIM2 è°ƒç”¨ `HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3)` è¿”å›ž HAL_OK ä½† CCER å¯„å­˜å™¨ç»´æŒ 0x00ï¼ŒCH3 è¾“å‡ºæœªä½¿èƒ½ã€‚æ ¹å› æœªæ˜Žç¡®å®šä½ï¼ˆç–‘ä¼¼ HAL åº“ç‰ˆæœ¬æˆ–ç¼–è¯‘ä¼˜åŒ–é—®é¢˜ï¼‰ã€‚ä¿®å¤ï¼šä½¿ç”¨ CMSIS çº§ `TIM_CCxChannelCmd(htim->Instance, TIM_CHANNEL_3, TIM_CCx_ENABLE)` + `__HAL_TIM_ENABLE(htim)`ï¼Œå¹¶æ­£ç¡®ç»´æŠ¤ `htim->State`ï¼ˆè®¾ä¸º BUSY â†’ æ“ä½œ â†’ æ¢å¤ï¼‰ã€‚æ­¤æ–¹æ¡ˆåŒæ—¶å…¼å®¹ TIM5 çš„å¤šé€šé“ HAL State é”é—®é¢˜ã€‚`driver_servo.c` ä¸­ç›¸å…³æ³¨é‡Šå·²æ›´æ–°ã€‚
 
-**4. TMC2209 VACTUAL Æô¶¯Å¤¾Ø²»×ã£º** Ö±½ÓÌøÈ«ËÙÊ±¾²Ä¦²Á¿¨×¡µç»ú£¬ÐèÓÃËÙ¶ÈÐ±ÆÂ£¨5000¡ú80000 ¦Ìstep/s£¬Ã¿¼¶ +8000£¬40ms/¼¶£©¡£
+**5. TMC2209 ENN å¼•è„šä¸ºä½Žæœ‰æ•ˆï¼ŒHost_Task ç”¨ TMC_SetEnable(false) ç¦ç”¨ï¼š** PD15(TMC1_EN) è¿žæŽ¥ TMC2209 Pin17 ENNï¼ˆEnable Notï¼‰ã€‚LOW=é©±åŠ¨å¼€å¯ï¼ŒHIGH=é©±åŠ¨å…³é—­ã€‚CubeMX åˆå§‹åŒ–ä¸º LOWï¼ˆé…åˆ TMC_Init ä½¿ç”¨ï¼‰ã€‚`Host_Task` å¯åŠ¨æ—¶è°ƒç”¨ `TMC_SetEnable(false)` å…³é—­é©±åŠ¨ï¼Œé˜²æ­¢ R è½´ç”µæœºåœ¨æœªåˆå§‹åŒ–æ—¶å‘çƒ­ã€‚
 
-**5. DRV8803 24V ¶Ë¿ÚÎªµÍ¶Ë¿ª¹Ø£º** Port_24VO1(PA6) µÈ 24V ¶Ë¿ÚÎª±ê×¼ DRV8803 µÍ¶ËÇý¶¯£ºIN=HIGH¡úOUT=LOW¡ú¸ºÔØµ¼Í¨£¬IN=LOW¡úOUT=¸ß×è¡ú¸ºÔØ¶Ï¿ª¡£Óë 12V ¶Ë¿ÚÂß¼­Ò»ÖÂ¡£ÔçÆÚÎÄµµ¡¸PA6=LOWÊ±µ¼Í¨¡¹Îª´íÎó¼ÇÂ¼£¬ÒÑÐÞÕý¡£
+**6. Servo_Init + DRV8803 åˆå§‹åŒ–åŠ å…¥ Host_Taskï¼š** åŽŸå…ˆç¼ºå°‘ `Servo_Init(&htim2)` å’Œ `DRV8803_Init()`ï¼Œå¯¼è‡´ `SET_SERVO` å‘½ä»¤æ— æ•ˆï¼ˆ`servo_handles[2].initialized=false`ï¼‰ï¼Œä¸” Z è½´èˆµæœºå›  DRV8803 è¾“å‡ºçŠ¶æ€ä¸ç¡®å®šè€Œå‘çƒ­ã€‚ä¿®å¤ï¼šHost_Task å¯åŠ¨æµç¨‹åŒ…å« `DRV8803_Init â†’ EnableChip(1) â†’ Servo_Init(&htim2) â†’ SetOutput(12VO4) â†’ Servo_SetAngle(Z_SERVO_CH, 120Â°)`ã€‚
 
+**7. å¸¸é‡è¯­ä¹‰åŒ–æ‹†åˆ†ï¼š** åŽŸ `JOG_SPEED`/`JOG_ACC` è¢«ç¦»æ•£ç§»åŠ¨ã€MOVE_TO å’Œ JOG å…±ç”¨ï¼Œå‘½åè¯¯å¯¼ã€‚æ‹†åˆ†ä¸ºä¸‰å±‚ï¼š`DEBUG_SPEED`/`DEBUG_ACC`ï¼ˆMOVE_UP/DOWN/LEFT/RIGHTã€MOVE_TOï¼‰ã€`JOG_SPEED`/`JOG_ACC`ï¼ˆMOVE_*_START è¿žç»­ JOGï¼‰ã€`PNP_SPEED`/`PNP_ACC`ï¼ˆMark/æ‰¾å…ƒä»¶/è´´è£…æµç¨‹ï¼‰ã€‚èˆµæœºé€šé“å·å®šä¹‰ä¸º `#define Z_SERVO_CH 2`ï¼Œæ¶ˆé™¤é­”æ³•æ•°å­—ã€‚
 
-### 9.8 ÒÑÍê³ÉµÄ¼Ü¹¹¸Ä½ø£¨2026-06-10£©
+**8. parse_header è¶Šç•Œä¿®å¤ï¼š** `while (p <= end)` åœ¨ç©ºè¡Œæ—¶ `p == end` å¤šè¯»ä¸€å­—èŠ‚ã€‚æ”¹ä¸º `p < end`ã€‚
 
-**1. Host_Task Æô¶¯²»ÔÙ·¢ËÍ DOWNLOAD_READY£º** ÉÏÎ»»úÐ­Òé¹æ¶¨ `DEBUG_MODE` ½âËøµ÷ÊÔ°´Å¥£¬`DOWNLOAD_READY` ½øÈëÎÄ¼þÏÂÔØÄ£Ê½¡£Ô­´úÂëÆô¶¯Ê±Í¬Ê±·¢ËÍÁ½Õß£¬µ¼ÖÂÉÏÎ»»ú±» `DOWNLOAD_READY` ´øÈëÏÂÔØÄ£Ê½£¬µ÷ÊÔ°´Å¥±»ÖØÐÂËø¶¨¡£ÐÞ¸´£ºÆô¶¯Ö»·¢ `DEBUG_MODE\n`£¬`DOWNLOAD_READY` ½öÔÚÏÂÔØÍê³É»òÍË³öµ÷ÊÔÊ±·¢ËÍ¡£
+**9. Vision_Init é‡å¤è°ƒç”¨æ¸…ç†ï¼š** åŽŸå…ˆ `app_freertos.c` å’Œ `Host_Task` å„è°ƒç”¨ä¸€æ¬¡ï¼Œå¯¼è‡´ `[VISION] Init done` æ‰“å°ä¸¤æ¬¡ã€‚å·²ä»Ž `app_freertos.c` ç§»é™¤ã€‚
 
-**2. ÃüÁî½âÎö´Ó ISR ÒÆÖÁÈÎÎñÉÏÏÂÎÄ£¨UART_PeekData ¼Ü¹¹£©£º** Ô­¼Ü¹¹ `HAL_UARTEx_RxEventCallback(ISR)` ¡ú `Host_UartRecvCallback(ISR)` ¡ú `LineParser_Feed`(º¬ `strtof` ¸¡µã) ¡ú `host_pkt_queue` ¡ú `Host_Task`¡£Cortex-M4F ÔÚ ISR ÖÐÊ¹ÓÃ FPU ¸¡µãÔËËã¿ÉÄÜµ¼ÖÂ¾²Ä¬Ê§°Ü£¬ÇÒ `g_parser` ±» ISR ºÍÈÎÎñÍ¬Ê±Ê¹ÓÃ´æÔÚ¾ºÌ¬¡£ÐÞ¸´£º`Host_UartRecvCallback` ¸ÄÎª¿Õº¯Êý£¨½ö±£Áô `(void)data; (void)len;`£©£¬`Host_Task` Ö÷Ñ­»·¸ÄÓÃ `UART_PeekData` + `LineParser_Feed`£¨È«²¿ÔÚÈÎÎñÉÏÏÂÎÄÖ´ÐÐ£©£¬`host_pkt_queue` ÆúÓÃ¡£
+**10. ä¸»å¾ªçŽ¯å†—ä½™ osDelay æ¸…ç†ï¼š** åŽŸä¸»å¾ªçŽ¯ switch åŽæœ‰é¢å¤– `osDelay(5)`ï¼Œå¯¼è‡´ HOST_DEBUG æ€æ¯å¾ªçŽ¯ 15ms è€Œéžé¢„æœŸçš„ 10msã€‚å·²ç§»é™¤ã€‚
 
-**3. move_xy_relative ½øÈëµÈ´ýÑ­»·Ç°¼Ó UART_ClearData£º** `UART_PeekData` Ö»¶Á²»Çå `data_ready` ±êÖ¾¡£Íâ²ãÖ÷Ñ­»·¶ÁÍêºó±êÖ¾ÈÔÖÃÎ»£¬µ¼ÖÂ `move_xy_relative` ÄÚ²¿µÈ´ýÑ­»·ÖÐµÄ `UART_PeekData` ¼ì²âµ½²ÐÁôÊý¾Ý£¬Á¢¼´·µ»Ø -3£¨ÎóÅÐÎªÖÐ¶ÏÃüÁî£©¡£ÐÞ¸´£ºµÈ´ýÑ­»·Ç°µ÷ÓÃ `UART_ClearData(UART_CH1)` Ë¢ÐÂ±êÖ¾¡£´Ë bug µ¼ÖÂ `MOVE_TO`/`SET_ORIGIN` µÈ×èÈûÊ½ÔË¶¯ÎÞÐ§¡£
+**11. HOST_DONE/HOST_ERROR ä¸å†è‡ªåŠ¨å‘ DOWNLOAD_READYï¼š** ä»»åŠ¡å®Œæˆæˆ–å‡ºé”™æ¢å¤åŽä¸å†å‘é€ `DOWNLOAD_READY`ï¼Œé¿å…è§¦å‘ä¸Šä½æœºè¿›å…¥æ–‡ä»¶ä¸‹è½½æ¨¡å¼é”å®šè°ƒè¯•æŒ‰é’®ã€‚
 
-**4. HAL_TIM_PWM_Start CCER ²»ÉúÐ§£¨¸ÄÓÃ CMSIS API£©£º** ¶Ô TIM2 µ÷ÓÃ `HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3)` ·µ»Ø HAL_OK µ« CCER ¼Ä´æÆ÷Î¬³Ö 0x00£¬CH3 Êä³öÎ´Ê¹ÄÜ¡£¸ùÒòÎ´Ã÷È·¶¨Î»£¨ÒÉËÆ HAL ¿â°æ±¾»ò±àÒëÓÅ»¯ÎÊÌâ£©¡£ÐÞ¸´£ºÊ¹ÓÃ CMSIS ¼¶ `TIM_CCxChannelCmd(htim->Instance, TIM_CHANNEL_3, TIM_CCx_ENABLE)` + `__HAL_TIM_ENABLE(htim)`£¬²¢ÕýÈ·Î¬»¤ `htim->State`£¨ÉèÎª BUSY ¡ú ²Ù×÷ ¡ú »Ö¸´£©¡£´Ë·½°¸Í¬Ê±¼æÈÝ TIM5 µÄ¶àÍ¨µÀ HAL State ËøÎÊÌâ¡£`driver_servo.c` ÖÐÏà¹Ø×¢ÊÍÒÑ¸üÐÂ¡£
+**12. è¿åŠ¨å‘½ä»¤ä¸å— g_state é™åˆ¶ï¼š** `handle_debug_cmd` è°ƒç”¨æ¡ä»¶ä»Ž `if (g_state == HOST_DEBUG)` æ”¹ä¸º `if (cmd != RAW_LINE/NONE/UNKNOWN)`ï¼Œç¡®ä¿å³ä½¿çŠ¶æ€æ„å¤–åˆ‡æ¢ï¼ˆå¦‚è¢« CSV æ•°æ®è¯¯è§¦ HOST_DOWNLOADINGï¼‰ï¼Œè¿åŠ¨å‘½ä»¤ä»èƒ½æ­£å¸¸å¤„ç†ã€‚
 
-**5. TMC2209 ENN Òý½ÅÎªµÍÓÐÐ§£¬Host_Task ÓÃ TMC_SetEnable(false) ½ûÓÃ£º** PD15(TMC1_EN) Á¬½Ó TMC2209 Pin17 ENN£¨Enable Not£©¡£LOW=Çý¶¯¿ªÆô£¬HIGH=Çý¶¯¹Ø±Õ¡£CubeMX ³õÊ¼»¯Îª LOW£¨ÅäºÏ TMC_Init Ê¹ÓÃ£©¡£`Host_Task` Æô¶¯Ê±µ÷ÓÃ `TMC_SetEnable(false)` ¹Ø±ÕÇý¶¯£¬·ÀÖ¹ R Öáµç»úÔÚÎ´³õÊ¼»¯Ê±·¢ÈÈ¡£
+**13. Host_UartRecvCallback é‡å¤æ³¨é‡Šå¤´æ¸…ç†ï¼š** ç§»é™¤æ—§çš„ `/* === Host_UartRecvCallback â€” UART ISR ä¸­è°ƒç”¨ === */` æ³¨é‡Šå—ï¼Œåªä¿ç•™"å·²å¼ƒç”¨é˜Ÿåˆ—æ¨¡å¼"ç‰ˆæœ¬ã€‚
 
-**6. Servo_Init + DRV8803 ³õÊ¼»¯¼ÓÈë Host_Task£º** Ô­ÏÈÈ±ÉÙ `Servo_Init(&htim2)` ºÍ `DRV8803_Init()`£¬µ¼ÖÂ `SET_SERVO` ÃüÁîÎÞÐ§£¨`servo_handles[2].initialized=false`£©£¬ÇÒ Z Öá¶æ»úÒò DRV8803 Êä³ö×´Ì¬²»È·¶¨¶ø·¢ÈÈ¡£ÐÞ¸´£ºHost_Task Æô¶¯Á÷³Ì°üº¬ `DRV8803_Init ¡ú EnableChip(1) ¡ú Servo_Init(&htim2) ¡ú SetOutput(12VO4) ¡ú Servo_SetAngle(Z_SERVO_CH, 120¡ã)`¡£
+### 9.10 UART DMA æž¶æž„æ”¹è¿›ï¼ˆ2026-06-12ï¼‰
 
-**7. ³£Á¿ÓïÒå»¯²ð·Ö£º** Ô­ `JOG_SPEED`/`JOG_ACC` ±»ÀëÉ¢ÒÆ¶¯¡¢MOVE_TO ºÍ JOG ¹²ÓÃ£¬ÃüÃûÎóµ¼¡£²ð·ÖÎªÈý²ã£º`DEBUG_SPEED`/`DEBUG_ACC`£¨MOVE_UP/DOWN/LEFT/RIGHT¡¢MOVE_TO£©¡¢`JOG_SPEED`/`JOG_ACC`£¨MOVE_*_START Á¬Ðø JOG£©¡¢`PNP_SPEED`/`PNP_ACC`£¨Mark/ÕÒÔª¼þ/Ìù×°Á÷³Ì£©¡£¶æ»úÍ¨µÀºÅ¶¨ÒåÎª `#define Z_SERVO_CH 2`£¬Ïû³ýÄ§·¨Êý×Ö¡£
+**èƒŒæ™¯ï¼š** ä¸Šä½æœºè¾“å‡ºæ—¥å¿—é‡å¤ã€å‘½ä»¤è¢«å¤šæ¬¡æ‰§è¡Œã€‚ç»æŽ’æŸ¥å‘çŽ°ä¸‰é‡æ ¹å› ï¼š
 
-**8. parse_header Ô½½çÐÞ¸´£º** `while (p <= end)` ÔÚ¿ÕÐÐÊ± `p == end` ¶à¶ÁÒ»×Ö½Ú¡£¸ÄÎª `p < end`¡£
+#### æ ¹å›  1ï¼šISR å†…ç«‹å³é‡å¯ DMA ä¸Žä»»åŠ¡ä¾§ç«žæ€
 
-**9. Vision_Init ÖØ¸´µ÷ÓÃÇåÀí£º** Ô­ÏÈ `app_freertos.c` ºÍ `Host_Task` ¸÷µ÷ÓÃÒ»´Î£¬µ¼ÖÂ `[VISION] Init done` ´òÓ¡Á½´Î¡£ÒÑ´Ó `app_freertos.c` ÒÆ³ý¡£
+åŽŸ `HAL_UARTEx_RxEventCallback` ISR åœ¨ç½® `data_ready` åŽç«‹å³è°ƒç”¨ `UART_StartReceive_DMA` é‡å¯ DMAã€‚ä½†æ­¤æ—¶ `UART_Driver_Process` å°šæœªæ‹·è´æ•°æ®ï¼ŒDMA ç¼“å†²åŒºè¢«æ–°ä¼ è¾“è¦†ç›–ï¼›åŒæ—¶ `HAL_UART_DMAStop` å¯èƒ½è§¦å‘è™šå‡ç©ºé—²ä¸­æ–­ï¼Œæ”¹å†™ `data_len`ã€‚
 
-**10. Ö÷Ñ­»·ÈßÓà osDelay ÇåÀí£º** Ô­Ö÷Ñ­»· switch ºóÓÐ¶îÍâ `osDelay(5)`£¬µ¼ÖÂ HOST_DEBUG Ì¬Ã¿Ñ­»· 15ms ¶ø·ÇÔ¤ÆÚµÄ 10ms¡£ÒÑÒÆ³ý¡£
+**ä¿®å¤ï¼š** ISR è¡Œä¸ºæŒ‰é€šé“å¯é…ç½®ã€‚å¼•å…¥ `UART_Channel_t.isr_restart` å­—æ®µï¼š
 
-**11. HOST_DONE/HOST_ERROR ²»ÔÙ×Ô¶¯·¢ DOWNLOAD_READY£º** ÈÎÎñÍê³É»ò³ö´í»Ö¸´ºó²»ÔÙ·¢ËÍ `DOWNLOAD_READY`£¬±ÜÃâ´¥·¢ÉÏÎ»»ú½øÈëÎÄ¼þÏÂÔØÄ£Ê½Ëø¶¨µ÷ÊÔ°´Å¥¡£
-
-**12. ÔË¶¯ÃüÁî²»ÊÜ g_state ÏÞÖÆ£º** `handle_debug_cmd` µ÷ÓÃÌõ¼þ´Ó `if (g_state == HOST_DEBUG)` ¸ÄÎª `if (cmd != RAW_LINE/NONE/UNKNOWN)`£¬È·±£¼´Ê¹×´Ì¬ÒâÍâÇÐ»»£¨Èç±» CSV Êý¾ÝÎó´¥ HOST_DOWNLOADING£©£¬ÔË¶¯ÃüÁîÈÔÄÜÕý³£´¦Àí¡£
-
-**13. Host_UartRecvCallback ÖØ¸´×¢ÊÍÍ·ÇåÀí£º** ÒÆ³ý¾ÉµÄ `/* === Host_UartRecvCallback ¡ª UART ISR ÖÐµ÷ÓÃ === */` ×¢ÊÍ¿é£¬Ö»±£Áô"ÒÑÆúÓÃ¶ÓÁÐÄ£Ê½"°æ±¾¡£
-
-### 9.10 UART DMA ¼Ü¹¹¸Ä½ø£¨2026-06-12£©
-
-**±³¾°£º** ÉÏÎ»»úÊä³öÈÕÖ¾ÖØ¸´¡¢ÃüÁî±»¶à´ÎÖ´ÐÐ¡£¾­ÅÅ²é·¢ÏÖÈýÖØ¸ùÒò£º
-
-#### ¸ùÒò 1£ºISR ÄÚÁ¢¼´ÖØÆô DMA ÓëÈÎÎñ²à¾ºÌ¬
-
-Ô­ `HAL_UARTEx_RxEventCallback` ISR ÔÚÖÃ `data_ready` ºóÁ¢¼´µ÷ÓÃ `UART_StartReceive_DMA` ÖØÆô DMA¡£µ«´ËÊ± `UART_Driver_Process` ÉÐÎ´¿½±´Êý¾Ý£¬DMA »º³åÇø±»ÐÂ´«Êä¸²¸Ç£»Í¬Ê± `HAL_UART_DMAStop` ¿ÉÄÜ´¥·¢Ðé¼Ù¿ÕÏÐÖÐ¶Ï£¬¸ÄÐ´ `data_len`¡£
-
-**ÐÞ¸´£º** ISR ÐÐÎª°´Í¨µÀ¿ÉÅäÖÃ¡£ÒýÈë `UART_Channel_t.isr_restart` ×Ö¶Î£º
-
-| Í¨µÀ | `isr_restart` | ²ßÂÔ |
+| é€šé“ | `isr_restart` | ç­–ç•¥ |
 |------|--------------|------|
-| UART_CH1 (ÉÏÎ»»ú) | `false` | ISR ²»ÖØÆô DMA£¬ÓÉ `UART_Driver_Process` Í³Ò»ÖØÆô |
-| UART_CH2 (ÉãÏñÍ·) | `true` | ISR Á¢¼´ÖØÆô£¬±£Ö¤Ö¡Êý¾Ý²»¶ª |
-| UART_CH3 (TMC2209) | `true` | ISR Á¢¼´ÖØÆô |
-| UART_CH4 (LPUART1) | `true` | ISR Á¢¼´ÖØÆô£¨Ô¤Áô£© |
+| UART_CH1 (ä¸Šä½æœº) | `false` | ISR ä¸é‡å¯ DMAï¼Œç”± `UART_Driver_Process` ç»Ÿä¸€é‡å¯ |
+| UART_CH2 (æ‘„åƒå¤´) | `true` | ISR ç«‹å³é‡å¯ï¼Œä¿è¯å¸§æ•°æ®ä¸ä¸¢ |
+| UART_CH3 (TMC2209) | `true` | ISR ç«‹å³é‡å¯ |
+| UART_CH4 (LPUART1) | `true` | ISR ç«‹å³é‡å¯ï¼ˆé¢„ç•™ï¼‰ |
 
-³õÊ¼»¯ÔÚ `UART_Driver_Init()` ÖÐÏÔÊ½¸³Öµ£¬³¤ÆÚÎ¬»¤Ö»Ðè¸ÄÒ»ÐÐ¡£
+åˆå§‹åŒ–åœ¨ `UART_Driver_Init()` ä¸­æ˜¾å¼èµ‹å€¼ï¼Œé•¿æœŸç»´æŠ¤åªéœ€æ”¹ä¸€è¡Œã€‚
 
-#### ¸ùÒò 2£ºdata_ready/data_len ±» ISR ºÍÈÎÎñ¹²Ïí
+#### æ ¹å›  2ï¼šdata_ready/data_len è¢« ISR å’Œä»»åŠ¡å…±äº«
 
-Ô­¼Ü¹¹ `UART_Driver_Process` ¿½±´Êý¾Ýºó²»Çå `data_ready`£¬ÒÀÀµÍâ²¿ `UART_ClearData` À´Çå¡£PrintDebug Êä³öµÄ TX¡úRX Ó²¼þ»·»Ø´¥·¢ ISR ÔÚ `UART_PeekData` ºÍ `UART_ClearData` Ö®¼äÐÞ¸Ä `data_len`£¬µ¼ÖÂ app buffer ÄÚÈÝºÍ³¤¶È×Ö¶ÎÍÑ¹³¡£
+åŽŸæž¶æž„ `UART_Driver_Process` æ‹·è´æ•°æ®åŽä¸æ¸… `data_ready`ï¼Œä¾èµ–å¤–éƒ¨ `UART_ClearData` æ¥æ¸…ã€‚PrintDebug è¾“å‡ºçš„ TXâ†’RX ç¡¬ä»¶çŽ¯å›žè§¦å‘ ISR åœ¨ `UART_PeekData` å’Œ `UART_ClearData` ä¹‹é—´ä¿®æ”¹ `data_len`ï¼Œå¯¼è‡´ app buffer å†…å®¹å’Œé•¿åº¦å­—æ®µè„±é’©ã€‚
 
-**ÐÞ¸´£º** ÒýÈë¶ÀÁ¢×Ö¶Î `rx_app_len`£¨ÈÎÎñ²à£¬ISR ²»´¥¼°£©¡£
+**ä¿®å¤ï¼š** å¼•å…¥ç‹¬ç«‹å­—æ®µ `rx_app_len`ï¼ˆä»»åŠ¡ä¾§ï¼ŒISR ä¸è§¦åŠï¼‰ã€‚
 
 ```
-ISR ²à                ÈÎÎñ²à£¨UART_Driver_Process ÁÙ½çÇøÄÚÔ­×Ó²Ù×÷£©
-data_ready ©¤©´         ©°©¤ rx_app_len£¨ÈÎÎñÖ»¶Á£©
-data_len   ©¤©È  ½âñî   ©À©¤ rx_app_buf
-            ©¼         ©¸©¤ ¿½±´ + ÇåÁã data_ready/data_len
+ISR ä¾§                ä»»åŠ¡ä¾§ï¼ˆUART_Driver_Process ä¸´ç•ŒåŒºå†…åŽŸå­æ“ä½œï¼‰
+data_ready â”€â”         â”Œâ”€ rx_app_lenï¼ˆä»»åŠ¡åªè¯»ï¼‰
+data_len   â”€â”¤  è§£è€¦   â”œâ”€ rx_app_buf
+            â”˜         â””â”€ æ‹·è´ + æ¸…é›¶ data_ready/data_len
 ```
 
-`UART_PeekData` / `UART_HasData` / `UART_GetRxCount` È«²¿¸ÄÓÃ `rx_app_len`¡£
-`UART_ClearData` Í¬Ê±ÇåÁã `rx_app_len`¡¢`data_ready`¡¢`data_len`£¬¼æÈÝ `move_xy_relative` µÄÖÐ¶Ï¼ì²â¡£
+`UART_PeekData` / `UART_HasData` / `UART_GetRxCount` å…¨éƒ¨æ”¹ç”¨ `rx_app_len`ã€‚
+`UART_ClearData` åŒæ—¶æ¸…é›¶ `rx_app_len`ã€`data_ready`ã€`data_len`ï¼Œå…¼å®¹ `move_xy_relative` çš„ä¸­æ–­æ£€æµ‹ã€‚
 
-#### ¸ùÒò 3£ºCAN TX µ÷ÊÔ´òÓ¡Ë¢ÆÁ
+#### æ ¹å›  3ï¼šCAN TX è°ƒè¯•æ‰“å°åˆ·å±
 
-`driver_can.c:139` µÄ TX µ÷ÊÔ´òÓ¡±» `#ifdef DEBUG_CAN_ISR` °ü¹ü£¬µ« Keil ¹¤³Ì¿ÉÄÜ¶¨ÒåÁË¸Ãºê¡£Ã¿´Î CAN ·¢ËÍ²úÉú 3 ÐÐÈÕÖ¾£¬Ò»¸ö JOG Ö¸Áî´¥·¢ ~9 ´Î CAN TX = 27 ÐÐÈÕÖ¾¡£
+`driver_can.c:139` çš„ TX è°ƒè¯•æ‰“å°è¢« `#ifdef DEBUG_CAN_ISR` åŒ…è£¹ï¼Œä½† Keil å·¥ç¨‹å¯èƒ½å®šä¹‰äº†è¯¥å®ã€‚æ¯æ¬¡ CAN å‘é€äº§ç”Ÿ 3 è¡Œæ—¥å¿—ï¼Œä¸€ä¸ª JOG æŒ‡ä»¤è§¦å‘ ~9 æ¬¡ CAN TX = 27 è¡Œæ—¥å¿—ã€‚
 
-**ÐÞ¸´£º** `#ifdef DEBUG_CAN_ISR` ¡ú `#if 0`£¬ÓÀ¾Ã½ûÓÃ¡£
+**ä¿®å¤ï¼š** `#ifdef DEBUG_CAN_ISR` â†’ `#if 0`ï¼Œæ°¸ä¹…ç¦ç”¨ã€‚
 
-#### Éæ¼°ÎÄ¼þ
+#### æ¶‰åŠæ–‡ä»¶
 
-| ÎÄ¼þ | ¸Ä¶¯ |
+| æ–‡ä»¶ | æ”¹åŠ¨ |
 |------|------|
-| `driver_uart.c` | `rx_app_len` ×Ö¶Î + `isr_restart` ×Ö¶Î + `UART_Driver_Process` Ô­×ÓÏû·Ñ + `UART_ClearData` ÈýÇå |
-| `driver_can.c` | CAN TX µ÷ÊÔ `#if 0` |
+| `driver_uart.c` | `rx_app_len` å­—æ®µ + `isr_restart` å­—æ®µ + `UART_Driver_Process` åŽŸå­æ¶ˆè´¹ + `UART_ClearData` ä¸‰æ¸… |
+| `driver_can.c` | CAN TX è°ƒè¯• `#if 0` |
 
 
-### 9.11 ÃüÁî´¦Àí¼Ü¹¹¸Ä½ø£¨2026-06-12£©
+### 9.11 å‘½ä»¤å¤„ç†æž¶æž„æ”¹è¿›ï¼ˆ2026-06-12ï¼‰
 
-#### ×´Ì¬È¥ÖØ
+#### çŠ¶æ€åŽ»é‡
 
-`handle_debug_cmd` Èë¿Ú¼ÓÈë×´Ì¬È¥ÖØ£ºÁ¬ÐøÁ½´Î cmd+param ÍêÈ«ÏàÍ¬µÄÃüÁîÖ±½Ó¶ªÆú¡£
+`handle_debug_cmd` å…¥å£åŠ å…¥çŠ¶æ€åŽ»é‡ï¼šè¿žç»­ä¸¤æ¬¡ cmd+param å®Œå…¨ç›¸åŒçš„å‘½ä»¤ç›´æŽ¥ä¸¢å¼ƒã€‚
 
 ```
-MOVE_DOWN_START 10 ¡ú Ö´ÐÐ (g_last=MOVE_DOWN_START, param=10)
-MOVE_DOWN_START 10 ¡ú ¶ªÆú (cmd==g_last && param==g_last_param)
-MOVE_STOP          ¡ú Ö´ÐÐ (cmd!=g_last£¬×Ô¶¯¸´Î»)
+MOVE_DOWN_START 10 â†’ æ‰§è¡Œ (g_last=MOVE_DOWN_START, param=10)
+MOVE_DOWN_START 10 â†’ ä¸¢å¼ƒ (cmd==g_last && param==g_last_param)
+MOVE_STOP          â†’ æ‰§è¡Œ (cmd!=g_lastï¼Œè‡ªåŠ¨å¤ä½)
 ```
 
-Ïà±ÈÊ±¼ä´°¿Ú·À¶¶£¬²»ÒÀÀµ tick ¾«¶È£¬ÖÐ¼äÓÐÆäËûÃüÁî½éÈë×Ô¶¯¸´Î»¡£
+ç›¸æ¯”æ—¶é—´çª—å£é˜²æŠ–ï¼Œä¸ä¾èµ– tick ç²¾åº¦ï¼Œä¸­é—´æœ‰å…¶ä»–å‘½ä»¤ä»‹å…¥è‡ªåŠ¨å¤ä½ã€‚
 
-#### RAW_LINE »ØÏÔ¹ýÂË
+#### RAW_LINE å›žæ˜¾è¿‡æ»¤
 
-Ö÷Ñ­»·ÖÐ RAW_LINE ´¦ÀíÔö¼ÓËÄÖØ¹ýÂË£¬·ÀÖ¹ PrintDebug Êä³öºÍÎÕÊÖÏûÏ¢µÄ TX¡úRX »·»ØÎó´¥·¢ÏÂÔØÄ£Ê½£º
+ä¸»å¾ªçŽ¯ä¸­ RAW_LINE å¤„ç†å¢žåŠ å››é‡è¿‡æ»¤ï¼Œé˜²æ­¢ PrintDebug è¾“å‡ºå’Œæ¡æ‰‹æ¶ˆæ¯çš„ TXâ†’RX çŽ¯å›žè¯¯è§¦å‘ä¸‹è½½æ¨¡å¼ï¼š
 
-1. ÃüÁîÖ´ÐÐÆÚ¼ä£¨`g_during_cmd=true`£©µÄ RAW_LINE ¡ú Ö±½Ó `continue`
-2. ÒÔ `[` ¿ªÍ·µÄÐÐ£¨PrintDebug »ØÏÔ£©
-3. ¾«È·Æ¥Åä `DEBUG_MODE`£¨10 ×Ö½Ú£©
-4. ¾«È·Æ¥Åä `DOWNLOAD_READY`£¨14 ×Ö½Ú£©
-5. ¾«È·Æ¥Åä `EXIT_DEBUG_MODE`£¨15 ×Ö½Ú£©
+1. å‘½ä»¤æ‰§è¡ŒæœŸé—´ï¼ˆ`g_during_cmd=true`ï¼‰çš„ RAW_LINE â†’ ç›´æŽ¥ `continue`
+2. ä»¥ `[` å¼€å¤´çš„è¡Œï¼ˆPrintDebug å›žæ˜¾ï¼‰
+3. ç²¾ç¡®åŒ¹é… `DEBUG_MODE`ï¼ˆ10 å­—èŠ‚ï¼‰
+4. ç²¾ç¡®åŒ¹é… `DOWNLOAD_READY`ï¼ˆ14 å­—èŠ‚ï¼‰
+5. ç²¾ç¡®åŒ¹é… `EXIT_DEBUG_MODE`ï¼ˆ15 å­—èŠ‚ï¼‰
 
-#### ÀëÉ¢ÒÆ¶¯ºÏ²¢
+#### ç¦»æ•£ç§»åŠ¨åˆå¹¶
 
-`HCMD_MOVE_UP/DOWN/LEFT/RIGHT` ËÄ¸ö case ºÏ²¢Îª fall-through + ¾²Ì¬²é±íÇý¶¯£¬Í¬Ê±¼ÓÈë `move_xy_relative` ·µ»ØÖµ¼ì²â£¨ÖÐ¶ÏÊ±ÈÕÖ¾±ê¼Ç INTERRUPTED£©¡£
+`HCMD_MOVE_UP/DOWN/LEFT/RIGHT` å››ä¸ª case åˆå¹¶ä¸º fall-through + é™æ€æŸ¥è¡¨é©±åŠ¨ï¼ŒåŒæ—¶åŠ å…¥ `move_xy_relative` è¿”å›žå€¼æ£€æµ‹ï¼ˆä¸­æ–­æ—¶æ—¥å¿—æ ‡è®° INTERRUPTEDï¼‰ã€‚
 
-#### Éæ¼°ÎÄ¼þ
+#### æ¶‰åŠæ–‡ä»¶
 
-| ÎÄ¼þ | ¸Ä¶¯ |
+| æ–‡ä»¶ | æ”¹åŠ¨ |
 |------|------|
-| `app_host.c` | ×´Ì¬È¥ÖØ + `g_during_cmd` ÊØÎÀ + ËÄÖØ¹ýÂË + ÀëÉ¢ÒÆ¶¯ºÏ²¢ |
+| `app_host.c` | çŠ¶æ€åŽ»é‡ + `g_during_cmd` å®ˆå« + å››é‡è¿‡æ»¤ + ç¦»æ•£ç§»åŠ¨åˆå¹¶ |
 
 
-### 9.12 ±Ã·§¿ØÖÆÓïÒå»¯£¨2026-06-12£©
+### 9.12 æ³µé˜€æŽ§åˆ¶è¯­ä¹‰åŒ–ï¼ˆ2026-06-12ï¼‰
 
-**±³¾°£º** µç´Å·§Êµ¼ÊÓ²¼þÐÐÎªÎª PA6=HIGH¡úµ¼Í¨£¨±ê×¼ DRV8803£©£¬ÓëÔçÆÚÎÄµµ¼ÇÂ¼Ïà·´¡£`DRV8803_Init` ÖÐ 12V/24V ¶Ë¿ÚÍ³Ò»³õÊ¼»¯Îª LOW£¨¹Ø¶Ï£©¡£
+**èƒŒæ™¯ï¼š** ç”µç£é˜€å®žé™…ç¡¬ä»¶è¡Œä¸ºä¸º PA6=HIGHâ†’å¯¼é€šï¼ˆæ ‡å‡† DRV8803ï¼‰ï¼Œä¸Žæ—©æœŸæ–‡æ¡£è®°å½•ç›¸åã€‚`DRV8803_Init` ä¸­ 12V/24V ç«¯å£ç»Ÿä¸€åˆå§‹åŒ–ä¸º LOWï¼ˆå…³æ–­ï¼‰ã€‚
 
-**ÓïÒå»¯½Ó¿Ú£º** ÔÚ `driver_drv8803.h` ÖÐÐÂÔöÄÚÁªº¯Êý£º
+**è¯­ä¹‰åŒ–æŽ¥å£ï¼š** åœ¨ `driver_drv8803.h` ä¸­æ–°å¢žå†…è”å‡½æ•°ï¼š
 
 ```c
 static inline void Pump_On(void)   { DRV8803_SetOutput(&Port_12VO1, true);  }
 static inline void Pump_Off(void)  { DRV8803_SetOutput(&Port_12VO1, false); }
-static inline void Valve_On(void)  { DRV8803_SetOutput(&Port_24VO1, true);  }  // PA6=HIGH¡úµ¼Í¨
-static inline void Valve_Off(void) { DRV8803_SetOutput(&Port_24VO1, false); }  // PA6=LOW¡ú¹Ø¶Ï
+static inline void Valve_On(void)  { DRV8803_SetOutput(&Port_24VO1, true);  }  // PA6=HIGHâ†’å¯¼é€š
+static inline void Valve_Off(void) { DRV8803_SetOutput(&Port_24VO1, false); }  // PA6=LOWâ†’å…³æ–­
 ```
 
-**PUMP_OFF Ê±Ðò£º** ¹Ø±Ã ¡ú Valve_On() ¡ú osDelay(1000ms) ¡ú Valve_Off()¡£ÆäÓàÊ±¼ä·§³£¹Ø¡£
+**PUMP_OFF æ—¶åºï¼š** å…³æ³µ â†’ Valve_On() â†’ osDelay(1000ms) â†’ Valve_Off()ã€‚å…¶ä½™æ—¶é—´é˜€å¸¸å…³ã€‚
 
-**Éæ¼°ÎÄ¼þ£º**
-| ÎÄ¼þ | ¸Ä¶¯ |
+**æ¶‰åŠæ–‡ä»¶ï¼š**
+| æ–‡ä»¶ | æ”¹åŠ¨ |
 |------|------|
-| `driver_drv8803.h` | ÐÂÔö Pump_On/Off¡¢Valve_On/Off ÄÚÁªº¯Êý |
-| `driver_drv8803.c` | `DRV8803_Init` 12V/24V Í³Ò»³õÌ¬ LOW |
-| `app_host.c` | `handle_debug_cmd` PUMP_ON/OFF ¸ÄÓÃÓïÒå»¯½Ó¿Ú |
-| `app_test.c` | ËùÓÐ BSRR Ö±Ð´ PA6 ¸ÄÎª `DRV8803_SetOutput(VALVE_PORT, ...)` |
+| `driver_drv8803.h` | æ–°å¢ž Pump_On/Offã€Valve_On/Off å†…è”å‡½æ•° |
+| `driver_drv8803.c` | `DRV8803_Init` 12V/24V ç»Ÿä¸€åˆæ€ LOW |
+| `app_host.c` | `handle_debug_cmd` PUMP_ON/OFF æ”¹ç”¨è¯­ä¹‰åŒ–æŽ¥å£ |
+| `app_test.c` | æ‰€æœ‰ BSRR ç›´å†™ PA6 æ”¹ä¸º `DRV8803_SetOutput(VALVE_PORT, ...)` |
 
 
-### 9.13 CAN ÖÐ¶Ï¼¤»î + ÖáÓ³Éä + ¾«×¼ËÙ¶ÈÐÞ¸´£¨2026-06-12£©
+### 9.13 CAN ä¸­æ–­æ¿€æ´» + è½´æ˜ å°„ + ç²¾å‡†é€Ÿåº¦ä¿®å¤ï¼ˆ2026-06-12ï¼‰
 
-#### ¸ùÒò 1£ºCAN RX ÖÐ¶ÏÎ´ÕýÈ·¼¤»î
+#### æ ¹å›  1ï¼šCAN RX ä¸­æ–­æœªæ­£ç¡®æ¿€æ´»
 
-can_filter_mask_config() ÖÐ HAL_FDCAN_ActivateNotification ÔÚ HAL_FDCAN_Start **Ö®Ç°**µ÷ÓÃ£¬¶ø CAN_Init ÖÐ **Ö®ºó**µÄÄÇ´Îµ÷ÓÃ±»×¢ÊÍµô¡£½á¹ûÊÇ CAN RX ÖÐ¶Ï¿ÉÄÜÎ´ÕýÈ·Ê¹ÄÜ£¬µç»úµ½Î»·´À¡£¨0xF5 + Status=0x02£©ÎÞ·¨±»½ÓÊÕ¡£
+can_filter_mask_config() ä¸­ HAL_FDCAN_ActivateNotification åœ¨ HAL_FDCAN_Start **ä¹‹å‰**è°ƒç”¨ï¼Œè€Œ CAN_Init ä¸­ **ä¹‹åŽ**çš„é‚£æ¬¡è°ƒç”¨è¢«æ³¨é‡ŠæŽ‰ã€‚ç»“æžœæ˜¯ CAN RX ä¸­æ–­å¯èƒ½æœªæ­£ç¡®ä½¿èƒ½ï¼Œç”µæœºåˆ°ä½åé¦ˆï¼ˆ0xF5 + Status=0x02ï¼‰æ— æ³•è¢«æŽ¥æ”¶ã€‚
 
-**ÐÞ¸´£º**
+**ä¿®å¤ï¼š**
 
-| ÎÄ¼þ | ¸Ä¶¯ |
+| æ–‡ä»¶ | æ”¹åŠ¨ |
 |------|------|
-| driver_can.c | can_filter_mask_config ÒÆ³ý HAL_FDCAN_ActivateNotification£¬½ö±£ÁôÂË²¨Æ÷ÅäÖÃ |
-| driver_can.c | CAN_Init ÖÐÈ¡Ïû×¢ÊÍ HAL_FDCAN_Start Ö®ºóµÄ HAL_FDCAN_ActivateNotification |
-| app_test.c | ÒÆ³ý StartCamTestTask¡¢vMotorTestTask ÖÐÈßÓàµÄÊÖ¶¯ HAL_FDCAN_ActivateNotification£¨CAN_Init ÄÚ²¿ÒÑ´¦Àí£© |
+| driver_can.c | can_filter_mask_config ç§»é™¤ HAL_FDCAN_ActivateNotificationï¼Œä»…ä¿ç•™æ»¤æ³¢å™¨é…ç½® |
+| driver_can.c | CAN_Init ä¸­å–æ¶ˆæ³¨é‡Š HAL_FDCAN_Start ä¹‹åŽçš„ HAL_FDCAN_ActivateNotification |
+| app_test.c | ç§»é™¤ StartCamTestTaskã€vMotorTestTask ä¸­å†—ä½™çš„æ‰‹åŠ¨ HAL_FDCAN_ActivateNotificationï¼ˆCAN_Init å†…éƒ¨å·²å¤„ç†ï¼‰ |
 
-ÕýÈ·³õÊ¼»¯Ë³Ðò£ºcan_filter_mask_config£¨ÅäÖÃÂË²¨Æ÷£¬CCE=1£©¡ú HAL_FDCAN_Start£¨state ¡ú BUSY£©¡ú HAL_FDCAN_ActivateNotification£¨Ê¹ÄÜÖÐ¶Ï£¬state=BUSY£©.
+æ­£ç¡®åˆå§‹åŒ–é¡ºåºï¼šcan_filter_mask_configï¼ˆé…ç½®æ»¤æ³¢å™¨ï¼ŒCCE=1ï¼‰â†’ HAL_FDCAN_Startï¼ˆstate â†’ BUSYï¼‰â†’ HAL_FDCAN_ActivateNotificationï¼ˆä½¿èƒ½ä¸­æ–­ï¼Œstate=BUSYï¼‰.
 
-#### ¸ùÒò 2£ºmain.c ÖÐÎÞÐ§µÄ Motor_Init()
+#### æ ¹å›  2ï¼šmain.c ä¸­æ— æ•ˆçš„ Motor_Init()
 
-main.c:131 ÔÚ RTOS µ÷¶ÈÆ÷Æô¶¯Ç°ºÍ CAN Æô¶¯Ç°µ÷ÓÃ Motor_Init(). ´ËÊ± hfdcan1.State = READY£¨·Ç BUSY£©£¬HAL_FDCAN_AddMessageToTxFifoQ ·µ»Ø HAL_ERROR£¨NOT_STARTED£©£¬ËùÓÐ CAN Ö¡¾²Ä¬Ê§°Ü.
+main.c:131 åœ¨ RTOS è°ƒåº¦å™¨å¯åŠ¨å‰å’Œ CAN å¯åŠ¨å‰è°ƒç”¨ Motor_Init(). æ­¤æ—¶ hfdcan1.State = READYï¼ˆéž BUSYï¼‰ï¼ŒHAL_FDCAN_AddMessageToTxFifoQ è¿”å›ž HAL_ERRORï¼ˆNOT_STARTEDï¼‰ï¼Œæ‰€æœ‰ CAN å¸§é™é»˜å¤±è´¥.
 
-**ÐÞ¸´£º** ÒÆ³ý¸Ãµ÷ÓÃ£¬Ìæ»»Îª×¢ÊÍ¡£¸÷ÈÎÎñÔÚ×ÔÉí³õÊ¼»¯½×¶Îµ÷ÓÃ CAN_Init + Motor_Init.
+**ä¿®å¤ï¼š** ç§»é™¤è¯¥è°ƒç”¨ï¼Œæ›¿æ¢ä¸ºæ³¨é‡Šã€‚å„ä»»åŠ¡åœ¨è‡ªèº«åˆå§‹åŒ–é˜¶æ®µè°ƒç”¨ CAN_Init + Motor_Init.
 
-#### Öá¶ÔÓ¦¹ØÏµ
+#### è½´å¯¹åº”å…³ç³»
 
-| ÎïÀíÖá | ³ÌÐò±äÁ¿ | Çý¶¯Öá | µç»ú |
+| ç‰©ç†è½´ | ç¨‹åºå˜é‡ | é©±åŠ¨è½´ | ç”µæœº |
 |--------|---------|--------|------|
-| X | dy / cur_y | Y Öá | µ¥µç»ú (ID=0x03) |
-| Y | dx / cur_x | X1+X2 Ë«Öá | Ë«µç»úÍ¬²½ (ID=0x01, 0x02) |
+| X | dy / cur_y | Y è½´ | å•ç”µæœº (ID=0x03) |
+| Y | dx / cur_x | X1+X2 åŒè½´ | åŒç”µæœºåŒæ­¥ (ID=0x01, 0x02) |
 
-´ËÓ³Éä¹ØÏµÔÚ cam_test_run µÄ P1/P3 Æ«ÒÆ¼ÆËãÖÐÒÑÌåÏÖ£º
+æ­¤æ˜ å°„å…³ç³»åœ¨ cam_test_run çš„ P1/P3 åç§»è®¡ç®—ä¸­å·²ä½“çŽ°ï¼š
 
 ```c
-dx_s = r->dy * CAM_PX_TO_STEPS;   // ÉãÏñÍ· Y Æ«ÒÆ ¡ú X1+X2£¨ÎïÀí Y£©
-dy_s = r->dx * CAM_PX_TO_STEPS;   // ÉãÏñÍ· X Æ«ÒÆ ¡ú Y µç»ú£¨ÎïÀí X£©
+dx_s = r->dy * CAM_PX_TO_STEPS;   // æ‘„åƒå¤´ Y åç§» â†’ X1+X2ï¼ˆç‰©ç† Yï¼‰
+dy_s = r->dx * CAM_PX_TO_STEPS;   // æ‘„åƒå¤´ X åç§» â†’ Y ç”µæœºï¼ˆç‰©ç† Xï¼‰
 
 ```
 
-#### ÊÓ¾õ±Õ»·¾«×¼ËÙ¶È
+#### è§†è§‰é—­çŽ¯ç²¾å‡†é€Ÿåº¦
 
-CAM_MOVE_SPEED ´Ó 300 RPM£¨25 mm/s£©½µÖÁ **100 RPM£¨¡Ö8.3 mm/s£©**£¬ÅäºÏÊÓ¾õµü´ú¶ÔÆëÊ¹ÓÃ£¬¼õÉÙ¹ý³å¡£
+CAM_MOVE_SPEED ä»Ž 300 RPMï¼ˆ25 mm/sï¼‰é™è‡³ **100 RPMï¼ˆâ‰ˆ8.3 mm/sï¼‰**ï¼Œé…åˆè§†è§‰è¿­ä»£å¯¹é½ä½¿ç”¨ï¼Œå‡å°‘è¿‡å†²ã€‚
 
-#### Éæ¼°ÎÄ¼þ
+#### æ¶‰åŠæ–‡ä»¶
 
-| ÎÄ¼þ | ¸Ä¶¯ |
+| æ–‡ä»¶ | æ”¹åŠ¨ |
 |------|------|
-| driver_can.c | CAN ÖÐ¶Ï¼¤»îÒÆµ½ HAL_FDCAN_Start Ö®ºó |
-| main.c | ÒÆ³ýÎÞÐ§ Motor_Init() |
-| app_test.c | ÒÆ³ýÈßÓà HAL_FDCAN_ActivateNotification ¡Á2 + ÖáÓ³Éä½»»» + CAM_MOVE_SPEED=100 |
+| driver_can.c | CAN ä¸­æ–­æ¿€æ´»ç§»åˆ° HAL_FDCAN_Start ä¹‹åŽ |
+| main.c | ç§»é™¤æ— æ•ˆ Motor_Init() |
+| app_test.c | ç§»é™¤å†—ä½™ HAL_FDCAN_ActivateNotification Ã—2 + è½´æ˜ å°„äº¤æ¢ + CAM_MOVE_SPEED=100 |
 
 
 
-### 9.14 move_xy_relative ÊÂ¼þ×é¼Ü¹¹ + ÖáÓ³ÉäÐÞÕý£¨2026-06-13£©
+### 9.14 move_xy_relative äº‹ä»¶ç»„æž¶æž„ + è½´æ˜ å°„ä¿®æ­£ï¼ˆ2026-06-13ï¼‰
 
-**±³¾°£º** StartCamTestTask ÖÐµç»úµ½Î»µ« move_xy_relative Ê¼ÖÕ³¬Ê±£¨ret=-1£©¡£¾­ÈýÖØ¸ùÒòÅÅ²éºó³¹µ×ÐÞ¸´¡£
+**èƒŒæ™¯ï¼š** StartCamTestTask ä¸­ç”µæœºåˆ°ä½ä½† move_xy_relative å§‹ç»ˆè¶…æ—¶ï¼ˆret=-1ï¼‰ã€‚ç»ä¸‰é‡æ ¹å› æŽ’æŸ¥åŽå½»åº•ä¿®å¤ã€‚
 
-#### ¸ùÒò 1£ºCAN_Process_Task Óë move_xy_relative ¶ÓÁÐ¾ºÕù
+#### æ ¹å›  1ï¼šCAN_Process_Task ä¸Ž move_xy_relative é˜Ÿåˆ—ç«žäº‰
 
-`CAN_Process_Task` Ê¹ÓÃ `osWaitForever` ×èÈû¶ÁÈ¡ `motor_event_queue`£¬`move_xy_relative` Ô­ÏÈÖ±½ÓÂÖÑ¯Í¬Ò»¶ÓÁÐ£¨0 ³¬Ê±£©¡£Ç°ÕßÓÅÏÈ¼¶ÏàÍ¬µ«×ÜÏÈÇÀµ½µ½Î»Ö¡£¬ºóÕßÓÀÔ¶¿´²»µ½ 0xF5+0x02 Íê³É°ü¡£
+`CAN_Process_Task` ä½¿ç”¨ `osWaitForever` é˜»å¡žè¯»å– `motor_event_queue`ï¼Œ`move_xy_relative` åŽŸå…ˆç›´æŽ¥è½®è¯¢åŒä¸€é˜Ÿåˆ—ï¼ˆ0 è¶…æ—¶ï¼‰ã€‚å‰è€…ä¼˜å…ˆçº§ç›¸åŒä½†æ€»å…ˆæŠ¢åˆ°åˆ°ä½å¸§ï¼ŒåŽè€…æ°¸è¿œçœ‹ä¸åˆ° 0xF5+0x02 å®ŒæˆåŒ…ã€‚
 
-**ÐÞ¸´£º** `move_xy_relative` ¸ÄÎªÍ¨¹ý `osEventFlagsGet(evtAxesDone)` ·ÇÆÆ»µÐÔ¶ÁÊÂ¼þ×é±êÖ¾£¬²»ÔÙÖ±½Ó·ÃÎÊ¶ÓÁÐ¡£`CAN_Process_Task` ¸ºÔðÏû·Ñ¶ÓÁÐ²¢Éè±êÖ¾£¬`move_xy_relative` Ö»¶Á±êÖ¾£¬·Ö¹¤Ã÷È·ÎÞ¾ºÕù¡£
+**ä¿®å¤ï¼š** `move_xy_relative` æ”¹ä¸ºé€šè¿‡ `osEventFlagsGet(evtAxesDone)` éžç ´åæ€§è¯»äº‹ä»¶ç»„æ ‡å¿—ï¼Œä¸å†ç›´æŽ¥è®¿é—®é˜Ÿåˆ—ã€‚`CAN_Process_Task` è´Ÿè´£æ¶ˆè´¹é˜Ÿåˆ—å¹¶è®¾æ ‡å¿—ï¼Œ`move_xy_relative` åªè¯»æ ‡å¿—ï¼Œåˆ†å·¥æ˜Žç¡®æ— ç«žäº‰ã€‚
 
-#### ¸ùÒò 2£ºosFlagsWaitAny auto-clear ¶ªÊ§±êÖ¾
+#### æ ¹å›  2ï¼šosFlagsWaitAny auto-clear ä¸¢å¤±æ ‡å¿—
 
-`osEventFlagsWait(evtAxesDone, ..., osFlagsWaitAny, ...)` »áÔÚ·µ»ØÊ± auto-clear **ËùÓÐ**ÒÑÉèÖÃµÄÆ¥Åä±êÖ¾¡£ÈýÖáµ½Î»Ë³Ðò²»¶¨£ºÈô Y ÏÈµ½Î»Éè EVENT_Y_DONE£¬È»ºó X1 µ½Î»£¬Wait ·µ»ØÊ±Í¬Ê±Çå³ýÁ½Õß¡£Y Ö»·¢Ò»´Îµ½Î»Ö¡£¬±êÖ¾±»ÍµºóÔÙÒ²²»»á»ØÀ´£¬accum ´Õ²»Æë `EVENT_ALL_AXES`¡£
+`osEventFlagsWait(evtAxesDone, ..., osFlagsWaitAny, ...)` ä¼šåœ¨è¿”å›žæ—¶ auto-clear **æ‰€æœ‰**å·²è®¾ç½®çš„åŒ¹é…æ ‡å¿—ã€‚ä¸‰è½´åˆ°ä½é¡ºåºä¸å®šï¼šè‹¥ Y å…ˆåˆ°ä½è®¾ EVENT_Y_DONEï¼Œç„¶åŽ X1 åˆ°ä½ï¼ŒWait è¿”å›žæ—¶åŒæ—¶æ¸…é™¤ä¸¤è€…ã€‚Y åªå‘ä¸€æ¬¡åˆ°ä½å¸§ï¼Œæ ‡å¿—è¢«å·åŽå†ä¹Ÿä¸ä¼šå›žæ¥ï¼Œaccum å‡‘ä¸é½ `EVENT_ALL_AXES`ã€‚
 
-**ÐÞ¸´£º** ·ÅÆú `osEventFlagsWait`£¬¸ÄÓÃ `osEventFlagsGet` ¡ª ·ÇÆÆ»µÐÔ¶ÁÈ¡£¬±êÖ¾²»»á±»Çå³ý¡£ÂÖÑ¯ + ÕæÊµÊ±ÖÓ³¬Ê±¡£
+**ä¿®å¤ï¼š** æ”¾å¼ƒ `osEventFlagsWait`ï¼Œæ”¹ç”¨ `osEventFlagsGet` â€” éžç ´åæ€§è¯»å–ï¼Œæ ‡å¿—ä¸ä¼šè¢«æ¸…é™¤ã€‚è½®è¯¢ + çœŸå®žæ—¶é’Ÿè¶…æ—¶ã€‚
 
-#### ¸ùÒò 3£ºÎ»ÖÃÒÆ¶¯·½Ïò·´×ª + ÖáÓ³ÉäÎ´½»»»
+#### æ ¹å›  3ï¼šä½ç½®ç§»åŠ¨æ–¹å‘åè½¬ + è½´æ˜ å°„æœªäº¤æ¢
 
-ÉãÏñÍ·Æ«ÒÆ·½ÏòÓëµç»úÔË¶¯·½ÏòÏà·´£¨ÉãÏñÍ· dx=35£¬µç»ú +dx ÒÆ¶¯ºó dx=36£¬Æ«ÒÆ·´¶ø±ä´ó£©£¬ÇÒ³ÌÐòÖá£¨X1+X2=ÎïÀíY¡¢Yµç»ú=ÎïÀíX£©Î´×ö½»»»¡£
+æ‘„åƒå¤´åç§»æ–¹å‘ä¸Žç”µæœºè¿åŠ¨æ–¹å‘ç›¸åï¼ˆæ‘„åƒå¤´ dx=35ï¼Œç”µæœº +dx ç§»åŠ¨åŽ dx=36ï¼Œåç§»åè€Œå˜å¤§ï¼‰ï¼Œä¸”ç¨‹åºè½´ï¼ˆX1+X2=ç‰©ç†Yã€Yç”µæœº=ç‰©ç†Xï¼‰æœªåšäº¤æ¢ã€‚
 
-**×îÖÕÓ³Éä¹«Ê½£¨P1/P3 Â·¾¶£¬app_test.c cam_test_run£©£º**
+**æœ€ç»ˆæ˜ å°„å…¬å¼ï¼ˆP1/P3 è·¯å¾„ï¼Œapp_test.c cam_test_runï¼‰ï¼š**
 ```c
-dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);  // ÉãÏñÍ· Y ¡ú X1+X2£¨ÎïÀí Y£©£¬È¡·´
-dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  // ÉãÏñÍ· X ¡ú Y µç»ú£¨ÎïÀí X£©£¬È¡·´
+dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);  // æ‘„åƒå¤´ Y â†’ X1+X2ï¼ˆç‰©ç† Yï¼‰ï¼Œå–å
+dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  // æ‘„åƒå¤´ X â†’ Y ç”µæœºï¼ˆç‰©ç† Xï¼‰ï¼Œå–å
 ```
 
-**P2£¨Mark ½¨Ïµ£©Â·¾¶Í¬²½ÐÞÕý£º**
+**P2ï¼ˆMark å»ºç³»ï¼‰è·¯å¾„åŒæ­¥ä¿®æ­£ï¼š**
 ```c
-dx_s = -(int32_t)(r->dy * CAM_MM10000_TO_STEPS);  // Í¬ÉÏ£¬µ¥Î»²»Í¬
+dx_s = -(int32_t)(r->dy * CAM_MM10000_TO_STEPS);  // åŒä¸Šï¼Œå•ä½ä¸åŒ
 dy_s = -(int32_t)(r->dx * CAM_MM10000_TO_STEPS);
 ```
 
-**Òªµã£º** £¨1£©·ûºÅÈ¡·´ ¡ª ÉãÏñÍ·Æ«ÒÆ·½ÏòÓëµç»ú²¹³¥·½ÏòÏà·´£»£¨2£©Öá½»»» ¡ª cam.dx¡úYµç»ú£¬cam.dy¡úX1+X2¡£Á½ÕßÈ±Ò»²»¿É¡£
+**è¦ç‚¹ï¼š** ï¼ˆ1ï¼‰ç¬¦å·å–å â€” æ‘„åƒå¤´åç§»æ–¹å‘ä¸Žç”µæœºè¡¥å¿æ–¹å‘ç›¸åï¼›ï¼ˆ2ï¼‰è½´äº¤æ¢ â€” cam.dxâ†’Yç”µæœºï¼Œcam.dyâ†’X1+X2ã€‚ä¸¤è€…ç¼ºä¸€ä¸å¯ã€‚
 
-#### move_xy_relative µ±Ç°¼Ü¹¹
+#### move_xy_relative å½“å‰æž¶æž„
 
 ```
-osEventFlagsClear ¡ú ·¢ CAN ÃüÁî ¡ú while(ÕæÊµÊ±ÖÓÎ´³¬Ê±) {
-    flags = osEventFlagsGet(evtAxesDone);  // ·ÇÆÆ»µÐÔ¶Á
-    if (flags & ERROR) ¡ú return -2;
-    if ((flags & done_mask) == done_mask) ¡ú return 0;
-    UART_Driver_Process + ÖÐ¶ÏÃüÁî¼ì²â;
+osEventFlagsClear â†’ å‘ CAN å‘½ä»¤ â†’ while(çœŸå®žæ—¶é’Ÿæœªè¶…æ—¶) {
+    flags = osEventFlagsGet(evtAxesDone);  // éžç ´åæ€§è¯»
+    if (flags & ERROR) â†’ return -2;
+    if ((flags & done_mask) == done_mask) â†’ return 0;
+    UART_Driver_Process + ä¸­æ–­å‘½ä»¤æ£€æµ‹;
     osDelay(100);
 }
 ```
 
-**³¬Ê±»úÖÆ£º** Ê¹ÓÃ `osKernelGetTickCount()` ÕæÊµÊ±ÖÓ£¨10s£©£¬¶ø·Ç¼ÆÊýÆ÷ÀÛ¼Ó¡£¼ÆÊýÆ÷ÔÚ±êÖ¾ÒÑÉèÊ±»áÔÚÎ¢Ãë¼¶ÉÕÍêµü´úÔ¤Ëã¡£
+**è¶…æ—¶æœºåˆ¶ï¼š** ä½¿ç”¨ `osKernelGetTickCount()` çœŸå®žæ—¶é’Ÿï¼ˆ10sï¼‰ï¼Œè€Œéžè®¡æ•°å™¨ç´¯åŠ ã€‚è®¡æ•°å™¨åœ¨æ ‡å¿—å·²è®¾æ—¶ä¼šåœ¨å¾®ç§’çº§çƒ§å®Œè¿­ä»£é¢„ç®—ã€‚
 
-**Õï¶ÏÈÕÖ¾£º** `[MOVE]` ºÍ `[CAN_PROC]` ÈÕÖ¾ÊÜ `#ifdef DEBUG_MOVE` / `#ifdef DEBUG_CAN_PROC` ¿ØÖÆ£¨app_test.c Í·²¿¶¨Òå£©¡£×¢ÊÍµô define ¼´¿É¾²Ä¬¡£
+**è¯Šæ–­æ—¥å¿—ï¼š** `[MOVE]` å’Œ `[CAN_PROC]` æ—¥å¿—å— `#ifdef DEBUG_MOVE` / `#ifdef DEBUG_CAN_PROC` æŽ§åˆ¶ï¼ˆapp_test.c å¤´éƒ¨å®šä¹‰ï¼‰ã€‚æ³¨é‡ŠæŽ‰ define å³å¯é™é»˜ã€‚
 
-#### Éæ¼°ÎÄ¼þ
+#### æ¶‰åŠæ–‡ä»¶
 
-| ÎÄ¼þ | ¸Ä¶¯ |
+| æ–‡ä»¶ | æ”¹åŠ¨ |
 |------|------|
-| app_test.c | move_xy_relative£º¶ÓÁÐÂÖÑ¯¡úÊÂ¼þ×é osEventFlagsGet + ÕæÊµÊ±ÖÓ + ÎÄµµ×¢ÊÍ |
-| app_test.c | cam_test_run P1/P3/P2£ºÆ«ÒÆÈ¡·´ + Öá½»»» |
-| app_test.c | ÐÂÔö `#define DEBUG_MOVE` / `#define DEBUG_CAN_PROC` Õï¶Ï¿ª¹Ø |
-| app_motion.c | CAN_Process_Task£ºµ½Î»Ö¡ÈÕÖ¾¼Ó `#ifdef DEBUG_CAN_PROC` ±£»¤ |
+| app_test.c | move_xy_relativeï¼šé˜Ÿåˆ—è½®è¯¢â†’äº‹ä»¶ç»„ osEventFlagsGet + çœŸå®žæ—¶é’Ÿ + æ–‡æ¡£æ³¨é‡Š |
+| app_test.c | cam_test_run P1/P3/P2ï¼šåç§»å–å + è½´äº¤æ¢ |
+| app_test.c | æ–°å¢ž `#define DEBUG_MOVE` / `#define DEBUG_CAN_PROC` è¯Šæ–­å¼€å…³ |
+| app_motion.c | CAN_Process_Taskï¼šåˆ°ä½å¸§æ—¥å¿—åŠ  `#ifdef DEBUG_CAN_PROC` ä¿æŠ¤ |
 
-### 10.1 ³£ÓÃ GPIO Òý½ÅËÙ²é
-| ¹¦ÄÜ | Òý½Å | ±¸×¢ |
+### 10.1 å¸¸ç”¨ GPIO å¼•è„šé€ŸæŸ¥
+| åŠŸèƒ½ | å¼•è„š | å¤‡æ³¨ |
 |------|------|------|
-| USART1_TX/RX | PE0/PE1 | ÉÏÎ»»úÍ¨ÐÅ |
-| USART2_TX/RX | PD5/PD6 | MaixCam ÉãÏñÍ· |
-| USART3_TX/RX | PB9/PB11 | TMC2209(RÖá) |
-| CAN_TX/RX | PA12/PA11 | ÈýÖáËÅ·þµç»ú |
-| Îü×ìÆø±Ã | PE12 | ¸ßÓÐÐ§ |
-| ¶æ»ú PWM (ZÖá) | PB10 | TIM2_CH3 (50Hz) |
+| USART1_TX/RX | PE0/PE1 | ä¸Šä½æœºé€šä¿¡ |
+| USART2_TX/RX | PD5/PD6 | MaixCam æ‘„åƒå¤´ |
+| USART3_TX/RX | PB9/PB11 | TMC2209(Rè½´) |
+| CAN_TX/RX | PA12/PA11 | ä¸‰è½´ä¼ºæœç”µæœº |
+| å¸å˜´æ°”æ³µ | PE12 | é«˜æœ‰æ•ˆ |
+| èˆµæœº PWM (Zè½´) | PB10 | TIM2_CH3 (50Hz) |
 | 12V_C1 PWM | PA0 | TIM2_CH1 |
 | 12V_C2 PWM | PE8 | TIM5_CH3 (50Hz) |
 | 24V_C1 PWM | PB2 | TIM5_CH1 |
 | 24V_C2 PWM | PB1 | |
 | SPI2_SCK/MOSI | PB13/PB15 | LCD |
-| SPI2_CS/DC/RST | PD10/PD9/PD8 | LCD ¿ØÖÆ |
+| SPI2_CS/DC/RST | PD10/PD9/PD8 | LCD æŽ§åˆ¶ |
 | SPI3_SCK/MISO/MOSI | PC10/PC11/PC12 | Flash |
-| SPI3_CS | PA15 | Flash Æ¬Ñ¡ |
+| SPI3_CS | PA15 | Flash ç‰‡é€‰ |
 | SPI4_SCK/MISO/MOSI | PE2/PE5/PE6 | ESP32 |
-| SPI4_CS | PE3 | ESP32 Æ¬Ñ¡ |
-| ESP32_RESET | PC13 | ESP32 Ó²¸´Î» |
-| TMC1_EN (ENN) | PD15 | RÖáÊ¹ÄÜ£¨µÍÓÐÐ§£ºLOW=¿ªÆô£¬HIGH=¹Ø±Õ£© |
-| TMC2_EN | PD14 | Ô¤Áô |
-| KEY1/KEY2 | PC6/PC7 | µÍÓÐÐ§ |
-| CW/CCW/PUSH | PA8/PC8/PC9 | µÍÓÐÐ§ |
-| BOOT0 | PB8 | Æô¶¯Ñ¡Ôñ |
-| ÎÂ¶È´«¸ÐÆ÷ | PF9 / PA3 | DS18B20 |
-| LCD_LED | PD8 | LCD ±³¹â |
-| 12VO1(¿ª¹Ø) | PE11 | Õæ¿Õ±Ã / 12VÊä³ö1 |
-| 12VO2(¿ª¹Ø) | PE12 | 12VÊä³ö2£¨Ô¤Áô£© |
-| 12VO3(¿ª¹Ø/PWM) | PE13 / PE8 | 12VÊä³ö3 + PWM(TIM5_CH3) |
-| 12VO4(¿ª¹Ø/PWM) | PE14 / PB10 | 12VÊä³ö4 + PWM(TIM2_CH3) |
-| 24VO1(¿ª¹Ø) | PA6 | 24VÊä³ö1 |
-| 24VO2(¿ª¹Ø) | PA7 | 24VÊä³ö2 |
-| 24VO3(¿ª¹Ø/PWM) | PC4 / PB1 | 24VÊä³ö3 + PWM(TIM3_CH4) |
-| 24VO4(¿ª¹Ø/PWM) | PC5 / PB2 | 24VÊä³ö4 + PWM(TIM5_CH1) |
+| SPI4_CS | PE3 | ESP32 ç‰‡é€‰ |
+| ESP32_RESET | PC13 | ESP32 ç¡¬å¤ä½ |
+| TMC1_EN (ENN) | PD15 | Rè½´ä½¿èƒ½ï¼ˆä½Žæœ‰æ•ˆï¼šLOW=å¼€å¯ï¼ŒHIGH=å…³é—­ï¼‰ |
+| TMC2_EN | PD14 | é¢„ç•™ |
+| KEY1/KEY2 | PC6/PC7 | ä½Žæœ‰æ•ˆ |
+| CW/CCW/PUSH | PA8/PC8/PC9 | ä½Žæœ‰æ•ˆ |
+| BOOT0 | PB8 | å¯åŠ¨é€‰æ‹© |
+| æ¸©åº¦ä¼ æ„Ÿå™¨ | PF9 / PA3 | DS18B20 |
+| LCD_LED | PD8 | LCD èƒŒå…‰ |
+| 12VO1(å¼€å…³) | PE11 | çœŸç©ºæ³µ / 12Vè¾“å‡º1 |
+| 12VO2(å¼€å…³) | PE12 | 12Vè¾“å‡º2ï¼ˆé¢„ç•™ï¼‰ |
+| 12VO3(å¼€å…³/PWM) | PE13 / PE8 | 12Vè¾“å‡º3 + PWM(TIM5_CH3) |
+| 12VO4(å¼€å…³/PWM) | PE14 / PB10 | 12Vè¾“å‡º4 + PWM(TIM2_CH3) |
+| 24VO1(å¼€å…³) | PA6 | 24Vè¾“å‡º1 |
+| 24VO2(å¼€å…³) | PA7 | 24Vè¾“å‡º2 |
+| 24VO3(å¼€å…³/PWM) | PC4 / PB1 | 24Vè¾“å‡º3 + PWM(TIM3_CH4) |
+| 24VO4(å¼€å…³/PWM) | PC5 / PB2 | 24Vè¾“å‡º4 + PWM(TIM5_CH1) |
 
-### 10.2 µç»ú CAN Ö¸ÁîËÙ²é
-| ¹¦ÄÜÂë | ¹¦ÄÜ | Êý¾Ý³¤¶È |
+### 10.2 ç”µæœº CAN æŒ‡ä»¤é€ŸæŸ¥
+| åŠŸèƒ½ç  | åŠŸèƒ½ | æ•°æ®é•¿åº¦ |
 |--------|------|----------|
-| 0xF5 | ×ø±ê¾ø¶ÔÔË¶¯ | 7 ×Ö½Ú |
-| 0xF3 | Ê¹ÄÜ/È¥Ê¹ÄÜ | 2 ×Ö½Ú |
-| 0x82 | ÉèÖÃ¹¤×÷Ä£Ê½ | 2 ×Ö½Ú |
-| 0x92 | ÉèÎªÁãµã | 1 ×Ö½Ú |
-| 0x4A | Í¬²½±êÖ¾¿ª¹Ø | 2 ×Ö½Ú (¹ã²¥) |
-| 0x4B | Í¬²½Ö´ÐÐ´¥·¢ | 1 ×Ö½Ú (¹ã²¥) |
-| 0x95 | µ½Î»ãÐÖµÉèÖÃ | 4 ×Ö½Ú |
-| 0x83 | ÉèÖÃ¹¤×÷µçÁ÷ | 3 ×Ö½Ú |
-| 0x84 | ÉèÖÃ¹¤×÷Ï¸·Ö | 2 ×Ö½Ú |
-| 0x32 | ¶ÁÈ¡ÊµÊ±×ªËÙ | 2 ×Ö½Ú |
-| 0x3F | »Ö¸´³ö³§²ÎÊý | 2 ×Ö½Ú |
-| 0x3D | ½â³ý¶Â×ª±£»¤ | 1 ×Ö½Ú |
-| 0x85 | EN Òý½ÅÅäÖÃ | 2 ×Ö½Ú |
+| 0xF5 | åæ ‡ç»å¯¹è¿åŠ¨ | 7 å­—èŠ‚ |
+| 0xF3 | ä½¿èƒ½/åŽ»ä½¿èƒ½ | 2 å­—èŠ‚ |
+| 0x82 | è®¾ç½®å·¥ä½œæ¨¡å¼ | 2 å­—èŠ‚ |
+| 0x92 | è®¾ä¸ºé›¶ç‚¹ | 1 å­—èŠ‚ |
+| 0x4A | åŒæ­¥æ ‡å¿—å¼€å…³ | 2 å­—èŠ‚ (å¹¿æ’­) |
+| 0x4B | åŒæ­¥æ‰§è¡Œè§¦å‘ | 1 å­—èŠ‚ (å¹¿æ’­) |
+| 0x95 | åˆ°ä½é˜ˆå€¼è®¾ç½® | 4 å­—èŠ‚ |
+| 0x83 | è®¾ç½®å·¥ä½œç”µæµ | 3 å­—èŠ‚ |
+| 0x84 | è®¾ç½®å·¥ä½œç»†åˆ† | 2 å­—èŠ‚ |
+| 0x32 | è¯»å–å®žæ—¶è½¬é€Ÿ | 2 å­—èŠ‚ |
+| 0x3F | æ¢å¤å‡ºåŽ‚å‚æ•° | 2 å­—èŠ‚ |
+| 0x3D | è§£é™¤å µè½¬ä¿æŠ¤ | 1 å­—èŠ‚ |
+| 0x85 | EN å¼•è„šé…ç½® | 2 å­—èŠ‚ |
 
-### 10.3 C ÎÄ¼þ±àÂëËµÃ÷
-- `Drivers/ZeMCU-G4/` Óë `Task/` Ä¿Â¼Ê¹ÓÃ **UTF-8£¨´ø BOM£©±àÂë**
-- `Core/` Ä¿Â¼£¨CubeMX Éú³É£©ÈÔÎª **GBK£¨CP936£©±àÂë**
-- CubeMX Éú³ÉµÄ CubeMX User Code ÆðÊ¼/½áÊø±ê¼Ç£º`/* USER CODE BEGIN ... */` / `/* USER CODE END ... */`
-- CubeMX ÖØÐÂÉú³É´úÂëÊ±£¬±ê¼ÇÍâÄÚÈÝ»á±»¸²¸Ç
-### 10.4 DRV8803 ¶Ë¿Ú¶ÔÕÕÓëÊ¹ÓÃÊ¾Àý
+### 10.3 C æ–‡ä»¶ç¼–ç è¯´æ˜Ž
+- `Drivers/ZeMCU-G4/` ä¸Ž `Task/` ç›®å½•ä½¿ç”¨ **UTF-8ï¼ˆå¸¦ BOMï¼‰ç¼–ç **
+- `Core/` ç›®å½•ï¼ˆCubeMX ç”Ÿæˆï¼‰ä»ä¸º **GBKï¼ˆCP936ï¼‰ç¼–ç **
+- CubeMX ç”Ÿæˆçš„ CubeMX User Code èµ·å§‹/ç»“æŸæ ‡è®°ï¼š`/* USER CODE BEGIN ... */` / `/* USER CODE END ... */`
+- CubeMX é‡æ–°ç”Ÿæˆä»£ç æ—¶ï¼Œæ ‡è®°å¤–å†…å®¹ä¼šè¢«è¦†ç›–
+### 10.4 DRV8803 ç«¯å£å¯¹ç…§ä¸Žä½¿ç”¨ç¤ºä¾‹
 
-**¶Ë¿Ú¶ÔÓ¦¹ØÏµ£º**
+**ç«¯å£å¯¹åº”å…³ç³»ï¼š**
 
-| Âß¼­¶Ë¿Ú | ¿ª¹ØÒý½Å | PWM Òý½Å | PWM TIM Í¨µÀ | ÓÃÍ¾ |
+| é€»è¾‘ç«¯å£ | å¼€å…³å¼•è„š | PWM å¼•è„š | PWM TIM é€šé“ | ç”¨é€” |
 |----------|---------|---------|-------------|------|
-| `Port_12VO1` | PE11 | ¡ª | ¡ª | Õæ¿Õ±Ã |
-| `Port_12VO2` | PE12 | ¡ª | ¡ª | Ô¤Áô |
-| `Port_12VO3` | PE13 | PE8 | TIM5_CH3 | 12V PWM Êä³ö |
-| `Port_12VO4` | PE14 | PB10 | TIM2_CH3 | 12V PWM Êä³ö |
-| `Port_24VO1` | PA6 | ¡ª | ¡ª | 24V Êä³ö |
-| `Port_24VO2` | PA7 | ¡ª | ¡ª | 24V Êä³ö |
-| `Port_24VO3` | PC4 | PB1 | TIM3_CH4 | 24V PWM Êä³ö |
-| `Port_24VO4` | PC5 | PB2 | TIM5_CH1 | 24V PWM Êä³ö |
+| `Port_12VO1` | PE11 | â€” | â€” | çœŸç©ºæ³µ |
+| `Port_12VO2` | PE12 | â€” | â€” | é¢„ç•™ |
+| `Port_12VO3` | PE13 | PE8 | TIM5_CH3 | 12V PWM è¾“å‡º |
+| `Port_12VO4` | PE14 | PB10 | TIM2_CH3 | 12V PWM è¾“å‡º |
+| `Port_24VO1` | PA6 | â€” | â€” | 24V è¾“å‡º |
+| `Port_24VO2` | PA7 | â€” | â€” | 24V è¾“å‡º |
+| `Port_24VO3` | PC4 | PB1 | TIM3_CH4 | 24V PWM è¾“å‡º |
+| `Port_24VO4` | PC5 | PB2 | TIM5_CH1 | 24V PWM è¾“å‡º |
 
-> **Ð¾Æ¬¼¶Òý½Å**£¨¹Ì¶¨£¬²»ÊôÓÚÊä³ö¶Ë¿Ú£©£º
+> **èŠ¯ç‰‡çº§å¼•è„š**ï¼ˆå›ºå®šï¼Œä¸å±žäºŽè¾“å‡ºç«¯å£ï¼‰ï¼š
 > U12(12V): PE9(EN) / PE10(RST) / PE15(FAULT)
 > U13(24V): PA4(EN) / PB0(RST) / PA5(FAULT)
 
-**Êý¾Ý½á¹¹£º**
+**æ•°æ®ç»“æž„ï¼š**
 
 ```c
 typedef struct {
@@ -610,584 +585,593 @@ typedef struct {
 } Pin_t;
 
 typedef struct {
-    uint8_t num_pins;   // 1=½ö¿ª¹Ø, 2=¿ª¹Ø+PWM
-    Pin_t   pins[2];    // pins[0]=¿ª¹ØÒý½Å, pins[1]=PWMÒý½Å
+    uint8_t num_pins;   // 1=ä»…å¼€å…³, 2=å¼€å…³+PWM
+    Pin_t   pins[2];    // pins[0]=å¼€å…³å¼•è„š, pins[1]=PWMå¼•è„š
 } PowerPort_t;
 ```
 
-**API º¯Êý£º**
+**API å‡½æ•°ï¼š**
 
-| º¯Êý | ËµÃ÷ |
+| å‡½æ•° | è¯´æ˜Ž |
 |------|------|
-| `DRV8803_Init()` | ³õÊ¼»¯ËùÓÐÊä³ö¶Ë¿ÚÎªµÍµçÆ½£¬½ûÓÃÁ½¸öÐ¾Æ¬ |
-| `DRV8803_SetOutput(port, on)` | ¿ØÖÆÄ³¶Ë¿Ú¿ª¹Ø£¨½ö²Ù×÷ pins[0]£© |
-| `DRV8803_EnableChip(id, enable)` | Ð¾Æ¬¼¶Ê¹ÄÜ£¨1=12V, 2=24V£© |
-| `DRV8803_IsChipFault(id)` | ²éÑ¯Ð¾Æ¬¹ÊÕÏ×´Ì¬ |
-| `DRV8803_TriggerChipReset(id)` | Ó²¼þ¸´Î»Ö¸¶¨Ð¾Æ¬ |
-| `DRV8803_HandleFault_RTOS(id)` | FreeRTOS ÈÎÎñÖÐµÄ¹ÊÕÏ»Ö¸´Á÷³Ì |
+| `DRV8803_Init()` | åˆå§‹åŒ–æ‰€æœ‰è¾“å‡ºç«¯å£ä¸ºä½Žç”µå¹³ï¼Œç¦ç”¨ä¸¤ä¸ªèŠ¯ç‰‡ |
+| `DRV8803_SetOutput(port, on)` | æŽ§åˆ¶æŸç«¯å£å¼€å…³ï¼ˆä»…æ“ä½œ pins[0]ï¼‰ |
+| `DRV8803_EnableChip(id, enable)` | èŠ¯ç‰‡çº§ä½¿èƒ½ï¼ˆ1=12V, 2=24Vï¼‰ |
+| `DRV8803_IsChipFault(id)` | æŸ¥è¯¢èŠ¯ç‰‡æ•…éšœçŠ¶æ€ |
+| `DRV8803_TriggerChipReset(id)` | ç¡¬ä»¶å¤ä½æŒ‡å®šèŠ¯ç‰‡ |
+| `DRV8803_HandleFault_RTOS(id)` | FreeRTOS ä»»åŠ¡ä¸­çš„æ•…éšœæ¢å¤æµç¨‹ |
 
-**Ê¹ÓÃÊ¾Àý£º**
+**ä½¿ç”¨ç¤ºä¾‹ï¼š**
 
 ```c
-// ³õÊ¼»¯
+// åˆå§‹åŒ–
 DRV8803_Init();
-DRV8803_EnableChip(1, true);    // Ê¹ÄÜ U12 (12V)
+DRV8803_EnableChip(1, true);    // ä½¿èƒ½ U12 (12V)
 
-// ¿ª¹Ø¿ØÖÆ
-DRV8803_SetOutput(&Port_12VO1, true);   // ¿ªÆôÕæ¿Õ±Ã
-DRV8803_SetOutput(&Port_12VO1, false);  // ¹Ø±Õ
+// å¼€å…³æŽ§åˆ¶
+DRV8803_SetOutput(&Port_12VO1, true);   // å¼€å¯çœŸç©ºæ³µ
+DRV8803_SetOutput(&Port_12VO1, false);  // å…³é—­
 
-// PWM ¿ØÖÆ£¨Í¨¹ý±ã½Ýºê·ÃÎÊÒý½Å£©
+// PWM æŽ§åˆ¶ï¼ˆé€šè¿‡ä¾¿æ·å®è®¿é—®å¼•è„šï¼‰
 HAL_GPIO_WritePin(PWM_12VO3_PIN.port, PWM_12VO3_PIN.pin, GPIO_PIN_SET);
 
-// ¹ÊÕÏ´¦Àí
+// æ•…éšœå¤„ç†
 if (DRV8803_IsChipFault(1)) {
     DRV8803_HandleFault_RTOS(1);
     DRV8803_EnableChip(1, true);
     DRV8803_SetOutput(&Port_12VO1, true);
 }
 ```
+**æ•…éšœæŽ’æŸ¥ï¼š**
+
+| çŽ°è±¡ | æ£€æŸ¥é¡¹ |
+|------|--------|
+| 12V ç«¯å£ä¸å·¥ä½œ | PE9(EN1) æ˜¯å¦ä¸º LOW |
+| 24V ç«¯å£ä¸å·¥ä½œ | PA4(EN2) æ˜¯å¦ä¸º LOWã€PB0(RST2) æ˜¯å¦ä¸º LOW |
+| ç”µç£é˜€ä¸åŠ¨ | PA6 æ˜¯å¦æœ‰ HIGHâ†’LOW è·³å˜ã€U13 æ˜¯å¦ä½¿èƒ½ã€24V ä¾›ç”µæ˜¯å¦æ­£å¸¸ |
+| èˆµæœºä¸è½¬ | PB10 æ˜¯å¦æœ‰ 50Hz PWMã€PE14(å¼€å…³) æ˜¯å¦ HIGH |
 
 
-## Ê®Ò»¡¢µ÷ÊÔÈÎÎñÓë¾­Ñé×Ü½á
+
+## åä¸€ã€è°ƒè¯•ä»»åŠ¡ä¸Žç»éªŒæ€»ç»“
 
 ### 11.1 StartHostMotionTestTask
 
-Î»ÓÚ `Task/app_test.c`£¬ÊÇÒ»¸ö½«**ÉÏÎ»»úÍ¨Ñ¶ + XY ÔË¶¯¿ØÖÆ**½áºÏÔÚÒ»ÆðµÄ²âÊÔÈÎÎñ¡£
+ä½äºŽ `Task/app_test.c`ï¼Œæ˜¯ä¸€ä¸ªå°†**ä¸Šä½æœºé€šè®¯ + XY è¿åŠ¨æŽ§åˆ¶**ç»“åˆåœ¨ä¸€èµ·çš„æµ‹è¯•ä»»åŠ¡ã€‚
 
-**Æô¶¯Á÷³Ì£º**
-1. `CAN_Init(&hfdcan1, NULL)` ¡ª Æô¶¯ CAN ÍâÉè£¨µ÷ÓÃ `HAL_FDCAN_Start`£©
-2. `HAL_FDCAN_ActivateNotification(...)` ¡ª ¼¤»î CAN RX ÖÐ¶Ï£¨±ØÐë£¡·ñÔòÊÕ²»µ½µç»úµ½Î»·´À¡£©
-3. `Motor_Init()` ¡ª ³õÊ¼»¯ÈýÖáµç»ú£¨ÉèÖÃ vFOC Ä£Ê½ ¡ú Ê¹ÄÜ ¡ú Éèµ½Î»ãÐÖµ ¡ú ¿ªÍ¬²½ ¡ú ¹éÁã£©
-4. ·¢ËÍ `DEBUG_MODE\n` ´¥·¢ÉÏÎ»»ú½øÈëµ÷ÊÔÄ£Ê½
-5. Ö÷Ñ­»·£º½ÓÊÕÉÏÎ»»úÖ¸Áî ¡ú ½âÎö ¡ú Ö´ÐÐµç»ú¶¯×÷ + »ØÏÔ
+**å¯åŠ¨æµç¨‹ï¼š**
+1. `CAN_Init(&hfdcan1, NULL)` â€” å¯åŠ¨ CAN å¤–è®¾ï¼ˆè°ƒç”¨ `HAL_FDCAN_Start`ï¼‰
+2. `HAL_FDCAN_ActivateNotification(...)` â€” æ¿€æ´» CAN RX ä¸­æ–­ï¼ˆå¿…é¡»ï¼å¦åˆ™æ”¶ä¸åˆ°ç”µæœºåˆ°ä½åé¦ˆï¼‰
+3. `Motor_Init()` â€” åˆå§‹åŒ–ä¸‰è½´ç”µæœºï¼ˆè®¾ç½® vFOC æ¨¡å¼ â†’ ä½¿èƒ½ â†’ è®¾åˆ°ä½é˜ˆå€¼ â†’ å¼€åŒæ­¥ â†’ å½’é›¶ï¼‰
+4. å‘é€ `DEBUG_MODE\n` è§¦å‘ä¸Šä½æœºè¿›å…¥è°ƒè¯•æ¨¡å¼
+5. ä¸»å¾ªçŽ¯ï¼šæŽ¥æ”¶ä¸Šä½æœºæŒ‡ä»¤ â†’ è§£æž â†’ æ‰§è¡Œç”µæœºåŠ¨ä½œ + å›žæ˜¾
 
-**ÃüÁîÓ³Éä£¨µ±Ç°£©£º**
-| ÉÏÎ»»úÃüÁî | ÎïÀíÖá | ÔË¶¯·½Ê½ |
+**å‘½ä»¤æ˜ å°„ï¼ˆå½“å‰ï¼‰ï¼š**
+| ä¸Šä½æœºå‘½ä»¤ | ç‰©ç†è½´ | è¿åŠ¨æ–¹å¼ |
 |---|---|---|
-| `MOVE_UP / MOVE_DOWN` | X Öá£¨X1+X2 Ë«µç»ú£© | ×èÈûÊ½Ïà¶ÔÒÆ¶¯ |
-| `MOVE_LEFT / MOVE_RIGHT` | Y Öá£¨µ¥µç»ú£© | ×èÈûÊ½Ïà¶ÔÒÆ¶¯ |
-| `MOVE_UP_START / MOVE_DOWN_START` | X Öá£¨X1+X2£© | Á¬Ðø JOG |
-| `MOVE_LEFT_START / MOVE_RIGHT_START` | Y Öá | Á¬Ðø JOG |
-| `MOVE_STOP` | X1+X2+Y ÈýÖá | Á¢¼´¼±Í£ |
-| `SET_ORIGIN` | X1+X2+Y ÈýÖá | ¹éÁã |
+| `MOVE_UP / MOVE_DOWN` | X è½´ï¼ˆX1+X2 åŒç”µæœºï¼‰ | é˜»å¡žå¼ç›¸å¯¹ç§»åŠ¨ |
+| `MOVE_LEFT / MOVE_RIGHT` | Y è½´ï¼ˆå•ç”µæœºï¼‰ | é˜»å¡žå¼ç›¸å¯¹ç§»åŠ¨ |
+| `MOVE_UP_START / MOVE_DOWN_START` | X è½´ï¼ˆX1+X2ï¼‰ | è¿žç»­ JOG |
+| `MOVE_LEFT_START / MOVE_RIGHT_START` | Y è½´ | è¿žç»­ JOG |
+| `MOVE_STOP` | X1+X2+Y ä¸‰è½´ | ç«‹å³æ€¥åœ |
+| `SET_ORIGIN` | X1+X2+Y ä¸‰è½´ | å½’é›¶ |
 
-**mm ×ª²½Êý³£Á¿£º** `#define STEPS_PER_MM 3276.8f`£¨1È¦=16384²½£¬¼ÙÉèµ¼³Ì=5mm£¬ÐèÊµ¼ÊÐ£×¼£©
+**mm è½¬æ­¥æ•°å¸¸é‡ï¼š** `#define STEPS_PER_MM 3276.8f`ï¼ˆ1åœˆ=16384æ­¥ï¼Œå‡è®¾å¯¼ç¨‹=5mmï¼Œéœ€å®žé™…æ ¡å‡†ï¼‰
 
-### 11.2 MKS µç»ú CAN ¿ØÖÆÒªµã
+### 11.2 MKS ç”µæœº CAN æŽ§åˆ¶è¦ç‚¹
 
-1. **CAN ÍâÉè±ØÐëÊÖ¶¯Æô¶¯£º** STM32 µÄ `MX_FDCAN1_Init` Ö»³õÊ¼»¯Ê±ÖÓºÍÒý½Å£¬»¹±ØÐëµ÷ÓÃ `HAL_FDCAN_Start`£¨ÔÚ `CAN_Init` ÄÚ²¿£©CAN ²ÅÄÜÕæÕýÍ¨ÐÅ¡£·ñÔò TX Ö¡Ö»Ð´Èë FIFO ²»·¢µ½×ÜÏß¡£
+1. **CAN å¤–è®¾å¿…é¡»æ‰‹åŠ¨å¯åŠ¨ï¼š** STM32 çš„ `MX_FDCAN1_Init` åªåˆå§‹åŒ–æ—¶é’Ÿå’Œå¼•è„šï¼Œè¿˜å¿…é¡»è°ƒç”¨ `HAL_FDCAN_Start`ï¼ˆåœ¨ `CAN_Init` å†…éƒ¨ï¼‰CAN æ‰èƒ½çœŸæ­£é€šä¿¡ã€‚å¦åˆ™ TX å¸§åªå†™å…¥ FIFO ä¸å‘åˆ°æ€»çº¿ã€‚
 
-2. **CAN RX ÖÐ¶Ï±ØÐë¼¤»î£º** µ÷ÓÃ `HAL_FDCAN_ActivateNotification` ¼¤»î `FDCAN_IT_RX_FIFO0_NEW_MESSAGE` ºó²ÅÄÜÊÕµ½µç»ú·´À¡¡£·ñÔò `CAN_Process_Task` ÓÀÔ¶ÊÕ²»µ½µ½Î»ÊÂ¼þ£¬`osEventFlagsWait` Ã¿´Î¶¼³¬Ê±¡£
+2. **CAN RX ä¸­æ–­å¿…é¡»æ¿€æ´»ï¼š** è°ƒç”¨ `HAL_FDCAN_ActivateNotification` æ¿€æ´» `FDCAN_IT_RX_FIFO0_NEW_MESSAGE` åŽæ‰èƒ½æ”¶åˆ°ç”µæœºåé¦ˆã€‚å¦åˆ™ `CAN_Process_Task` æ°¸è¿œæ”¶ä¸åˆ°åˆ°ä½äº‹ä»¶ï¼Œ`osEventFlagsWait` æ¯æ¬¡éƒ½è¶…æ—¶ã€‚
 
-3. **Í¬²½Ä£Ê½Ó°Ïì¼±Í££º** `Motor_Init` ÖÐ `motorSyncEnable(1)` ¿ªÆôÁËÍ¬²½Ä£Ê½£¬Ö®ºóËùÓÐ `0xF5` Ö¸Áî£¨°üÀ¨¼±Í£Ö¡£©¶¼±»»º´æ£¬Ö»ÓÐÊÕµ½ `0x4B` Í¬²½´¥·¢²ÅÖ´ÐÐ¡£`MOVE_STOP` ·¢Íê¼±Í£Ö¡ºó±ØÐë¸ú `motorSyncTrigger(0)`¡£
+3. **åŒæ­¥æ¨¡å¼å½±å“æ€¥åœï¼š** `Motor_Init` ä¸­ `motorSyncEnable(1)` å¼€å¯äº†åŒæ­¥æ¨¡å¼ï¼Œä¹‹åŽæ‰€æœ‰ `0xF5` æŒ‡ä»¤ï¼ˆåŒ…æ‹¬æ€¥åœå¸§ï¼‰éƒ½è¢«ç¼“å­˜ï¼Œåªæœ‰æ”¶åˆ° `0x4B` åŒæ­¥è§¦å‘æ‰æ‰§è¡Œã€‚`MOVE_STOP` å‘å®Œæ€¥åœå¸§åŽå¿…é¡»è·Ÿ `motorSyncTrigger(0)`ã€‚
 
-4. **ËÙ¶Èµ¥Î»£º** `positionMode3Run` µÄ speed ²ÎÊýÊÇ MKS µÄ RPM Öµ£¬²»ÊÇ mm/s¡£JOG ÃüÁî´ÓÉÏÎ»»úÊÕµ½µÄ speed ²ÎÊý£¨mm/s£©²»ÄÜÖ±½ÓÍ¸´«£¬ÐèÒªËõ·Å¡£µ±Ç°´úÂëÖ±½Ó `(uint16_t)parsed.param`£¬Ó¦ÔÚ `MOVE_*_START` case ÖÐ¼Ó×ª»»ÏµÊý¡£
+4. **é€Ÿåº¦å•ä½ï¼š** `positionMode3Run` çš„ speed å‚æ•°æ˜¯ MKS çš„ RPM å€¼ï¼Œä¸æ˜¯ mm/sã€‚JOG å‘½ä»¤ä»Žä¸Šä½æœºæ”¶åˆ°çš„ speed å‚æ•°ï¼ˆmm/sï¼‰ä¸èƒ½ç›´æŽ¥é€ä¼ ï¼Œéœ€è¦ç¼©æ”¾ã€‚å½“å‰ä»£ç ç›´æŽ¥ `(uint16_t)parsed.param`ï¼Œåº”åœ¨ `MOVE_*_START` case ä¸­åŠ è½¬æ¢ç³»æ•°ã€‚
 
-5. **Õ»ÒªÇó£º** `StartHostMotionTestTask` Õ»ÒÑÀ©ÖÁ **4096** ×Ö½Ú£¨`app_freertos.c`£©£¬Í¬Ê± `PrintDebug` ÄÚ²¿µÄ `vsnprintf` ÒÑÌæ»»Îª×ÔÊµÏÖµÄ `dbg_vformat`£¨Õ»Õ¼ÓÃÔ¼ 80 ×Ö½Ú£¬Ô¶µÍÓÚ±ê×¼¿âµÄ ~800 ×Ö½Ú£©¡£Á¬Ðø CAN ·¢ËÍÖ®¼ä²åÈë `osDelay(2)` ÊÍ·ÅÕ»Ö¡£¬·À±ÀÀ£¡£
+5. **æ ˆè¦æ±‚ï¼š** `StartHostMotionTestTask` æ ˆå·²æ‰©è‡³ **4096** å­—èŠ‚ï¼ˆ`app_freertos.c`ï¼‰ï¼ŒåŒæ—¶ `PrintDebug` å†…éƒ¨çš„ `vsnprintf` å·²æ›¿æ¢ä¸ºè‡ªå®žçŽ°çš„ `dbg_vformat`ï¼ˆæ ˆå ç”¨çº¦ 80 å­—èŠ‚ï¼Œè¿œä½ŽäºŽæ ‡å‡†åº“çš„ ~800 å­—èŠ‚ï¼‰ã€‚è¿žç»­ CAN å‘é€ä¹‹é—´æ’å…¥ `osDelay(2)` é‡Šæ”¾æ ˆå¸§ï¼Œé˜²å´©æºƒã€‚
 
-### 11.3 ÉÏÎ»»úÍ¨Ñ¶Ð­ÒéÒªµã
+### 11.3 ä¸Šä½æœºé€šè®¯åè®®è¦ç‚¹
 
-ÉÏÎ»»ú£¨SerialTool.exe£©Ð­Òé¼û `E:/ÁÄÌì¼ÇÂ¼/ÉÏÎ»»ú´®¿ÚÍ¨Ñ¶Ð­Òé.txt`£º
-- ¸ñÊ½£º`COMMAND arg\n`£¬UTF-8 ±àÂë
-- ÀëÉ¢ÒÆ¶¯£º`MOVE_UP/DOWN/LEFT/RIGHT <mm>`
-- Á¬ÐøÒÆ¶¯£¨¹´Ñ¡"Á¬ÐøÒÆ¶¯"ºó£©£ºµÚÒ»´Îµã»÷·¢ `MOVE_*_START <ËÙ¶È>`£¬µÚ¶þ´Îµã»÷Í¬Ò»·½Ïò·¢ `MOVE_STOP`
-- µã»÷²»Í¬·½Ïò£ºÏÈ×Ô¶¯·¢ `MOVE_STOP`£¬ÔÙ·¢ÐÂ·½ÏòµÄ `START`
-- G4 Æô¶¯Ê±·¢ `DEBUG_MODE\n` ¼¤»îÉÏÎ»»úµ÷ÊÔÃæ°å
+ä¸Šä½æœºï¼ˆSerialTool.exeï¼‰åè®®è§ `E:/èŠå¤©è®°å½•/ä¸Šä½æœºä¸²å£é€šè®¯åè®®.txt`ï¼š
+- æ ¼å¼ï¼š`COMMAND arg\n`ï¼ŒUTF-8 ç¼–ç 
+- ç¦»æ•£ç§»åŠ¨ï¼š`MOVE_UP/DOWN/LEFT/RIGHT <mm>`
+- è¿žç»­ç§»åŠ¨ï¼ˆå‹¾é€‰"è¿žç»­ç§»åŠ¨"åŽï¼‰ï¼šç¬¬ä¸€æ¬¡ç‚¹å‡»å‘ `MOVE_*_START <é€Ÿåº¦>`ï¼Œç¬¬äºŒæ¬¡ç‚¹å‡»åŒä¸€æ–¹å‘å‘ `MOVE_STOP`
+- ç‚¹å‡»ä¸åŒæ–¹å‘ï¼šå…ˆè‡ªåŠ¨å‘ `MOVE_STOP`ï¼Œå†å‘æ–°æ–¹å‘çš„ `START`
+- G4 å¯åŠ¨æ—¶å‘ `DEBUG_MODE\n` æ¿€æ´»ä¸Šä½æœºè°ƒè¯•é¢æ¿
 
-### 11.4 ÒÑÖª¿Óµã
+### 11.4 å·²çŸ¥å‘ç‚¹
 
-| ÎÊÌâ | ÏÖÏó | ¸ùÒò | ½â¾ö |
+| é—®é¢˜ | çŽ°è±¡ | æ ¹å›  | è§£å†³ |
 |------|------|------|------|
-| Ã»µ÷ CAN_Init | CAN TX ÓÐ´òÓ¡µ«µç»ú²»¶¯ | CAN ÍâÉèÎ´Æô¶¯ | CAN_Init(&hfdcan1, NULL) |
-| Ã»µ÷ HAL_FDCAN_ActivateNotification | µã¶¯ºó×èÈû 10 Ãë | CAN RX ÖÐ¶ÏÎ´¼¤»î | ¼¤»î RX FIFO ÖÐ¶Ï |
-| Õ»Ì«Ð¡ | Æô¶¯ÏûÏ¢²»´òÓ¡/±ÀÀ£ | vsnprintf Õ»ÉîÔ¼800B | Õ»À©ÖÁ4096£¬vsnprintfÌæ»»Îªdbg_vformat |
-| JOG speedÌ«µÍÓÚ300 | µç»úÖ»Õð²»×ª | RPMÌ«µÍ | ÉÏÎ»»ú·¢speedÖÁÉÙ300 |
-| Í¬²½Ä£Ê½¼±Í£²»Ö´ÐÐ | MOVE_STOPºóµç»ú¼ÌÐøÅÜ | ¼±Í£±»»º´æÎ´´¥·¢ | axis_stopºó¸úmotorSyncTrigger(0) |
-| CMSIS´íÎóÂëÓëEVENT_ANY_ERROR³åÍ» | µ¥²½ÒÆ¶¯È«·µ»Ø-2 | osFlagsErrorParameter=0x80000008µÄbit3ÓëEVENT_ANY_ERRORÖØºÏ | ÏÈÓÃ(int32_t)flagsÐ¡ÓÚ0¹ýÂË´íÎóÂë |
-| Í¬²½´¥·¢ºó×´Ì¬±»ÏûºÄ | ÏÂ´Îµ¥²½X1X2Ö±½ÓÖ´ÐÐ²»×ßÍ¬²½ | motorSyncTriggerºóÍ¬²½±êÖ¾±»Çå³ý | disable_sync_stopÄ©Î²²¹motorSyncEnable(1) |
-| JOGÇÐ»»·½Ïòµç»ú²»¶¯ | UP_STARTºóµãDOWN_STARTÍ£×¡²»·´×ß | ÔËÐÐÖÐ»º´æ±»Ëø | disable_sync_stopÏÈÐÐ¼±Í£ÔÙ·¢ÐÂ·½Ïò |
-| MOVE_TO±»µ±×÷CSV | ×ø±êÔË¶¯ÃüÁî²»Ê¶±ð | app_uart_parser.cÖÐMOVE_TO´íÇ¶Ì×ÔÚSET_ORIGINÄÚ | ÒÆ³öÇ¶Ì×Æ½¼¶´¦Àí |
-| Á¬ÐøCAN·¢ËÍ±ÀÀ£ | ÈÕÖ¾ÔÚTX ID=2´¦½Ø¶Ï | PrintDebugµ½vsnprintfÕ»µþ¼Ó³¬ÏÞ | osDelay(2)¼ä¸ô·¢ËÍÊÍ·ÅÕ»Ö¡ |
-| dbg_vformatÊä³ö°Ù·ÖºÅ2X | CANÈÕÖ¾ÏÔÊ¾¸ñÊ½´®Ô­ÎÄ | °Ù·ÖºÅ02XµÄ¿í¶ÈÎ»2Î´±»Ìø¹ý | ¼ÓÊý×ÖÎ»Ìø¹ýÂß¼­ |
-### 11.5 ±¾ÈÎÎñÉæ¼°µÄÎÄ¼þ
+| æ²¡è°ƒ CAN_Init | CAN TX æœ‰æ‰“å°ä½†ç”µæœºä¸åŠ¨ | CAN å¤–è®¾æœªå¯åŠ¨ | CAN_Init(&hfdcan1, NULL) |
+| æ²¡è°ƒ HAL_FDCAN_ActivateNotification | ç‚¹åŠ¨åŽé˜»å¡ž 10 ç§’ | CAN RX ä¸­æ–­æœªæ¿€æ´» | æ¿€æ´» RX FIFO ä¸­æ–­ |
+| æ ˆå¤ªå° | å¯åŠ¨æ¶ˆæ¯ä¸æ‰“å°/å´©æºƒ | vsnprintf æ ˆæ·±çº¦800B | æ ˆæ‰©è‡³4096ï¼Œvsnprintfæ›¿æ¢ä¸ºdbg_vformat |
+| JOG speedå¤ªä½ŽäºŽ300 | ç”µæœºåªéœ‡ä¸è½¬ | RPMå¤ªä½Ž | ä¸Šä½æœºå‘speedè‡³å°‘300 |
+| åŒæ­¥æ¨¡å¼æ€¥åœä¸æ‰§è¡Œ | MOVE_STOPåŽç”µæœºç»§ç»­è·‘ | æ€¥åœè¢«ç¼“å­˜æœªè§¦å‘ | axis_stopåŽè·ŸmotorSyncTrigger(0) |
+| CMSISé”™è¯¯ç ä¸ŽEVENT_ANY_ERRORå†²çª | å•æ­¥ç§»åŠ¨å…¨è¿”å›ž-2 | osFlagsErrorParameter=0x80000008çš„bit3ä¸ŽEVENT_ANY_ERRORé‡åˆ | å…ˆç”¨(int32_t)flagså°äºŽ0è¿‡æ»¤é”™è¯¯ç  |
+| åŒæ­¥è§¦å‘åŽçŠ¶æ€è¢«æ¶ˆè€— | ä¸‹æ¬¡å•æ­¥X1X2ç›´æŽ¥æ‰§è¡Œä¸èµ°åŒæ­¥ | motorSyncTriggeråŽåŒæ­¥æ ‡å¿—è¢«æ¸…é™¤ | disable_sync_stopæœ«å°¾è¡¥motorSyncEnable(1) |
+| JOGåˆ‡æ¢æ–¹å‘ç”µæœºä¸åŠ¨ | UP_STARTåŽç‚¹DOWN_STARTåœä½ä¸åèµ° | è¿è¡Œä¸­ç¼“å­˜è¢«é” | disable_sync_stopå…ˆè¡Œæ€¥åœå†å‘æ–°æ–¹å‘ |
+| MOVE_TOè¢«å½“ä½œCSV | åæ ‡è¿åŠ¨å‘½ä»¤ä¸è¯†åˆ« | app_uart_parser.cä¸­MOVE_TOé”™åµŒå¥—åœ¨SET_ORIGINå†… | ç§»å‡ºåµŒå¥—å¹³çº§å¤„ç† |
+| è¿žç»­CANå‘é€å´©æºƒ | æ—¥å¿—åœ¨TX ID=2å¤„æˆªæ–­ | PrintDebugåˆ°vsnprintfæ ˆå åŠ è¶…é™ | osDelay(2)é—´éš”å‘é€é‡Šæ”¾æ ˆå¸§ |
+| dbg_vformatè¾“å‡ºç™¾åˆ†å·2X | CANæ—¥å¿—æ˜¾ç¤ºæ ¼å¼ä¸²åŽŸæ–‡ | ç™¾åˆ†å·02Xçš„å®½åº¦ä½2æœªè¢«è·³è¿‡ | åŠ æ•°å­—ä½è·³è¿‡é€»è¾‘ |
+### 11.5 æœ¬ä»»åŠ¡æ¶‰åŠçš„æ–‡ä»¶
 
-| ÎÄ¼þ | ½ÇÉ« |
+| æ–‡ä»¶ | è§’è‰² |
 |------|------|
 | Task/app_test.c | StartHostMotionTestTask + move_xy_relative + axis_stop + disable_sync_stop + dbg_vformat + PrintDebug |
-| Task/app_test.h | º¯ÊýÉùÃ÷ + extern hostMotionTestTask_attributes |
-| Task/app_uart_parser.c | ÉÏÎ»»úÐÐÐ­Òé½âÎöÆ÷£¨MOVE_TO/SET_ORIGIN À¨ºÅÒÑÐÞ¸´£© |
-| Core/Src/app_freertos.c | RTOS Ïß³Ì´´½¨ + hostMotionTestTask_attributes£¨Õ» 4096£© |
-| Drivers/ZeMCU-G4/driver_motor.c | positionMode3Run¡¢Motor_Init¡¢motorSyncTrigger¡¢motorSyncEnable µÈ API |
-| Drivers/ZeMCU-G4/driver_can.c | CAN_Init¡¢CAN_Transmit_Data£¨CRC º¬ CAN ID£©+ PrintDebug µ÷ÓÃ |
+| Task/app_test.h | å‡½æ•°å£°æ˜Ž + extern hostMotionTestTask_attributes |
+| Task/app_uart_parser.c | ä¸Šä½æœºè¡Œåè®®è§£æžå™¨ï¼ˆMOVE_TO/SET_ORIGIN æ‹¬å·å·²ä¿®å¤ï¼‰ |
+| Core/Src/app_freertos.c | RTOS çº¿ç¨‹åˆ›å»º + hostMotionTestTask_attributesï¼ˆæ ˆ 4096ï¼‰ |
+| Drivers/ZeMCU-G4/driver_motor.c | positionMode3Runã€Motor_Initã€motorSyncTriggerã€motorSyncEnable ç­‰ API |
+| Drivers/ZeMCU-G4/driver_can.c | CAN_Initã€CAN_Transmit_Dataï¼ˆCRC å« CAN IDï¼‰+ PrintDebug è°ƒç”¨ |
 
-### 11.6 MKS Í¬²½Ä£Ê½Éî¶È½âÎö
+### 11.6 MKS åŒæ­¥æ¨¡å¼æ·±åº¦è§£æž
 
-MKS SERVO42D Í¬²½Ä£Ê½Á÷³Ì£º
+MKS SERVO42D åŒæ­¥æ¨¡å¼æµç¨‹ï¼š
 
-1. `motorSyncEnable(1)` ¹ã²¥ ¡ú µç»ú½øÈëÍ¬²½Ä£Ê½£¨´Ëºó 0xF5 ±»»º´æ£¬×´Ì¬Âë 0x05£©
-2. ·¢ËÍ `0xF5` Î»ÖÃÖ¸Áîµ½¸÷Öá ¡ú µç»ú»º´æÖ¸Áî£¨×´Ì¬Âë 0x05£©
-3. `motorSyncTrigger(0)` ¹ã²¥ ¡ú ËùÓÐµç»ú**Í¬Ê±**Ö´ÐÐ»º´æÖ¸Áî£¨×´Ì¬Âë 0x01¡ú0x02£©
+1. `motorSyncEnable(1)` å¹¿æ’­ â†’ ç”µæœºè¿›å…¥åŒæ­¥æ¨¡å¼ï¼ˆæ­¤åŽ 0xF5 è¢«ç¼“å­˜ï¼ŒçŠ¶æ€ç  0x05ï¼‰
+2. å‘é€ `0xF5` ä½ç½®æŒ‡ä»¤åˆ°å„è½´ â†’ ç”µæœºç¼“å­˜æŒ‡ä»¤ï¼ˆçŠ¶æ€ç  0x05ï¼‰
+3. `motorSyncTrigger(0)` å¹¿æ’­ â†’ æ‰€æœ‰ç”µæœº**åŒæ—¶**æ‰§è¡Œç¼“å­˜æŒ‡ä»¤ï¼ˆçŠ¶æ€ç  0x01â†’0x02ï¼‰
 
-**¹Ø¼ü¿Óµã**£º
-- **ÔËÐÐÆÚ¼ä»º´æ±»Ëø**£ºµç»úÖ´ÐÐÖÐ£¨0x01£©²»½ÓÊÜÐÂ 0xF5 »º´æ¸²¸Ç¡£ÇÐ»»·½Ïò/Í£Ö¹ÐèÏÈÓÃ `disable_sync_stop` ÖÐÖ¹
-- **Í¬²½´¥·¢ÏûºÄ×´Ì¬**£º`motorSyncTrigger(0)` Ö´ÐÐºóÍ¬²½±êÖ¾±»Çå³ý£¬±ØÐëÖØÐÂ `motorSyncEnable(1)` ²ÅÄÜ¼ÌÐø»º´æ
-- **syncEnable ¿ÉÄÜ±»µç»úºöÂÔ**£ºÈÕÖ¾Ö¤Ã÷ Y ÖáÔËÐÐÊ±ÎÞÊÓ `motorSyncEnable(0)` ¹ã²¥£¬¹Ê²»ÇÐ»»Í¬²½Ä£Ê½¡¢Ö±½ÓÓÃ»º´æ+´¥·¢¸ü¿É¿¿
-- **ÈýÖá×´Ì¬²»Ò»ÖÂ**£ºÒ»¸ö disable_sync_stop ÖÜÆÚºó¿ÉÄÜ X1/X2 ÔÚ·ÇÍ¬²½¶ø Y ÔÚÍ¬²½£¬ÐèÄ©Î² `motorSyncEnable(1)` Í³Ò»
-- **move_xy_relative Í¬²½±£ÕÏ**£ºÃ¿´Î `move_xy_relative` µ÷ÓÃ±ØÐë (1) ·¢°üÇ° `motorSyncEnable(1)` È·±£»º´æ¿ªÆô£¬(2) `motorSyncTrigger(0)` ºóÁ¢¼´ `motorSyncEnable(1)` »Ö¸´Í¬²½¡£È±Ê§ÈÎÒ»²½Öè»áµ¼ÖÂºóÐøÔË¶¯ X1 ±È X2 ÔçÆð²½£¬Ë« X ÁúÃÅÀ­³¶ ¡ú ¶¶¶¯ + error¡£
+**å…³é”®å‘ç‚¹**ï¼š
+- **è¿è¡ŒæœŸé—´ç¼“å­˜è¢«é”**ï¼šç”µæœºæ‰§è¡Œä¸­ï¼ˆ0x01ï¼‰ä¸æŽ¥å—æ–° 0xF5 ç¼“å­˜è¦†ç›–ã€‚åˆ‡æ¢æ–¹å‘/åœæ­¢éœ€å…ˆç”¨ `disable_sync_stop` ä¸­æ­¢
+- **åŒæ­¥è§¦å‘æ¶ˆè€—çŠ¶æ€**ï¼š`motorSyncTrigger(0)` æ‰§è¡ŒåŽåŒæ­¥æ ‡å¿—è¢«æ¸…é™¤ï¼Œå¿…é¡»é‡æ–° `motorSyncEnable(1)` æ‰èƒ½ç»§ç»­ç¼“å­˜
+- **syncEnable å¯èƒ½è¢«ç”µæœºå¿½ç•¥**ï¼šæ—¥å¿—è¯æ˜Ž Y è½´è¿è¡Œæ—¶æ— è§† `motorSyncEnable(0)` å¹¿æ’­ï¼Œæ•…ä¸åˆ‡æ¢åŒæ­¥æ¨¡å¼ã€ç›´æŽ¥ç”¨ç¼“å­˜+è§¦å‘æ›´å¯é 
+- **ä¸‰è½´çŠ¶æ€ä¸ä¸€è‡´**ï¼šä¸€ä¸ª disable_sync_stop å‘¨æœŸåŽå¯èƒ½ X1/X2 åœ¨éžåŒæ­¥è€Œ Y åœ¨åŒæ­¥ï¼Œéœ€æœ«å°¾ `motorSyncEnable(1)` ç»Ÿä¸€
+- **move_xy_relative åŒæ­¥ä¿éšœ**ï¼šæ¯æ¬¡ `move_xy_relative` è°ƒç”¨å¿…é¡» (1) å‘åŒ…å‰ `motorSyncEnable(1)` ç¡®ä¿ç¼“å­˜å¼€å¯ï¼Œ(2) `motorSyncTrigger(0)` åŽç«‹å³ `motorSyncEnable(1)` æ¢å¤åŒæ­¥ã€‚ç¼ºå¤±ä»»ä¸€æ­¥éª¤ä¼šå¯¼è‡´åŽç»­è¿åŠ¨ X1 æ¯” X2 æ—©èµ·æ­¥ï¼ŒåŒ X é¾™é—¨æ‹‰æ‰¯ â†’ æŠ–åŠ¨ + errorã€‚
 
-### 11.7 disable_sync_stop º¯ÊýÉè¼Æ
+### 11.7 disable_sync_stop å‡½æ•°è®¾è®¡
 
-×îÖÕ°æ±¾£¨`Task/app_test.c` µÚ 523-533 ÐÐ£©£º
+æœ€ç»ˆç‰ˆæœ¬ï¼ˆ`Task/app_test.c` ç¬¬ 523-533 è¡Œï¼‰ï¼š
 ```c
 static void disable_sync_stop(void) {
-    axis_stop(X1_ADDR);    // »º´æ¼±Í££¨0xF5 ËÙ¶È=0£©
+    axis_stop(X1_ADDR);    // ç¼“å­˜æ€¥åœï¼ˆ0xF5 é€Ÿåº¦=0ï¼‰
     axis_stop(X2_ADDR);
     axis_stop(Y_ADDR);
     osDelay(5);
-    motorSyncTrigger(0);   // ´¥·¢Ö´ÐÐ ¡ú ÖÐÖ¹µ±Ç°ÔË¶¯
+    motorSyncTrigger(0);   // è§¦å‘æ‰§è¡Œ â†’ ä¸­æ­¢å½“å‰è¿åŠ¨
     osDelay(10);
-    motorSyncEnable(1);    // »Ö¸´Í¬²½Ä£Ê½£¨´¥·¢ºó×´Ì¬±»ÏûºÄ£©
+    motorSyncEnable(1);    // æ¢å¤åŒæ­¥æ¨¡å¼ï¼ˆè§¦å‘åŽçŠ¶æ€è¢«æ¶ˆè€—ï¼‰
     osDelay(10);
 }
 ```
 
-Éè¼ÆÑÝ½ø£¨3 °æ£©£º
-1. ³õ°æ£º`motorSyncEnable(0)` ÍË³öÍ¬²½ ¡ú `axis_stop` ¡ú `motorSyncEnable(1)` ÖØ¿ª¡£ÎÊÌâ£ºY ÖáÎÞÊÓ syncEnable ¹ã²¥
-2. ¶þ°æ£ºÈ¥µôÍ¬²½ÇÐ»»£¬´¿»º´æ+´¥·¢¡£ÎÊÌâ£º´¥·¢ºóÍ¬²½×´Ì¬¶ªÊ§£¬ÏÂ´Îµ¥²½ X1/X2 Ö±½ÓÖ´ÐÐ²»×ßÍ¬²½
-3. **ÖÕ°æ**£º»º´æ¼±Í£ + ´¥·¢ + »Ö¸´Í¬²½¡£¼æ¹Ë¿É¿¿Í£Ö¹Óë×´Ì¬Ò»ÖÂÐÔ
-### 11.8 move_xy_relative µ±Ç°ÊµÏÖ£¨2026-05 ×îÖÕ°æ£©
+è®¾è®¡æ¼”è¿›ï¼ˆ3 ç‰ˆï¼‰ï¼š
+1. åˆç‰ˆï¼š`motorSyncEnable(0)` é€€å‡ºåŒæ­¥ â†’ `axis_stop` â†’ `motorSyncEnable(1)` é‡å¼€ã€‚é—®é¢˜ï¼šY è½´æ— è§† syncEnable å¹¿æ’­
+2. äºŒç‰ˆï¼šåŽ»æŽ‰åŒæ­¥åˆ‡æ¢ï¼Œçº¯ç¼“å­˜+è§¦å‘ã€‚é—®é¢˜ï¼šè§¦å‘åŽåŒæ­¥çŠ¶æ€ä¸¢å¤±ï¼Œä¸‹æ¬¡å•æ­¥ X1/X2 ç›´æŽ¥æ‰§è¡Œä¸èµ°åŒæ­¥
+3. **ç»ˆç‰ˆ**ï¼šç¼“å­˜æ€¥åœ + è§¦å‘ + æ¢å¤åŒæ­¥ã€‚å…¼é¡¾å¯é åœæ­¢ä¸ŽçŠ¶æ€ä¸€è‡´æ€§
+### 11.8 move_xy_relative å½“å‰å®žçŽ°ï¼ˆ2026-05 æœ€ç»ˆç‰ˆï¼‰
 
-£¨`Task/app_test.c` move_xy_relative º¯Êý£©
+ï¼ˆ`Task/app_test.c` move_xy_relative å‡½æ•°ï¼‰
 
 ```c
-motorSyncEnable(1);         // ¡ï ·¢°üÇ°Ç¿ÖÆ¿ªÆôÍ¬²½£¨È·±£ 0xF5 ±»»º´æ¶ø·ÇÁ¢¼´Ö´ÐÐ£©
+motorSyncEnable(1);         // â˜… å‘åŒ…å‰å¼ºåˆ¶å¼€å¯åŒæ­¥ï¼ˆç¡®ä¿ 0xF5 è¢«ç¼“å­˜è€Œéžç«‹å³æ‰§è¡Œï¼‰
 osDelay(5);
 
 if (dx != 0) {
     positionMode3Run(X1_ADDR, speed, acc, target_x);
-    osDelay(2);             // ¡ï CAN Ê±Ðò£º¸ø MKS µç»ú×ã¹»Ê±¼ä´¦Àí 0xF5 »º´æ
+    osDelay(2);             // â˜… CAN æ—¶åºï¼šç»™ MKS ç”µæœºè¶³å¤Ÿæ—¶é—´å¤„ç† 0xF5 ç¼“å­˜
     positionMode3Run(X2_ADDR, speed, acc, target_x);
     osDelay(2);
 }
 if (dy != 0) {
     positionMode3Run(Y_ADDR,  speed, acc, target_y);
-    osDelay(2);             // ¡ï ÎÞ´ËÑÓÊ± Y ÖáÀ´²»¼°»º´æ ¡ú ²»ÔË¶¯
+    osDelay(2);             // â˜… æ— æ­¤å»¶æ—¶ Y è½´æ¥ä¸åŠç¼“å­˜ â†’ ä¸è¿åŠ¨
 }
 
-motorSyncTrigger(0);        // ÈýÖáÍ¬Ê±Ö´ÐÐ
+motorSyncTrigger(0);        // ä¸‰è½´åŒæ—¶æ‰§è¡Œ
 osDelay(5);
-motorSyncEnable(1);         // ¡ï ´¥·¢ºó»Ö¸´Í¬²½£¬ÏÂ´ÎÔË¶¯²»±»ÆÆ»µ
+motorSyncEnable(1);         // â˜… è§¦å‘åŽæ¢å¤åŒæ­¥ï¼Œä¸‹æ¬¡è¿åŠ¨ä¸è¢«ç ´å
 osDelay(5);
-// ... µÈ´ýµ½Î»ÊÂ¼þ ...
+// ... ç­‰å¾…åˆ°ä½äº‹ä»¶ ...
 ```
 
-**¹Ø¼üÒªµã**£º
-1. **osDelay(2) µÄË«ÖØ×÷ÓÃ**£º(a) CAN TX FIFO ·ÀÒç³ö£¬(b) ¸ø MKS µç»ú´¦Àí 0xF5 »º´æµÄÊ±¼ä¡£È¥µôºó Y µÄ 0xF5 ¾à 0x4B ´¥·¢½ö ~100¦Ìs£¬µç»úÀ´²»¼°»º´æ ¡ú Y ²»ÔË¶¯
-2. **Í¬²½Ë«±£ÏÕ**£º`motorSyncTrigger` ÏûºÄÍ¬²½±êÖ¾£¬²»»Ö¸´ÔòÏÂ´Î `move_xy_relative` µÄ 0xF5 Á¢¼´Ö´ÐÐ£¬X1 ±È X2 Ôç 2ms Æð²½ ¡ú »úÐµÀ­³¶
-3. **×îÓÅ²ÎÊý**£ºspeed=300, acc=25£¨speed=600/acc=70 µ¼ÖÂ¶ÌÐÐ³ÌÎÞÑ²º½¶Î¡¢È«³Ì¼Ó¼õËÙ¡¢¸úËæÎó²îÀÛ»ý£©
+**å…³é”®è¦ç‚¹**ï¼š
+1. **osDelay(2) çš„åŒé‡ä½œç”¨**ï¼š(a) CAN TX FIFO é˜²æº¢å‡ºï¼Œ(b) ç»™ MKS ç”µæœºå¤„ç† 0xF5 ç¼“å­˜çš„æ—¶é—´ã€‚åŽ»æŽ‰åŽ Y çš„ 0xF5 è· 0x4B è§¦å‘ä»… ~100Î¼sï¼Œç”µæœºæ¥ä¸åŠç¼“å­˜ â†’ Y ä¸è¿åŠ¨
+2. **åŒæ­¥åŒä¿é™©**ï¼š`motorSyncTrigger` æ¶ˆè€—åŒæ­¥æ ‡å¿—ï¼Œä¸æ¢å¤åˆ™ä¸‹æ¬¡ `move_xy_relative` çš„ 0xF5 ç«‹å³æ‰§è¡Œï¼ŒX1 æ¯” X2 æ—© 2ms èµ·æ­¥ â†’ æœºæ¢°æ‹‰æ‰¯
+3. **æœ€ä¼˜å‚æ•°**ï¼šspeed=300, acc=25ï¼ˆspeed=600/acc=70 å¯¼è‡´çŸ­è¡Œç¨‹æ— å·¡èˆªæ®µã€å…¨ç¨‹åŠ å‡é€Ÿã€è·Ÿéšè¯¯å·®ç´¯ç§¯ï¼‰
 
-### 11.9 dbg_vformat ÇáÁ¿¸ñÊ½»¯
+### 11.9 dbg_vformat è½»é‡æ ¼å¼åŒ–
 
-£¨`Task/app_test.c` µÚ 50-107 ÐÐ£©
+ï¼ˆ`Task/app_test.c` ç¬¬ 50-107 è¡Œï¼‰
 
-×ÔÊµÏÖ¸ñÊ½»¯ÒýÇæ£¬Ìæ´ú `<stdio.h>` µÄ `vsnprintf`£º
+è‡ªå®žçŽ°æ ¼å¼åŒ–å¼•æ“Žï¼Œæ›¿ä»£ `<stdio.h>` çš„ `vsnprintf`ï¼š
 
-| ÌØÐÔ | vsnprintf | dbg_vformat |
+| ç‰¹æ€§ | vsnprintf | dbg_vformat |
 |------|-----------|-------------|
-| Õ»Õ¼ÓÃ | ~800 ×Ö½Ú | ~80 ×Ö½Ú |
-| Ö§³Ö¸ñÊ½ | printf È«²¿ | ÏîÄ¿Êµ¼Ê 7 ÖÖ£º%d %ld %u %.1f %.2f %02X %s %.*s |
-| ÖÐÎÄ/UTF-8 | Ö§³Ö | Ö§³Ö£¨Öð×Ö½ÚÍ¸´«£¬0x25 ²Å´¥·¢¸ñÊ½½âÎö£© |
-| ÒÀÀµ | stdio.h | ÎÞÍâ²¿ÒÀÀµ |
+| æ ˆå ç”¨ | ~800 å­—èŠ‚ | ~80 å­—èŠ‚ |
+| æ”¯æŒæ ¼å¼ | printf å…¨éƒ¨ | é¡¹ç›®å®žé™… 7 ç§ï¼š%d %ld %u %.1f %.2f %02X %s %.*s |
+| ä¸­æ–‡/UTF-8 | æ”¯æŒ | æ”¯æŒï¼ˆé€å­—èŠ‚é€ä¼ ï¼Œ0x25 æ‰è§¦å‘æ ¼å¼è§£æžï¼‰ |
+| ä¾èµ– | stdio.h | æ— å¤–éƒ¨ä¾èµ– |
 
-**¸ñÊ½Î»½âÎöË³Ðò**£ºÆì±ê(0)¡ú¿í¶È¡ú¾«¶È(.2/.1/.*)¡ú³¤¶È(l)¡úÀàÐÍ·û(d/u/s/X/f)¡£
-**¿Ó**£º¿í¶ÈÎ»£¨Èç %02X µÄ 2£©±ØÐëÔÚ½øÈëÀàÐÍ·ûÇ°Ìø¹ý£¬·ñÔò±»µ±×÷ÆÕÍ¨×Ö·ûÊä³ö¡£
+**æ ¼å¼ä½è§£æžé¡ºåº**ï¼šæ——æ ‡(0)â†’å®½åº¦â†’ç²¾åº¦(.2/.1/.*)â†’é•¿åº¦(l)â†’ç±»åž‹ç¬¦(d/u/s/X/f)ã€‚
+**å‘**ï¼šå®½åº¦ä½ï¼ˆå¦‚ %02X çš„ 2ï¼‰å¿…é¡»åœ¨è¿›å…¥ç±»åž‹ç¬¦å‰è·³è¿‡ï¼Œå¦åˆ™è¢«å½“ä½œæ™®é€šå­—ç¬¦è¾“å‡ºã€‚
 
-### 11.10 Î»ÖÃÄ£Ê½¸úËæÎó²îµ÷ÊÔ¼ÇÂ¼£¨2026-05-28£©
+### 11.10 ä½ç½®æ¨¡å¼è·Ÿéšè¯¯å·®è°ƒè¯•è®°å½•ï¼ˆ2026-05-28ï¼‰
 
-**ÏÖÏó**£ºJOG Á¬ÐøÔË¶¯ÎÞ error£¬MOVE_TO Î»ÖÃÔË¶¯Ê± X1 ³öÏÖ¸úËæÎó²î£¨Öð½¥Ôö´ó¡¢µ½Î»ÇåÁã£©£¬ÈýÖá¶¶¶¯¡£
+**çŽ°è±¡**ï¼šJOG è¿žç»­è¿åŠ¨æ—  errorï¼ŒMOVE_TO ä½ç½®è¿åŠ¨æ—¶ X1 å‡ºçŽ°è·Ÿéšè¯¯å·®ï¼ˆé€æ¸å¢žå¤§ã€åˆ°ä½æ¸…é›¶ï¼‰ï¼Œä¸‰è½´æŠ–åŠ¨ã€‚
 
-**¸ùÒò**£º
-- MKS 0xF5 Î»ÖÃÄ£Ê½ÊÇÄÚÖÃ¹ì¼£¹æ»®Æ÷£¬¸ø¶¨ speed/acc/target ºóÄÚ²¿¹æ»®¼ÓËÙ¡úÑ²º½¡ú¼õËÙÇúÏß
-- JOG Ä¿±ê = 8388607£¨¼«Ô¶£©¡ú ¶ÌÔÝ¼ÓËÙºóºãËÙÑ²º½ ¡ú ¸úËæÎó²î ¡Ö 0
-- Î»ÖÃÄ£Ê½Ä¿±ê = ¶ÌÐÐ³Ì£¨Èç 10mm = 32768 ²½£©¡ú speed=600/acc=70 Ê±È«³Ì¼Ó¼õËÙ¡¢ÎÞÑ²º½¶Î ¡ú ¸úËæÎó²î³ÖÐøÀÛ»ý
-- X1 »úÐµ¸ºÔØ > X2£¨Ë« X ÁúÃÅ²»¶Ô³Æ£©£¬¼ÓËÙÊ± X1 Á¦¾Ø²»×ã£¬Îó²î¸ü´ó
+**æ ¹å› **ï¼š
+- MKS 0xF5 ä½ç½®æ¨¡å¼æ˜¯å†…ç½®è½¨è¿¹è§„åˆ’å™¨ï¼Œç»™å®š speed/acc/target åŽå†…éƒ¨è§„åˆ’åŠ é€Ÿâ†’å·¡èˆªâ†’å‡é€Ÿæ›²çº¿
+- JOG ç›®æ ‡ = 8388607ï¼ˆæžè¿œï¼‰â†’ çŸ­æš‚åŠ é€ŸåŽæ’é€Ÿå·¡èˆª â†’ è·Ÿéšè¯¯å·® â‰ˆ 0
+- ä½ç½®æ¨¡å¼ç›®æ ‡ = çŸ­è¡Œç¨‹ï¼ˆå¦‚ 10mm = 32768 æ­¥ï¼‰â†’ speed=600/acc=70 æ—¶å…¨ç¨‹åŠ å‡é€Ÿã€æ— å·¡èˆªæ®µ â†’ è·Ÿéšè¯¯å·®æŒç»­ç´¯ç§¯
+- X1 æœºæ¢°è´Ÿè½½ > X2ï¼ˆåŒ X é¾™é—¨ä¸å¯¹ç§°ï¼‰ï¼ŒåŠ é€Ÿæ—¶ X1 åŠ›çŸ©ä¸è¶³ï¼Œè¯¯å·®æ›´å¤§
 
-**½â¾ö¹ý³Ì**£º
-1. ½µËÙ½µ¼ÓËÙ¶È speed 600¡ú300, acc 70¡ú10£ºerror ÈÔ´æÔÚ£¬¸ùÒòÊÇ **Í¬²½Ä£Ê½ÔÚ trigger ºó±»ÏûºÄ£¬move_xy_relative Î´»Ö¸´**
-2. ÐÞ¸´Í¬²½£º·¢°üÇ°ºóË« `motorSyncEnable(1)` + ÒÆ³ý osDelay(2) ¡ú error ÏûÊ§£¬µ« **Y Öá²»ÔË¶¯**
-3. »Ö¸´ osDelay(2)£ºÎÞÑÓÊ± Y µÄ 0xF5 ¾à´¥·¢½ö ~100¦Ìs£¬MKS À´²»¼°»º´æ ¡ú Y ±»Ìø¹ý
-4. Î¢µ÷ acc 10¡ú25£ºÔÚÅ¤¾ØÐèÇóºÍ¼ÓËÙ³ÖÐøÊ±¼äÖ®¼äÕÛÖÐ
-5. MKS Ó²¼þÉÏµ÷¸ß X1 ¹¤×÷µçÁ÷£¨Ma£¬0x83 Ö¸Áî£©£º²¹³¥ X1 ¶îÍâ»úÐµ¸ºÔØ£¬½µµÍ¸úËæÎó²î¡£±£³ÖµçÁ÷ HoldMa ²»µ÷Õû
+**è§£å†³è¿‡ç¨‹**ï¼š
+1. é™é€Ÿé™åŠ é€Ÿåº¦ speed 600â†’300, acc 70â†’10ï¼šerror ä»å­˜åœ¨ï¼Œæ ¹å› æ˜¯ **åŒæ­¥æ¨¡å¼åœ¨ trigger åŽè¢«æ¶ˆè€—ï¼Œmove_xy_relative æœªæ¢å¤**
+2. ä¿®å¤åŒæ­¥ï¼šå‘åŒ…å‰åŽåŒ `motorSyncEnable(1)` + ç§»é™¤ osDelay(2) â†’ error æ¶ˆå¤±ï¼Œä½† **Y è½´ä¸è¿åŠ¨**
+3. æ¢å¤ osDelay(2)ï¼šæ— å»¶æ—¶ Y çš„ 0xF5 è·è§¦å‘ä»… ~100Î¼sï¼ŒMKS æ¥ä¸åŠç¼“å­˜ â†’ Y è¢«è·³è¿‡
+4. å¾®è°ƒ acc 10â†’25ï¼šåœ¨æ‰­çŸ©éœ€æ±‚å’ŒåŠ é€ŸæŒç»­æ—¶é—´ä¹‹é—´æŠ˜ä¸­
+5. MKS ç¡¬ä»¶ä¸Šè°ƒé«˜ X1 å·¥ä½œç”µæµï¼ˆMaï¼Œ0x83 æŒ‡ä»¤ï¼‰ï¼šè¡¥å¿ X1 é¢å¤–æœºæ¢°è´Ÿè½½ï¼Œé™ä½Žè·Ÿéšè¯¯å·®ã€‚ä¿æŒç”µæµ HoldMa ä¸è°ƒæ•´
 
-**×îÖÕ×´Ì¬**£ºspeed=300, acc=25£¬`move_xy_relative` ´øÍ¬²½Ë«±£ÏÕ + osDelay(2) Ê±Ðò±£»¤£¬X1 µçÁ÷ÔÚ MKS µ÷²ÎÈí¼þÖÐµ¥¶ÀÌáÉý¡£
+**æœ€ç»ˆçŠ¶æ€**ï¼šspeed=300, acc=25ï¼Œ`move_xy_relative` å¸¦åŒæ­¥åŒä¿é™© + osDelay(2) æ—¶åºä¿æŠ¤ï¼ŒX1 ç”µæµåœ¨ MKS è°ƒå‚è½¯ä»¶ä¸­å•ç‹¬æå‡ã€‚
 
-## Ê®¶þ¡¢TouchGFX + FreeRTOS ÒÆÖ²ÈÕÖ¾£¨2026-05£©
+## åäºŒã€TouchGFX + FreeRTOS ç§»æ¤æ—¥å¿—ï¼ˆ2026-05ï¼‰
 
-### 12.1 ÒÆÖ²¸ÅÊö
+### 12.1 ç§»æ¤æ¦‚è¿°
 
-| ÏîÄ¿ | ÒÆÖ²Ç°×´Ì¬ | ÒÆÖ²ºó×´Ì¬ |
+| é¡¹ç›® | ç§»æ¤å‰çŠ¶æ€ | ç§»æ¤åŽçŠ¶æ€ |
 |------|-----------|-----------|
-| TouchGFX | Âã»ú main() while(1) ÂÖÑ¯ | ¶ÀÁ¢ TouchGFX_Task£¨Õ» 8192B£© |
-| VSYNC ÐÅºÅ | Î´ÊµÏÖ | TIM7 Ó²¼þ¶¨Ê±Æ÷ 30Hz Ä£Äâ VSYNC |
-| LCD Çý¶¯ | HAL_Delay ÒÀÀµ Systick | BusyDelay Ã¦µÈÌæ´ú£¬ÒÆ³ý HAL_Delay |
-| °´¼üÇý¶¯ | Âã»úÂÖÑ¯ | FreeRTOS Key_Task£¨10ms ÖÜÆÚ£© + ÏûÏ¢¶ÓÁÐ |
-| Ö÷ÏµÍ³?GUI Í¨ÐÅ | È«¾Ö±äÁ¿ÂÖÑ¯ | FreeRTOS ÏûÏ¢¶ÓÁÐ£¨Data_Transfer£© |
-| ÏµÍ³Ê±»ù | Systick | TIM6£¨HAL ÏµÍ³Ê±»ù£© |
+| TouchGFX | è£¸æœº main() while(1) è½®è¯¢ | ç‹¬ç«‹ TouchGFX_Taskï¼ˆæ ˆ 8192Bï¼‰ |
+| VSYNC ä¿¡å· | æœªå®žçŽ° | TIM7 ç¡¬ä»¶å®šæ—¶å™¨ 30Hz æ¨¡æ‹Ÿ VSYNC |
+| LCD é©±åŠ¨ | HAL_Delay ä¾èµ– Systick | BusyDelay å¿™ç­‰æ›¿ä»£ï¼Œç§»é™¤ HAL_Delay |
+| æŒ‰é”®é©±åŠ¨ | è£¸æœºè½®è¯¢ | FreeRTOS Key_Taskï¼ˆ10ms å‘¨æœŸï¼‰ + æ¶ˆæ¯é˜Ÿåˆ— |
+| ä¸»ç³»ç»Ÿ?GUI é€šä¿¡ | å…¨å±€å˜é‡è½®è¯¢ | FreeRTOS æ¶ˆæ¯é˜Ÿåˆ—ï¼ˆData_Transferï¼‰ |
+| ç³»ç»Ÿæ—¶åŸº | Systick | TIM6ï¼ˆHAL ç³»ç»Ÿæ—¶åŸºï¼‰ |
 
-### 12.2 ÐÂÔöÎÄ¼þÇåµ¥
+### 12.2 æ–°å¢žæ–‡ä»¶æ¸…å•
 
-| ÎÄ¼þ | ËµÃ÷ |
+| æ–‡ä»¶ | è¯´æ˜Ž |
 |------|------|
-| `TouchGFX/target/KeyController.cpp` | °´¼ü¿ØÖÆÆ÷£¬Ïû·Ñ keyEventQueue£¬ËÉ¿ª´¥·¢ |
-| `TouchGFX/target/KeyController.hpp` | KeyController Í·ÎÄ¼þ£¬¼Ì³Ð ButtonController |
-| `TouchGFX/gui/src/model/Data_Transfer.c` | Ö÷ÏµÍ³?GUI ÏûÏ¢¶ÓÁÐÄ£¿é |
-| `TouchGFX/gui/include/gui/model/Data_Transfer.h` | Data_Transfer Í·ÎÄ¼þ |
-| `TouchGFX/gui/src/containers/circleProgress.cpp` | Ô²ÐÎ½ø¶ÈÌõÈÝÆ÷ |
-| `TouchGFX/gui/include/gui/containers/circleProgress.hpp` | Ô²ÐÎ½ø¶ÈÌõÍ·ÎÄ¼þ |
-| `Task/app_motor.c/h` | µç»úÓ¦ÓÃ²ãÈÎÎñ£¨´ýÊµÏÖ£© |
-| `startup_stm32g474xx.s` | Æô¶¯»ã±àÎÄ¼þ |
-| `.gitignore` | Git ºöÂÔ¹æÔò£¨Keil ¹¹½¨²úÎï£© |
+| `TouchGFX/target/KeyController.cpp` | æŒ‰é”®æŽ§åˆ¶å™¨ï¼Œæ¶ˆè´¹ keyEventQueueï¼Œæ¾å¼€è§¦å‘ |
+| `TouchGFX/target/KeyController.hpp` | KeyController å¤´æ–‡ä»¶ï¼Œç»§æ‰¿ ButtonController |
+| `TouchGFX/gui/src/model/Data_Transfer.c` | ä¸»ç³»ç»Ÿ?GUI æ¶ˆæ¯é˜Ÿåˆ—æ¨¡å— |
+| `TouchGFX/gui/include/gui/model/Data_Transfer.h` | Data_Transfer å¤´æ–‡ä»¶ |
+| `TouchGFX/gui/src/containers/circleProgress.cpp` | åœ†å½¢è¿›åº¦æ¡å®¹å™¨ |
+| `TouchGFX/gui/include/gui/containers/circleProgress.hpp` | åœ†å½¢è¿›åº¦æ¡å¤´æ–‡ä»¶ |
+| `Task/app_motor.c/h` | ç”µæœºåº”ç”¨å±‚ä»»åŠ¡ï¼ˆå¾…å®žçŽ°ï¼‰ |
+| `startup_stm32g474xx.s` | å¯åŠ¨æ±‡ç¼–æ–‡ä»¶ |
+| `.gitignore` | Git å¿½ç•¥è§„åˆ™ï¼ˆKeil æž„å»ºäº§ç‰©ï¼‰ |
 
-### 12.3 ÐÂÔö FreeRTOS ÈÎÎñ
+### 12.3 æ–°å¢ž FreeRTOS ä»»åŠ¡
 
-| ÈÎÎñÃû | Èë¿Úº¯Êý | Õ»´óÐ¡ | ÓÅÏÈ¼¶ | ÖÜÆÚ/´¥·¢ | ¹¦ÄÜ |
+| ä»»åŠ¡å | å…¥å£å‡½æ•° | æ ˆå¤§å° | ä¼˜å…ˆçº§ | å‘¨æœŸ/è§¦å‘ | åŠŸèƒ½ |
 |--------|---------|--------|--------|----------|------|
-| `TouchGFX_Task` | `TouchGFX_Task` | 8192 | Normal | VSYNC Çý¶¯ | GUI äÖÈ¾£¨ST7306_Init ¡ú touchgfx_taskEntry£© |
-| `Key_Task` | `Key_Task` | 256 | Normal | 10ms | 5¼üÓ²¼þÉ¨Ãè + Ïû¶¶ ¡ú keyEventQueue |
+| `TouchGFX_Task` | `TouchGFX_Task` | 8192 | Normal | VSYNC é©±åŠ¨ | GUI æ¸²æŸ“ï¼ˆST7306_Init â†’ touchgfx_taskEntryï¼‰ |
+| `Key_Task` | `Key_Task` | 256 | Normal | 10ms | 5é”®ç¡¬ä»¶æ‰«æ + æ¶ˆæŠ– â†’ keyEventQueue |
 
-### 12.4 ÐÂÔö FreeRTOS Í¨ÐÅ¶ÔÏó
+### 12.4 æ–°å¢ž FreeRTOS é€šä¿¡å¯¹è±¡
 
-| ¶ÔÏó | ÀàÐÍ | ¶¨ÒåÎ»ÖÃ | ÓÃÍ¾ |
+| å¯¹è±¡ | ç±»åž‹ | å®šä¹‰ä½ç½® | ç”¨é€” |
 |------|------|---------|------|
-| `keyEventQueue` | osMessageQueue(16) | app_freertos.c | Key_Task ¡ú KeyController ¡ú TouchGFX |
-| `dataTransferQueue` | osMessageQueue(16) | app_freertos.c | Ö÷ÏµÍ³ Task ¡ú Model::processQueue() ¡ú UI ¸üÐÂ |
-| `frame_buffer_sem` | osSemaphore(1) | OSWrappers.cpp | TouchGFX Ö¡»º³å»¥³â |
-| `vsync_queue` | osMessageQueue(1) | OSWrappers.cpp | TIM7 ISR ¡ú TouchGFX äÖÈ¾Ñ­»· |
+| `keyEventQueue` | osMessageQueue(16) | app_freertos.c | Key_Task â†’ KeyController â†’ TouchGFX |
+| `dataTransferQueue` | osMessageQueue(16) | app_freertos.c | ä¸»ç³»ç»Ÿ Task â†’ Model::processQueue() â†’ UI æ›´æ–° |
+| `frame_buffer_sem` | osSemaphore(1) | OSWrappers.cpp | TouchGFX å¸§ç¼“å†²äº’æ–¥ |
+| `vsync_queue` | osMessageQueue(1) | OSWrappers.cpp | TIM7 ISR â†’ TouchGFX æ¸²æŸ“å¾ªçŽ¯ |
 
-### 12.5 TouchGFX ÒÆÖ²ÏêÏ¸²½Öè
+### 12.5 TouchGFX ç§»æ¤è¯¦ç»†æ­¥éª¤
 
-#### 12.5.1 CubeMX ÅäÖÃ
+#### 12.5.1 CubeMX é…ç½®
 - FreeRTOS: CMSIS_V2, TICK_RATE_HZ=1000, TOTAL_HEAP_SIZE=32768, heap_4
-- TIM6: HAL ÏµÍ³Ê±»ù£¨Ìæ´ú Systick£©
-- TIM7: TouchGFX VSYNC ÐÅºÅÔ´£¨Prescaler=169, Period=33333 ¡ú 30Hz@170MHz£©
-- SPI2: ST7306 LCD Í¨ÐÅ
+- TIM6: HAL ç³»ç»Ÿæ—¶åŸºï¼ˆæ›¿ä»£ Systickï¼‰
+- TIM7: TouchGFX VSYNC ä¿¡å·æºï¼ˆPrescaler=169, Period=33333 â†’ 30Hz@170MHzï¼‰
+- SPI2: ST7306 LCD é€šä¿¡
 
-#### 12.5.2 VSYNC ÐÅºÅÁ´Â·
+#### 12.5.2 VSYNC ä¿¡å·é“¾è·¯
 ```
-TIM7 (30Hz) ¡ú TIM7_DAC_IRQHandler ¡ú TouchGFX_VSYNC_IRQCallback()
-  ¡ú touchgfxSignalVSync()
-    ¡ú HAL::vSync() + OSWrappers::signalVSync()
-      ¡ú vsync_queue ¡ú TouchGFX äÖÈ¾Ñ­»·»½ÐÑ
+TIM7 (30Hz) â†’ TIM7_DAC_IRQHandler â†’ TouchGFX_VSYNC_IRQCallback()
+  â†’ touchgfxSignalVSync()
+    â†’ HAL::vSync() + OSWrappers::signalVSync()
+      â†’ vsync_queue â†’ TouchGFX æ¸²æŸ“å¾ªçŽ¯å”¤é†’
 ```
 
-**¹Ø¼üÊµÏÖÎÄ¼þ£º**
-- `Core/Src/stm32g4xx_it.c:415` ¡ª `TouchGFX_VSYNC_IRQCallback()` µ÷ÓÃµã
-- `TouchGFX/target/TouchGFXHAL.cpp:43-58` ¡ª `TouchGFX_VSYNC_TimerInit()` / `TouchGFX_VSYNC_IRQCallback()`
+**å…³é”®å®žçŽ°æ–‡ä»¶ï¼š**
+- `Core/Src/stm32g4xx_it.c:415` â€” `TouchGFX_VSYNC_IRQCallback()` è°ƒç”¨ç‚¹
+- `TouchGFX/target/TouchGFXHAL.cpp:43-58` â€” `TouchGFX_VSYNC_TimerInit()` / `TouchGFX_VSYNC_IRQCallback()`
 
-#### 12.5.3 HAL ³õÊ¼»¯Ë³Ðò
+#### 12.5.3 HAL åˆå§‹åŒ–é¡ºåº
 ```
-MX_TouchGFX_PreOSInit()  ¡ú ¿Õ
-MX_TouchGFX_Init()       ¡ú touchgfx_components_init() + touchgfx_init()
-  touchgfx_init()        ¡ú FrontendHeap::getInstance() ¡ú gotoStartScreen() ¡ú hal.initialize()
-    HAL::initialize()    ¡ú OSWrappers::initialize() (´´½¨ FreeRTOS ÐÅºÅÁ¿/¶ÓÁÐ)
-    TouchGFXHAL::initialize() ¡ú setButtonController(&keyController) + isInited=1
+MX_TouchGFX_PreOSInit()  â†’ ç©º
+MX_TouchGFX_Init()       â†’ touchgfx_components_init() + touchgfx_init()
+  touchgfx_init()        â†’ FrontendHeap::getInstance() â†’ gotoStartScreen() â†’ hal.initialize()
+    HAL::initialize()    â†’ OSWrappers::initialize() (åˆ›å»º FreeRTOS ä¿¡å·é‡/é˜Ÿåˆ—)
+    TouchGFXHAL::initialize() â†’ setButtonController(&keyController) + isInited=1
 osKernelStart()
   TouchGFX_Task:
     ST7306_Init(&hspi2)
     touchgfx_taskEntry()
-      enableLCDControllerInterrupt() ¡ú TouchGFX_VSYNC_TimerInit() ¡ú TIM7 Æô¶¯
-      backPorchExited() ¡ú swapFrameBuffers() + tick() ¡ú handlePendingScreenTransition()
-         ¡ú gotoScreen_HOMEScreenNoTransition() ¡ú äÖÈ¾ HOME ½çÃæ
-      Ö÷Ñ­»·: waitForVSync() ¡ú render ¡ú flushFrameBuffer() ¡ú ST7306_Refresh()
+      enableLCDControllerInterrupt() â†’ TouchGFX_VSYNC_TimerInit() â†’ TIM7 å¯åŠ¨
+      backPorchExited() â†’ swapFrameBuffers() + tick() â†’ handlePendingScreenTransition()
+         â†’ gotoScreen_HOMEScreenNoTransition() â†’ æ¸²æŸ“ HOME ç•Œé¢
+      ä¸»å¾ªçŽ¯: waitForVSync() â†’ render â†’ flushFrameBuffer() â†’ ST7306_Refresh()
 ```
 
-### 12.6 °´¼üÏµÍ³¼Ü¹¹
+### 12.6 æŒ‰é”®ç³»ç»Ÿæž¶æž„
 
-#### 12.6.1 ÊÂ¼þÁ÷
+#### 12.6.1 äº‹ä»¶æµ
 ```
-Key_Task (10ms FreeRTOS ÈÎÎñ)
-  ¡ú Key_Scan()                    // Èí¼þÏû¶¶£¨10ms ²ÉÑù)
-  ¡ú keyEventQueue                 // KeyEvent_t {key_id, type: 0=ËÉ¿ª 1=°´ÏÂ}
+Key_Task (10ms FreeRTOS ä»»åŠ¡)
+  â†’ Key_Scan()                    // è½¯ä»¶æ¶ˆæŠ–ï¼ˆ10ms é‡‡æ ·)
+  â†’ keyEventQueue                 // KeyEvent_t {key_id, type: 0=æ¾å¼€ 1=æŒ‰ä¸‹}
 
-KeyController::sample()           // TouchGFX ¿ò¼ÜÃ¿Ö¡µ÷ÓÃ£¬Î¨Ò»Ïû·ÑÕß
-  ¡ú ½ö´¦Àí type==0£¨ËÉ¿ª/µ¥»÷£©
-  ¡ú TouchGFX ¿ò¼Ü ¡ú handleKeyEvent(key_id)
-    ¡ú Screen_HOMEView::handleKeyEvent()
-      ¡ú PageTable::handleKey(key)
-        ©À©¤ KEY_DOWN (2)  ¡ú ¹â±êÏÂÒÆ (page_cnt+1)%4
-        ©À©¤ KEY_UP   (3)  ¡ú ¹â±êÉÏÒÆ (page_cnt+3)%4
-        ©À©¤ KEY_KEY1 (0)  ¡ú ÇÐ»»ÏêÇéÃæ°å
-        ©¸©¤ KEY_KEY2 (1)  ¡ú ½øÈëÑ¡ÖÐÒ³Ãæ/gotoScreen
+KeyController::sample()           // TouchGFX æ¡†æž¶æ¯å¸§è°ƒç”¨ï¼Œå”¯ä¸€æ¶ˆè´¹è€…
+  â†’ ä»…å¤„ç† type==0ï¼ˆæ¾å¼€/å•å‡»ï¼‰
+  â†’ TouchGFX æ¡†æž¶ â†’ handleKeyEvent(key_id)
+    â†’ Screen_HOMEView::handleKeyEvent()
+      â†’ PageTable::handleKey(key)
+        â”œâ”€ KEY_DOWN (2)  â†’ å…‰æ ‡ä¸‹ç§» (page_cnt+1)%4
+        â”œâ”€ KEY_UP   (3)  â†’ å…‰æ ‡ä¸Šç§» (page_cnt+3)%4
+        â”œâ”€ KEY_KEY1 (0)  â†’ åˆ‡æ¢è¯¦æƒ…é¢æ¿
+        â””â”€ KEY_KEY2 (1)  â†’ è¿›å…¥é€‰ä¸­é¡µé¢/gotoScreen
 ```
 
-#### 12.6.2 °´¼ü ID Ó³Éä
-| ID | ºê | Òý½Å | ¹¦ÄÜ |
+#### 12.6.2 æŒ‰é”® ID æ˜ å°„
+| ID | å® | å¼•è„š | åŠŸèƒ½ |
 |----|-----|------|------|
-| 0 | KEY_KEY1 | PC6 | ÇÐ»»ÏêÇé |
-| 1 | KEY_KEY2 | PC7 | È·ÈÏ/½øÈë |
-| 2 | KEY_DOWN | PC8 | ¹â±êÏÂÒÆ |
-| 3 | KEY_UP | PA8 | ¹â±êÉÏÒÆ |
-| 4 | KEY_PUSH | PC9 | °´Ñ¹ |
+| 0 | KEY_KEY1 | PC6 | åˆ‡æ¢è¯¦æƒ… |
+| 1 | KEY_KEY2 | PC7 | ç¡®è®¤/è¿›å…¥ |
+| 2 | KEY_DOWN | PC8 | å…‰æ ‡ä¸‹ç§» |
+| 3 | KEY_UP | PA8 | å…‰æ ‡ä¸Šç§» |
+| 4 | KEY_PUSH | PC9 | æŒ‰åŽ‹ |
 
-> ?? CW/CCW Òý½ÅÓë AGENTS.md ¡ì¶þ ²»Ò»ÖÂ£¨¹æ¸ñ: CW=PA8, CCW=PC8£©£¬·´Ó³±àÂëÆ÷ÎïÀí°²×°·½Ïò
+> ?? CW/CCW å¼•è„šä¸Ž AGENTS.md Â§äºŒ ä¸ä¸€è‡´ï¼ˆè§„æ ¼: CW=PA8, CCW=PC8ï¼‰ï¼Œåæ˜ ç¼–ç å™¨ç‰©ç†å®‰è£…æ–¹å‘
 
-#### 12.6.3 ¹Ø¼ü API
-| º¯Êý | ÎÄ¼þ | ËµÃ÷ |
+#### 12.6.3 å…³é”® API
+| å‡½æ•° | æ–‡ä»¶ | è¯´æ˜Ž |
 |------|------|------|
-| `Key_Init()` | key.c | GPIO ³õÊ¼»¯£¨ÉÏÀ­ÊäÈë£¬µÍÓÐÐ§£© |
-| `Key_Scan()` | key.c | Ïû¶¶É¨Ãè£¨Ã¿10msµ÷ÓÃ£©£¬²úÉú press/release ÊÂ¼þ |
-| `Key_GetEvent()` | key.c | ¶ÁÈ¡ËÉ¿ªÊÂ¼þ£¨µ¥»÷£© |
-| `Key_GetPressEvent()` | key.c | ¶ÁÈ¡°´ÏÂÊÂ¼þ |
-| `Key_IsAnyPressed()` | key.c | ²éÑ¯ÊµÊ±°´¼ü×´Ì¬£¨·µ»ØÊ×¸ö°´ÏÂ¼üID£¬ÎÞ°´¼ü0xFF£© |
-| `KeyController::sample()` | KeyController.cpp | TouchGFX ¿ò¼Ü½Ó¿Ú£¬Ïû·Ñ keyEventQueue£¨ËÉ¿ª´¥·¢£© |
-| `PageTable::handleKey()` | PageTable.cpp | UI °´¼üÂ·ÓÉ£¨HOME/IMPORT/LOG/RESET ÇÐ»»£© |
+| `Key_Init()` | key.c | GPIO åˆå§‹åŒ–ï¼ˆä¸Šæ‹‰è¾“å…¥ï¼Œä½Žæœ‰æ•ˆï¼‰ |
+| `Key_Scan()` | key.c | æ¶ˆæŠ–æ‰«æï¼ˆæ¯10msè°ƒç”¨ï¼‰ï¼Œäº§ç”Ÿ press/release äº‹ä»¶ |
+| `Key_GetEvent()` | key.c | è¯»å–æ¾å¼€äº‹ä»¶ï¼ˆå•å‡»ï¼‰ |
+| `Key_GetPressEvent()` | key.c | è¯»å–æŒ‰ä¸‹äº‹ä»¶ |
+| `Key_IsAnyPressed()` | key.c | æŸ¥è¯¢å®žæ—¶æŒ‰é”®çŠ¶æ€ï¼ˆè¿”å›žé¦–ä¸ªæŒ‰ä¸‹é”®IDï¼Œæ— æŒ‰é”®0xFFï¼‰ |
+| `KeyController::sample()` | KeyController.cpp | TouchGFX æ¡†æž¶æŽ¥å£ï¼Œæ¶ˆè´¹ keyEventQueueï¼ˆæ¾å¼€è§¦å‘ï¼‰ |
+| `PageTable::handleKey()` | PageTable.cpp | UI æŒ‰é”®è·¯ç”±ï¼ˆHOME/IMPORT/LOG/RESET åˆ‡æ¢ï¼‰ |
 
-### 12.7 ÒÑÐÞ¸´ÎÊÌâ
+### 12.7 å·²ä¿®å¤é—®é¢˜
 
-| ÎÊÌâ | ÏÖÏó | ¸ùÒò | ½â¾ö·½°¸ |
+| é—®é¢˜ | çŽ°è±¡ | æ ¹å›  | è§£å†³æ–¹æ¡ˆ |
 |------|------|------|----------|
-| **ÆÁÄ»²»ÏÔÊ¾** | ST7306_Init ºóÈ«ºÚ£¬touchgfx_taskEntry ÎÞÊä³ö | `stm32g4xx_it.c` ÖÐ `touchgfxSignalVSync()` ±»×¢ÊÍ£¬äÖÈ¾Ñ­»·ËÀËø | ISR ¸ÄÎªµ÷ÓÃ `TouchGFX_VSYNC_IRQCallback()` |
-| **TIM7 Æô¶¯Ê§°Ü** | enableLCDControllerInterrupt ºó waitForVSync ×èÈû | TouchGFX_VSYNC_TimerInit Ö» Stop+Init£¬²» Start | TimerInit Ä©Î²Ôö¼Ó `HAL_TIM_Base_Start_IT(&htim7)` |
-| **TIM7 ÓÅÏÈ¼¶²»µ±** | FreeRTOS API µ÷ÓÃ¿ÉÄÜÊ§°Ü | NVIC pri=5 ÔÚ configMAX_SYSCALL ±ß½ç | enableLCDControllerInterrupt ÖÐÉèÖÃ pri=14 |
-| **°´¼üÓ³Éä»ìÂÒ** | °´ KEY1 ´¥·¢ KEY_DOWN | KeyController Óë Model Ë«Â·Ïû·Ñ keyEventQueue + ÎÞÏû¶¶ GPIO ¶ÁÈ¡ | KeyController µ¥Â·Ïû·Ñ¶ÓÁÐ£»Model ÒÆ³ý°´¼ü´¦Àí |
-| **°´¼ü°´ÏÂ¼´´¥·¢** | ÆÚÍûËÉ¿ª´¥·¢ | Model ´¦Àí type==1£¨°´ÏÂÊÂ¼þ£© | ¸ÄÎª type==0£¨ËÉ¿ª/µ¥»÷ÊÂ¼þ£© |
-| **KeyController ²»¿ÉÓÃ** | ±àÒë±¨´í undefined symbol | KeyController.cpp Î´¼ÓÈë Keil ±àÒëÁÐ±í | Ìí¼Óµ½ pnp_1.uvprojx |
-| **LCD SPI ËÀËø** | ¿¨ÔÚ `while (!(hspi->SR & SPI_SR_TXE))` | HAL_Delay ÒÀÀµ uwTick£¬FreeRTOS Æô¶¯Ç° uwTick=0 | `BusyDelay()` Ìæ´ú `HAL_Delay()`£¨__NOP Ã¦µÈ£© |
-| **ST7306_Init ¿¨ËÀ** | HAL_GetTick ·µ»Ø 0£¬³¬Ê±Ñ­»·ËÀËø | HAL Ê±»ùÎ´³õÊ¼»¯ | CubeMX ÅäÖÃ TIM6 Îª HAL Ê±»ù£¨Ìæ´ú Systick£© |
-| **TouchGFXHAL.cpp ±àÒë±¨´í** | TIM7_IRQn / hspi2 / touchgfxSignalVSync Î´ÉùÃ÷ | Âã»ú´úÂëÖ±½ÓÕ³Ìù£¬È±ÉÙ RTOS ÊÊÅä | ÖØÐ´ HAL ³õÊ¼»¯Á÷³Ì |
-| **Data_Transfer ·ûºÅÖØ¸´** | dataTransferQueue multiply defined | È«¾Ö±äÁ¿ÔÚ¶à¸ö .c/.o ÖÐ¶¨Òå | ½öÔÚ app_freertos.c ¶¨Òå£¬ÆäËûÎÄ¼þ extern |
-| **TIM7 ISR ÖØ¸´¶¨Òå** | TIM7_DAC_IRQHandler multiply defined | CubeMX Éú³É + ×Ô¶¨Òå ISR ³åÍ» | É¾³ý×Ô¶¨Òå ISR£¬¸´ÓÃ stm32g4xx_it.c |
+| **å±å¹•ä¸æ˜¾ç¤º** | ST7306_Init åŽå…¨é»‘ï¼Œtouchgfx_taskEntry æ— è¾“å‡º | `stm32g4xx_it.c` ä¸­ `touchgfxSignalVSync()` è¢«æ³¨é‡Šï¼Œæ¸²æŸ“å¾ªçŽ¯æ­»é” | ISR æ”¹ä¸ºè°ƒç”¨ `TouchGFX_VSYNC_IRQCallback()` |
+| **TIM7 å¯åŠ¨å¤±è´¥** | enableLCDControllerInterrupt åŽ waitForVSync é˜»å¡ž | TouchGFX_VSYNC_TimerInit åª Stop+Initï¼Œä¸ Start | TimerInit æœ«å°¾å¢žåŠ  `HAL_TIM_Base_Start_IT(&htim7)` |
+| **TIM7 ä¼˜å…ˆçº§ä¸å½“** | FreeRTOS API è°ƒç”¨å¯èƒ½å¤±è´¥ | NVIC pri=5 åœ¨ configMAX_SYSCALL è¾¹ç•Œ | enableLCDControllerInterrupt ä¸­è®¾ç½® pri=14 |
+| **æŒ‰é”®æ˜ å°„æ··ä¹±** | æŒ‰ KEY1 è§¦å‘ KEY_DOWN | KeyController ä¸Ž Model åŒè·¯æ¶ˆè´¹ keyEventQueue + æ— æ¶ˆæŠ– GPIO è¯»å– | KeyController å•è·¯æ¶ˆè´¹é˜Ÿåˆ—ï¼›Model ç§»é™¤æŒ‰é”®å¤„ç† |
+| **æŒ‰é”®æŒ‰ä¸‹å³è§¦å‘** | æœŸæœ›æ¾å¼€è§¦å‘ | Model å¤„ç† type==1ï¼ˆæŒ‰ä¸‹äº‹ä»¶ï¼‰ | æ”¹ä¸º type==0ï¼ˆæ¾å¼€/å•å‡»äº‹ä»¶ï¼‰ |
+| **KeyController ä¸å¯ç”¨** | ç¼–è¯‘æŠ¥é”™ undefined symbol | KeyController.cpp æœªåŠ å…¥ Keil ç¼–è¯‘åˆ—è¡¨ | æ·»åŠ åˆ° pnp_1.uvprojx |
+| **LCD SPI æ­»é”** | å¡åœ¨ `while (!(hspi->SR & SPI_SR_TXE))` | HAL_Delay ä¾èµ– uwTickï¼ŒFreeRTOS å¯åŠ¨å‰ uwTick=0 | `BusyDelay()` æ›¿ä»£ `HAL_Delay()`ï¼ˆ__NOP å¿™ç­‰ï¼‰ |
+| **ST7306_Init å¡æ­»** | HAL_GetTick è¿”å›ž 0ï¼Œè¶…æ—¶å¾ªçŽ¯æ­»é” | HAL æ—¶åŸºæœªåˆå§‹åŒ– | CubeMX é…ç½® TIM6 ä¸º HAL æ—¶åŸºï¼ˆæ›¿ä»£ Systickï¼‰ |
+| **TouchGFXHAL.cpp ç¼–è¯‘æŠ¥é”™** | TIM7_IRQn / hspi2 / touchgfxSignalVSync æœªå£°æ˜Ž | è£¸æœºä»£ç ç›´æŽ¥ç²˜è´´ï¼Œç¼ºå°‘ RTOS é€‚é… | é‡å†™ HAL åˆå§‹åŒ–æµç¨‹ |
+| **Data_Transfer ç¬¦å·é‡å¤** | dataTransferQueue multiply defined | å…¨å±€å˜é‡åœ¨å¤šä¸ª .c/.o ä¸­å®šä¹‰ | ä»…åœ¨ app_freertos.c å®šä¹‰ï¼Œå…¶ä»–æ–‡ä»¶ extern |
+| **TIM7 ISR é‡å¤å®šä¹‰** | TIM7_DAC_IRQHandler multiply defined | CubeMX ç”Ÿæˆ + è‡ªå®šä¹‰ ISR å†²çª | åˆ é™¤è‡ªå®šä¹‰ ISRï¼Œå¤ç”¨ stm32g4xx_it.c |
 
-### 12.8 ÈÔ´æÔÚµÄÎÊÌâ£¨?? ´ý´¦Àí£©
+### 12.8 ä»å­˜åœ¨çš„é—®é¢˜ï¼ˆ?? å¾…å¤„ç†ï¼‰
 
-| ÎÊÌâ | Î»ÖÃ | ËµÃ÷ |
+| é—®é¢˜ | ä½ç½® | è¯´æ˜Ž |
 |------|------|------|
-| **keyEventQueue ±» KeyController Ã¿´ÎÖ»È¡1Ìõ** | KeyController.cpp | `osMessageQueueGet` Áã³¬Ê±Ö»È¡1Ìõ£¬¸ßÆµ°´¼ü¿ÉÄÜ¶Ñ»ý¡£¿É¸ÄÎª while Ñ­»·ÅÅ¿Õ |
-| **PageTable Î´´¦Àí KEY_PUSH** | PageTable.cpp | KEY_PUSH(id=4) ÎÞ case ·ÖÖ§ |
-| **ÆäËûÆÁÄ»Î´ÊµÏÖ handleKeyEvent** | IMPORT/LOG/RESET View | ½ö HOME ÆÁÄ»ÓÐ°´¼ü´¦Àí£¬ÇÐ»»µ½ÆäËûÆÁÄ»ºó°´¼üÎÞÏìÓ¦ |
-| **Data_Transfer ¸÷ case Î´ÊµÏÖ** | Model.cpp:processQueue() | DT_SMT_STATUS/DT_TEMP_CHANGE µÈ case ÌåÎª TODO ×¢ÊÍ |
-| **MCU ¸ºÔØÎ´¼à¿Ø** | TouchGFXHAL | Î´ÆôÓÃ `MCUInstrumentation`£¬ÎÞÖ¡ÂÊ/CPU Õ¼ÓÃÍ³¼Æ |
-| **TOUCHGFX_Framebuffer ¶ÎÎ´ÔÚÁ´½Ó½Å±¾¶¨Òå** | STM32G474XX_FLASH.ld | Ö¡»º³åÊ¹ÓÃ `LOCATION_PRAGMA_NOLOAD` ·ÅÖÃ£¬¿ÉÄÜÎ´ÕýÈ·¶ÔÆë |
-| **KeyController::sample() Î´Çå¿Õ°´ÏÂÊÂ¼þ** | KeyController.cpp | ½öÏû·Ñ type==0£¨ËÉ¿ª£©£¬°´ÏÂÊÂ¼þ(type==1)²ÐÁôÔÚ¶ÓÁÐÖÐ¡£Ëä²»´¥·¢µ«Õ¼ÓÃ¶ÓÁÐ¿Õ¼ä |
+| **keyEventQueue è¢« KeyController æ¯æ¬¡åªå–1æ¡** | KeyController.cpp | `osMessageQueueGet` é›¶è¶…æ—¶åªå–1æ¡ï¼Œé«˜é¢‘æŒ‰é”®å¯èƒ½å †ç§¯ã€‚å¯æ”¹ä¸º while å¾ªçŽ¯æŽ’ç©º |
+| **PageTable æœªå¤„ç† KEY_PUSH** | PageTable.cpp | KEY_PUSH(id=4) æ—  case åˆ†æ”¯ |
+| **å…¶ä»–å±å¹•æœªå®žçŽ° handleKeyEvent** | IMPORT/LOG/RESET View | ä»… HOME å±å¹•æœ‰æŒ‰é”®å¤„ç†ï¼Œåˆ‡æ¢åˆ°å…¶ä»–å±å¹•åŽæŒ‰é”®æ— å“åº” |
+| **Data_Transfer å„ case æœªå®žçŽ°** | Model.cpp:processQueue() | DT_SMT_STATUS/DT_TEMP_CHANGE ç­‰ case ä½“ä¸º TODO æ³¨é‡Š |
+| **MCU è´Ÿè½½æœªç›‘æŽ§** | TouchGFXHAL | æœªå¯ç”¨ `MCUInstrumentation`ï¼Œæ— å¸§çŽ‡/CPU å ç”¨ç»Ÿè®¡ |
+| **TOUCHGFX_Framebuffer æ®µæœªåœ¨é“¾æŽ¥è„šæœ¬å®šä¹‰** | STM32G474XX_FLASH.ld | å¸§ç¼“å†²ä½¿ç”¨ `LOCATION_PRAGMA_NOLOAD` æ”¾ç½®ï¼Œå¯èƒ½æœªæ­£ç¡®å¯¹é½ |
+| **KeyController::sample() æœªæ¸…ç©ºæŒ‰ä¸‹äº‹ä»¶** | KeyController.cpp | ä»…æ¶ˆè´¹ type==0ï¼ˆæ¾å¼€ï¼‰ï¼ŒæŒ‰ä¸‹äº‹ä»¶(type==1)æ®‹ç•™åœ¨é˜Ÿåˆ—ä¸­ã€‚è™½ä¸è§¦å‘ä½†å ç”¨é˜Ÿåˆ—ç©ºé—´ |
 
-### 12.9 ¹Ø¼ü´úÂëÂ·¾¶ËÙ²é
+### 12.9 å…³é”®ä»£ç è·¯å¾„é€ŸæŸ¥
 
-| ¹¦ÄÜ | Èë¿ÚÎÄ¼þ | ¹Ø¼üº¯Êý/ÐÐºÅ |
+| åŠŸèƒ½ | å…¥å£æ–‡ä»¶ | å…³é”®å‡½æ•°/è¡Œå· |
 |------|---------|-------------|
-| TouchGFX ÈÎÎñ | `TouchGFX/App/app_touchgfx.c` | `TouchGFX_Task():86-92` |
+| TouchGFX ä»»åŠ¡ | `TouchGFX/App/app_touchgfx.c` | `TouchGFX_Task():86-92` |
 | VSYNC ISR | `Core/Src/stm32g4xx_it.c` | `TIM7_DAC_IRQHandler:408-417` |
-| TIM7 ³õÊ¼»¯ | `TouchGFX/target/TouchGFXHAL.cpp` | `TouchGFX_VSYNC_TimerInit:43-49` |
-| HAL ³õÊ¼»¯ | `TouchGFX/target/TouchGFXHAL.cpp` | `TouchGFXHAL::initialize:68-73` |
-| Ö¡Ë¢ÐÂ | `TouchGFX/target/TouchGFXHAL.cpp` | `flushFrameBuffer:96-101` |
-| °´¼üÈÎÎñ | `Drivers/ZeMCU-G4/key.c` | `Key_Task:105-127` |
-| °´¼üÉ¨Ãè | `Drivers/ZeMCU-G4/key.c` | `Key_Scan:62-101` |
-| °´¼ü¿ØÖÆÆ÷ | `TouchGFX/target/KeyController.cpp` | `sample:16-26` |
-| ÏûÏ¢¶ÓÁÐ´¦Àí | `TouchGFX/gui/src/model/Model.cpp` | `processQueue:27-67` |
-| LCD ³õÊ¼»¯ | `st7306/lcd.c` | `ST7306_Init:176-188` |
-| LCD Ë¢ÐÂ | `st7306/lcd.c` | `ST7306_Refresh:209-215` |
-| 1bpp¡ú2¡Á4 ×ª»» | `TouchGFX/target/TouchGFXHAL.cpp` | `convert_1bpp_to_2x4:80-93` |
-| FreeRTOS ÈÎÎñ´´½¨ | `Core/Src/app_freertos.c` | `MX_FREERTOS_Init:165-222` |
-| ÈÎÎñÊôÐÔ¶¨Òå | `Core/Src/app_freertos.c` | `touchGFX_attributes:48-52` `keyTask_attributes:54-58` |
+| TIM7 åˆå§‹åŒ– | `TouchGFX/target/TouchGFXHAL.cpp` | `TouchGFX_VSYNC_TimerInit:43-49` |
+| HAL åˆå§‹åŒ– | `TouchGFX/target/TouchGFXHAL.cpp` | `TouchGFXHAL::initialize:68-73` |
+| å¸§åˆ·æ–° | `TouchGFX/target/TouchGFXHAL.cpp` | `flushFrameBuffer:96-101` |
+| æŒ‰é”®ä»»åŠ¡ | `Drivers/ZeMCU-G4/key.c` | `Key_Task:105-127` |
+| æŒ‰é”®æ‰«æ | `Drivers/ZeMCU-G4/key.c` | `Key_Scan:62-101` |
+| æŒ‰é”®æŽ§åˆ¶å™¨ | `TouchGFX/target/KeyController.cpp` | `sample:16-26` |
+| æ¶ˆæ¯é˜Ÿåˆ—å¤„ç† | `TouchGFX/gui/src/model/Model.cpp` | `processQueue:27-67` |
+| LCD åˆå§‹åŒ– | `st7306/lcd.c` | `ST7306_Init:176-188` |
+| LCD åˆ·æ–° | `st7306/lcd.c` | `ST7306_Refresh:209-215` |
+| 1bppâ†’2Ã—4 è½¬æ¢ | `TouchGFX/target/TouchGFXHAL.cpp` | `convert_1bpp_to_2x4:80-93` |
+| FreeRTOS ä»»åŠ¡åˆ›å»º | `Core/Src/app_freertos.c` | `MX_FREERTOS_Init:165-222` |
+| ä»»åŠ¡å±žæ€§å®šä¹‰ | `Core/Src/app_freertos.c` | `touchGFX_attributes:48-52` `keyTask_attributes:54-58` |
 
-| ÈÎÎñÊôÐÔ¶¨Òå | `Core/Src/app_freertos.c` | `touchGFX_attributes:48-52` `keyTask_attributes:54-58` |
-## Ê®Èý¡¢·Ö·¢ÖÐÊà£¨Data_Transfer Dispatcher£©Ð­ÒéÎÄµµ
+| ä»»åŠ¡å±žæ€§å®šä¹‰ | `Core/Src/app_freertos.c` | `touchGFX_attributes:48-52` `keyTask_attributes:54-58` |
+## åä¸‰ã€åˆ†å‘ä¸­æž¢ï¼ˆData_Transfer Dispatcherï¼‰åè®®æ–‡æ¡£
 
-> ±¾ÕÂ½Ú¹© Agent ºÍ¿ª·¢ÈËÔ±²Î¿¼£¬ÃèÊö FreeRTOS ? TouchGFX Ë«ÏòÍ¨ÐÅ¿ò¼Ü¡£
+> æœ¬ç« èŠ‚ä¾› Agent å’Œå¼€å‘äººå‘˜å‚è€ƒï¼Œæè¿° FreeRTOS ? TouchGFX åŒå‘é€šä¿¡æ¡†æž¶ã€‚
 
-### 13.1 ¼Ü¹¹¸ÅÀÀ
+### 13.1 æž¶æž„æ¦‚è§ˆ
 
 ```
-©°©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©´
-©¦     Data_Transfer.h/c        ©¦  ·Ö·¢ÖÐÊà£¨Î¨Ò»³öÈë¿Ú£©
-©¦   ©°©¤©¤©¤©¤©¤©¤©¤©¤©´  ©°©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©´  ©¦
-©¦   ©¦ Â·ÓÉ±í  ©¦  ©¦ DT_Dispatch©¦  ©¦
-©¦   ©¸©¤©¤©¤©¤©¤©¤©¤©¤©¼  ©¸©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¼  ©¦
-©¸©¤©¤©¤©¤©¤©¤©Ð©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©Ð©¤©¤©¤©¤©¤©¤©¤©¤©¼
-       ©¦  System¡úGUI  ©¦  GUI¡úSystem
-       ©¦  (Í¨Öª)      ©¦  (ÃüÁî)
-       ¨‹              ¨‹
-©°©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©´  ©°©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©´
-©¦dataTransferQ©¦  ©¦  guiCmdQueue  ©¦
-©¦ (ÒÑÓÐ)      ©¦  ©¦  (ÐÂÔö)       ©¦
-©¸©¤©¤©¤©¤©¤©¤©Ð©¤©¤©¤©¤©¤©¤©¼  ©¸©¤©¤©¤©¤©¤©¤©Ð©¤©¤©¤©¤©¤©¤©¤©¼
-       ©¦                ©¦
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚     Data_Transfer.h/c        â”‚  åˆ†å‘ä¸­æž¢ï¼ˆå”¯ä¸€å‡ºå…¥å£ï¼‰
+â”‚   â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”‚
+â”‚   â”‚ è·¯ç”±è¡¨  â”‚  â”‚ DT_Dispatchâ”‚  â”‚
+â”‚   â””â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”˜  â”‚
+â””â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”€â”˜
+       â”‚  Systemâ†’GUI  â”‚  GUIâ†’System
+       â”‚  (é€šçŸ¥)      â”‚  (å‘½ä»¤)
+       â–¼              â–¼
+â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”  â”Œâ”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”
+â”‚dataTransferQâ”‚  â”‚  guiCmdQueue  â”‚
+â”‚ (å·²æœ‰)      â”‚  â”‚  (æ–°å¢ž)       â”‚
+â””â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”˜  â””â”€â”€â”€â”€â”€â”€â”¬â”€â”€â”€â”€â”€â”€â”€â”˜
+       â”‚                â”‚
   Model::tick()    Model::processQueue()
-  ¡úprocessQueue()  ¡úDT_Dispatch()
-  ¡úModelListener   ¡úÂ·ÓÉ±í¡úhandler
-  ¡úPresenter¡úView  ¡úÏµÍ³ÈÎÎñ
+  â†’processQueue()  â†’DT_Dispatch()
+  â†’ModelListener   â†’è·¯ç”±è¡¨â†’handler
+  â†’Presenterâ†’View  â†’ç³»ç»Ÿä»»åŠ¡
 ```
 
-### 13.2 ÏûÏ¢ÀàÐÍËÙ²é±í
+### 13.2 æ¶ˆæ¯ç±»åž‹é€ŸæŸ¥è¡¨
 
-#### System ¡ú GUI£¨Í¨Öª£¬0x00~0x0F£©
-| ID | Ã¶¾Ù | Êý¾Ý×Ö¶Î | ·¢ËÍ API | Presenter »Øµ÷ |
+#### System â†’ GUIï¼ˆé€šçŸ¥ï¼Œ0x00~0x0Fï¼‰
+| ID | æžšä¸¾ | æ•°æ®å­—æ®µ | å‘é€ API | Presenter å›žè°ƒ |
 |----|------|---------|----------|---------------|
 | 0x00 | `DT_SMT_STATUS` | `.data.status` | `DT_NotifySMTStatus(u8)` | `onNotifySMTStatus(u8)` |
 | 0x01 | `DT_TEMP_CHANGE` | `.data.temp` | `DT_NotifyTemp(u16)` | `onNotifyTemp(u16)` |
 | 0x02 | `DT_DOWNLOAD_STATUS` | `.data.status` | `DT_NotifyDownloadStatus(u8)` | `onNotifyDownloadStatus(u8)` |
 | 0x03 | `DT_SMT_PROGRESS` | `.data.progress` | `DT_NotifySMTProgress(cur,total)` | `onNotifySMTProgress(u8,u8)` |
-| 0x04 | `DT_MOTOR_RESET_DONE` | ¡ª | `DT_NotifyMotorResetDone()` | `onNotifyMotorResetDone()` |
+| 0x04 | `DT_MOTOR_RESET_DONE` | â€” | `DT_NotifyMotorResetDone()` | `onNotifyMotorResetDone()` |
 | 0x05 | `DT_CUSTOM_MSG` | `.data.raw[0..1]` | `DT_NotifyCustom(code,param)` | `onNotifyCustom(u8,u8)` |
 
-#### GUI ¡ú System£¨ÃüÁî£¬0x10~0x2F£©
-| ID | Ã¶¾Ù | ²ÎÊý1 | ²ÎÊý2 | ¶ÔÓ¦ handler |
+#### GUI â†’ Systemï¼ˆå‘½ä»¤ï¼Œ0x10~0x2Fï¼‰
+| ID | æžšä¸¾ | å‚æ•°1 | å‚æ•°2 | å¯¹åº” handler |
 |----|------|-------|-------|-------------|
 | 0x10 | `DT_CMD_MOTOR_MOVE` | x(mm*100) | y(mm*100) | `_h_motor_move` |
-| 0x11 | `DT_CMD_MOTOR_STOP` | ¡ª | ¡ª | `_h_motor_stop` |
-| 0x12 | `DT_CMD_MOTOR_HOME` | ¡ª | ¡ª | `_h_motor_home` |
-| 0x13 | `DT_CMD_SMT_START` | ¡ª | ¡ª | `_h_smt_start` |
-| 0x14 | `DT_CMD_SMT_PAUSE` | ¡ª | ¡ª | `_h_smt_pause` |
-| 0x15 | `DT_CMD_HEATER_SET` | temp(0.1¡æ) | ¡ª | `_h_heater_set` |
-| 0x16 | `DT_CMD_SYSTEM_RESET` | ¡ª | ¡ª | `_h_system_reset` |
-| 0x1F | `DT_CMD_CUSTOM` | code | param | ×Ô¶¨Òå |
+| 0x11 | `DT_CMD_MOTOR_STOP` | â€” | â€” | `_h_motor_stop` |
+| 0x12 | `DT_CMD_MOTOR_HOME` | â€” | â€” | `_h_motor_home` |
+| 0x13 | `DT_CMD_SMT_START` | â€” | â€” | `_h_smt_start` |
+| 0x14 | `DT_CMD_SMT_PAUSE` | â€” | â€” | `_h_smt_pause` |
+| 0x15 | `DT_CMD_HEATER_SET` | temp(0.1â„ƒ) | â€” | `_h_heater_set` |
+| 0x16 | `DT_CMD_SYSTEM_RESET` | â€” | â€” | `_h_system_reset` |
+| 0x1F | `DT_CMD_CUSTOM` | code | param | è‡ªå®šä¹‰ |
 
-### 13.3 Ìí¼ÓÐÂÏûÏ¢µÄ²½Öè
+### 13.3 æ·»åŠ æ–°æ¶ˆæ¯çš„æ­¥éª¤
 
-**Step 1 ¡ª ¶¨Òå ID**£ºÔÚ `Data_Transfer.h` µÄ `DT_MsgType` Ã¶¾ÙÖÐÌí¼Ó¡£
-- System¡úGUI Í¨Öª£º¼ÓÔÚ `0x00~0x0F` Çø¶Î
-- GUI¡úSystem ÃüÁî£º¼ÓÔÚ `0x10~0x2F` Çø¶Î
+**Step 1 â€” å®šä¹‰ ID**ï¼šåœ¨ `Data_Transfer.h` çš„ `DT_MsgType` æžšä¸¾ä¸­æ·»åŠ ã€‚
+- Systemâ†’GUI é€šçŸ¥ï¼šåŠ åœ¨ `0x00~0x0F` åŒºæ®µ
+- GUIâ†’System å‘½ä»¤ï¼šåŠ åœ¨ `0x10~0x2F` åŒºæ®µ
 
-**Step 2 ¡ª ×¢²áÂ·ÓÉ**£¨½öÃüÁî·½ÏòÐèÒª£©£ºÔÚ `Data_Transfer.c` µÄ `s_routeTable[]` ÖÐÌí¼Ó£º
+**Step 2 â€” æ³¨å†Œè·¯ç”±**ï¼ˆä»…å‘½ä»¤æ–¹å‘éœ€è¦ï¼‰ï¼šåœ¨ `Data_Transfer.c` çš„ `s_routeTable[]` ä¸­æ·»åŠ ï¼š
 ```c
 { DT_CMD_YOUR_NEW_CMD, _h_your_handler, NULL },
 ```
 
-**Step 3 ¡ª ÊµÏÖ handler / ·¢ËÍº¯Êý**£º
-- ÃüÁî£ºÔÚ `Data_Transfer.c` Ä©Î²Ìí¼Ó `static void _h_xxx(const DT_Msg_t *msg)`
-- Í¨Öª£ºÔÚ `Data_Transfer.c` Ìí¼Ó `DT_NotifyXxx()` + ÔÚ `ModelListener.hpp` Ìí¼Ó `onNotifyXxx()` + ÔÚ `Model.cpp` µÄ switch ÖÐÌí¼Ó case
+**Step 3 â€” å®žçŽ° handler / å‘é€å‡½æ•°**ï¼š
+- å‘½ä»¤ï¼šåœ¨ `Data_Transfer.c` æœ«å°¾æ·»åŠ  `static void _h_xxx(const DT_Msg_t *msg)`
+- é€šçŸ¥ï¼šåœ¨ `Data_Transfer.c` æ·»åŠ  `DT_NotifyXxx()` + åœ¨ `ModelListener.hpp` æ·»åŠ  `onNotifyXxx()` + åœ¨ `Model.cpp` çš„ switch ä¸­æ·»åŠ  case
 
-### 13.4 Ê¹ÓÃÊ¾Àý
+### 13.4 ä½¿ç”¨ç¤ºä¾‹
 
-#### Ê¾Àý1£ºÏµÍ³ÈÎÎñÍ¨Öª GUI ÎÂ¶È±ä»¯
+#### ç¤ºä¾‹1ï¼šç³»ç»Ÿä»»åŠ¡é€šçŸ¥ GUI æ¸©åº¦å˜åŒ–
 ```c
-// ÔÚÈÎÒâ FreeRTOS ÈÎÎñÖÐ£¨Èç¼ÓÈÈÌ¨ÈÎÎñ£©
+// åœ¨ä»»æ„ FreeRTOS ä»»åŠ¡ä¸­ï¼ˆå¦‚åŠ çƒ­å°ä»»åŠ¡ï¼‰
 #include "gui/model/Data_Transfer.h"
 
 void Heater_Task(void *arg) {
     for (;;) {
-        uint16_t temp = read_thermocouple();  // ¶ÁÈ¡ÎÂ¶È (0.1¡æ)
-        DT_NotifyTemp(temp);                   // Í¨Öª GUI ¸üÐÂÏÔÊ¾
+        uint16_t temp = read_thermocouple();  // è¯»å–æ¸©åº¦ (0.1â„ƒ)
+        DT_NotifyTemp(temp);                   // é€šçŸ¥ GUI æ›´æ–°æ˜¾ç¤º
         osDelay(500);
     }
 }
 ```
 
-#### Ê¾Àý2£ºGUI °´Å¥´¥·¢µç»úÒÆ¶¯
+#### ç¤ºä¾‹2ï¼šGUI æŒ‰é’®è§¦å‘ç”µæœºç§»åŠ¨
 ```cpp
-// ÔÚ Presenter ÖÐ
+// åœ¨ Presenter ä¸­
 #include <gui/model/Model.hpp>
 
 void Screen_HOMEPresenter::onButtonMoveClicked()
 {
-    // ÒÆ¶¯µç»úµ½ (50.00mm, 30.00mm)£¬×ø±êÒÔ mm*100 Îªµ¥Î»
+    // ç§»åŠ¨ç”µæœºåˆ° (50.00mm, 30.00mm)ï¼Œåæ ‡ä»¥ mm*100 ä¸ºå•ä½
     model->sendCommand(DT_CMD_MOTOR_MOVE, 5000, 3000);
 }
 ```
 
-#### Ê¾Àý3£ºGUI °´Å¥Æô¶¯ÌùÆ¬
+#### ç¤ºä¾‹3ï¼šGUI æŒ‰é’®å¯åŠ¨è´´ç‰‡
 ```cpp
 void Screen_IMPORTPresenter::onStartSMTClicked()
 {
-    model->sendCommand(DT_CMD_SMT_START);  // ÎÞ²ÎÊýÃüÁî
+    model->sendCommand(DT_CMD_SMT_START);  // æ— å‚æ•°å‘½ä»¤
 }
 ```
 
-#### Ê¾Àý4£ºÏµÍ³ÈÎÎñ·¢ËÍ×Ô¶¨ÒåÍ¨Öª
+#### ç¤ºä¾‹4ï¼šç³»ç»Ÿä»»åŠ¡å‘é€è‡ªå®šä¹‰é€šçŸ¥
 ```c
-// ·¢ËÍ´øÁ½¸ö×Ö½Ú²ÎÊýµÄ×Ô¶¨ÒåÏûÏ¢
+// å‘é€å¸¦ä¸¤ä¸ªå­—èŠ‚å‚æ•°çš„è‡ªå®šä¹‰æ¶ˆæ¯
 DT_NotifyCustom(0xAB, 0xCD);
 
-// GUI Presenter ¶Ë½ÓÊÕ£º
+// GUI Presenter ç«¯æŽ¥æ”¶ï¼š
 void Screen_HOMEPresenter::onNotifyCustom(uint8_t code, uint8_t param)
 {
     if (code == 0xAB) {
-        // ´¦Àí×Ô¶¨ÒåÂß¼­
+        // å¤„ç†è‡ªå®šä¹‰é€»è¾‘
     }
 }
 ```
 
-### 13.5 ¹Ø¼üÎÄ¼þË÷Òý
+### 13.5 å…³é”®æ–‡ä»¶ç´¢å¼•
 
-| ÎÄ¼þ | ½ÇÉ« |
+| æ–‡ä»¶ | è§’è‰² |
 |------|------|
-| `TouchGFX/gui/include/gui/model/Data_Transfer.h` | ÏûÏ¢Ð­Òé¶¨Òå£¨Ã¶¾Ù+½á¹¹Ìå+APIÉùÃ÷£© |
-| `TouchGFX/gui/src/model/Data_Transfer.c` | Â·ÓÉ±í + ·Ö·¢º¯Êý + ·¢ËÍÊµÏÖ |
-| `TouchGFX/gui/include/gui/model/Model.hpp` | Model ÉùÃ÷£¨sendCommand Èë¿Ú£© |
-| `TouchGFX/gui/src/model/Model.cpp` | Ë«Ïò¶ÓÁÐÏû·Ñ£¨processQueue + dispatch£© |
-| `TouchGFX/gui/include/gui/model/ModelListener.hpp` | Presenter »Øµ÷½Ó¿Ú |
-| `Core/Src/app_freertos.c` | ¶ÓÁÐ´´½¨£¨guiCmdQueue£©+ DT_Init() |
+| `TouchGFX/gui/include/gui/model/Data_Transfer.h` | æ¶ˆæ¯åè®®å®šä¹‰ï¼ˆæžšä¸¾+ç»“æž„ä½“+APIå£°æ˜Žï¼‰ |
+| `TouchGFX/gui/src/model/Data_Transfer.c` | è·¯ç”±è¡¨ + åˆ†å‘å‡½æ•° + å‘é€å®žçŽ° |
+| `TouchGFX/gui/include/gui/model/Model.hpp` | Model å£°æ˜Žï¼ˆsendCommand å…¥å£ï¼‰ |
+| `TouchGFX/gui/src/model/Model.cpp` | åŒå‘é˜Ÿåˆ—æ¶ˆè´¹ï¼ˆprocessQueue + dispatchï¼‰ |
+| `TouchGFX/gui/include/gui/model/ModelListener.hpp` | Presenter å›žè°ƒæŽ¥å£ |
+| `Core/Src/app_freertos.c` | é˜Ÿåˆ—åˆ›å»ºï¼ˆguiCmdQueueï¼‰+ DT_Init() |
 
-### 13.6 Éè¼ÆÔ­Ôò
+### 13.6 è®¾è®¡åŽŸåˆ™
 
-1. **µ¥Ò»Èë¿Ú**£ºËùÓÐ FreeRTOS?GUI Í¨ÐÅ±ØÐë¾­¹ý `Data_Transfer.h` µÄ API£¬½ûÖ¹Ö±½Ó²Ù×÷È«¾Ö±äÁ¿
-2. **Â·ÓÉ½âñî**£ºGUI ¶ËÖ»µ÷ÓÃ `Model::sendCommand()`£¬²»¹ØÐÄÃüÁîÈçºÎµ½´ïÄ¿±ê
-3. **ÃüÃûÔ¼¶¨**£º`DT_xxx` = Í¨Öª£¬`DT_CMD_xxx` = ÃüÁî£¬`onNotifyXxx` = Presenter »Øµ÷
-4. **·Ç×èÈû**£ºËùÓÐ¶ÓÁÐ²Ù×÷Ê¹ÓÃ `osMessageQueuePut/Get` Áã³¬Ê±£¬²»×èÈûäÖÈ¾Ñ­»·
-5. **Ïòºó¼æÈÝ**£ºÈ«¾Ö±äÁ¿ `if_now_SMT`/`total_SMT`/`now_SMT`/`Temp`/`if_DOWNLOAD_READY` ±£Áô¿ÉÓÃ£¬µ«ÐÂ´úÂëÓ¦Í¨¹ý `DT_Notify*` ÏµÁÐº¯Êý¸üÐÂ
-## Ê®ËÄ¡¢ÈÎÎñ±¨¸æ ¡ª TouchGFX FreeRTOS ÒÆÖ² + ·Ö·¢ÖÐÊà£¨2026-05-20~21£©£¨ºóÐøÈÎÎñ±¨¸æ¿ÉÔÚ´Ë»ù´¡ÉÏ½øÐÐÑÓÉê£©
+1. **å•ä¸€å…¥å£**ï¼šæ‰€æœ‰ FreeRTOS?GUI é€šä¿¡å¿…é¡»ç»è¿‡ `Data_Transfer.h` çš„ APIï¼Œç¦æ­¢ç›´æŽ¥æ“ä½œå…¨å±€å˜é‡
+2. **è·¯ç”±è§£è€¦**ï¼šGUI ç«¯åªè°ƒç”¨ `Model::sendCommand()`ï¼Œä¸å…³å¿ƒå‘½ä»¤å¦‚ä½•åˆ°è¾¾ç›®æ ‡
+3. **å‘½åçº¦å®š**ï¼š`DT_xxx` = é€šçŸ¥ï¼Œ`DT_CMD_xxx` = å‘½ä»¤ï¼Œ`onNotifyXxx` = Presenter å›žè°ƒ
+4. **éžé˜»å¡ž**ï¼šæ‰€æœ‰é˜Ÿåˆ—æ“ä½œä½¿ç”¨ `osMessageQueuePut/Get` é›¶è¶…æ—¶ï¼Œä¸é˜»å¡žæ¸²æŸ“å¾ªçŽ¯
+5. **å‘åŽå…¼å®¹**ï¼šå…¨å±€å˜é‡ `if_now_SMT`/`total_SMT`/`now_SMT`/`Temp`/`if_DOWNLOAD_READY` ä¿ç•™å¯ç”¨ï¼Œä½†æ–°ä»£ç åº”é€šè¿‡ `DT_Notify*` ç³»åˆ—å‡½æ•°æ›´æ–°
+## åå››ã€ä»»åŠ¡æŠ¥å‘Š â€” TouchGFX FreeRTOS ç§»æ¤ + åˆ†å‘ä¸­æž¢ï¼ˆ2026-05-20~21ï¼‰ï¼ˆåŽç»­ä»»åŠ¡æŠ¥å‘Šå¯åœ¨æ­¤åŸºç¡€ä¸Šè¿›è¡Œå»¶ç”³ï¼‰
 
-### 14.1 ÈÎÎñ¸ÅÊö
+### 14.1 ä»»åŠ¡æ¦‚è¿°
 
-½« STM32G474 ÌùÆ¬»úÏîÄ¿ÖÐµÄ TouchGFX GUI¡¢ST7306 LCD Çý¶¯¡¢5¼ü°´¼üÇý¶¯´ÓÂã»úÇ¨ÒÆµ½ FreeRTOS£¬
-²¢´î½¨Í³Ò»µÄ·Ö·¢ÖÐÊà£¨Dispatcher£©ÊµÏÖ FreeRTOS ? TouchGFX Ë«ÏòÍ¨ÐÅ¡£
+å°† STM32G474 è´´ç‰‡æœºé¡¹ç›®ä¸­çš„ TouchGFX GUIã€ST7306 LCD é©±åŠ¨ã€5é”®æŒ‰é”®é©±åŠ¨ä»Žè£¸æœºè¿ç§»åˆ° FreeRTOSï¼Œ
+å¹¶æ­å»ºç»Ÿä¸€çš„åˆ†å‘ä¸­æž¢ï¼ˆDispatcherï¼‰å®žçŽ° FreeRTOS ? TouchGFX åŒå‘é€šä¿¡ã€‚
 
-### 14.2 ÊµÏÖµÄ¹¦ÄÜÇåµ¥
+### 14.2 å®žçŽ°çš„åŠŸèƒ½æ¸…å•
 
-| ÐòºÅ | ¹¦ÄÜ | Éæ¼°ÎÄ¼þ |
+| åºå· | åŠŸèƒ½ | æ¶‰åŠæ–‡ä»¶ |
 |------|------|----------|
-| 1 | VSYNC ÐÅºÅÐÞ¸´£¨ÆÁÄ»µãÁÁ£© | `Core/Src/stm32g4xx_it.c`, `TouchGFX/target/TouchGFXHAL.cpp` |
-| 2 | TIM7 ¶¨Ê±Æ÷ÆôÍ£Ê±ÐòÐÞ¸´ | `TouchGFX/target/TouchGFXHAL.cpp` |
-| 3 | FreeRTOS °²È« NVIC ÓÅÏÈ¼¶ÅäÖÃ | `TouchGFX/target/TouchGFXHAL.cpp` |
-| 4 | Key_Task ´´½¨£¨10ms É¨ÃèÖÜÆÚ£© | `Core/Src/app_freertos.c` |
-| 5 | °´¼üÏû¶¶ + ËÉ¿ª´¥·¢ÊÂ¼þÁ÷ | `Drivers/ZeMCU-G4/key.c`, `TouchGFX/target/KeyController.cpp` |
-| 6 | KeyController HAL ×¢²á£¨ButtonController ¿ò¼Ü£© | `TouchGFX/target/TouchGFXHAL.cpp`, `KeyController.cpp` |
-| 7 | °´¼ü¡úUI µ¼º½£¨HOME/IMPORT/LOG/RESET ÇÐ»»£© | `TouchGFX/gui/src/containers/PageTable.cpp` |
-| 8 | TouchGFX_Task ¾«¼ò£¨ÒÆ³ýµ÷ÊÔ´úÂë£© | `TouchGFX/App/app_touchgfx.c` |
-| 9 | Model °´¼üÏû·ÑÒÆ³ý£¨±ÜÃâË«Â·¾ºÕù£© | `TouchGFX/gui/src/model/Model.cpp` |
-| 10 | ·Ö·¢ÖÐÊà ¡ª Í³Ò»ÏûÏ¢Ð­Òé£¨DT_Msg_t£© | `TouchGFX/gui/include/gui/model/Data_Transfer.h` |
-| 11 | ·Ö·¢ÖÐÊà ¡ª Â·ÓÉ±í + DT_Dispatch() | `TouchGFX/gui/src/model/Data_Transfer.c` |
-| 12 | ·Ö·¢ÖÐÊà ¡ª System¡úGUI Í¨Öª·¢ËÍ API£¨6¸ö£© | `TouchGFX/gui/src/model/Data_Transfer.c` |
-| 13 | ·Ö·¢ÖÐÊà ¡ª GUI¡úSystem ÃüÁîÂ·ÓÉ£¨7¸ö handler£© | `TouchGFX/gui/src/model/Data_Transfer.c` |
-| 14 | ·Ö·¢ÖÐÊà ¡ª guiCmdQueue Ë«Ïò±Õ»· | `Core/Src/app_freertos.c`, `Model.cpp` |
-| 15 | ModelListener À©Õ¹£¨6¸ö onNotify* »Øµ÷£© | `TouchGFX/gui/include/gui/model/ModelListener.hpp` |
-| 16 | Model::sendCommand() ¡ª Presenter ·¢ÁîÈë¿Ú | `TouchGFX/gui/include/gui/model/Model.hpp`, `Model.cpp` |
-| 17 | Model::processQueue() ÊµÏÖÈ«²¿ case ·Ö·¢ | `TouchGFX/gui/src/model/Model.cpp` |
-| 18 | .gitignore ÍêÉÆ£¨¹¹½¨²úÎï + ÃÜÔ¿/Æ¾Ö¤±£»¤£© | `.gitignore` |
-| 19 | AGENTS.md ¸üÐÂ£¨¡ì12 ÒÆÖ²ÈÕÖ¾ + ¡ì13 Ð­ÒéÎÄµµ£© | `AGENTS.md` |
-| 20 | Keil ¹¤³ÌÌí¼Ó KeyController.cpp | `MDK-ARM/pnp_1.uvprojx` |
+| 1 | VSYNC ä¿¡å·ä¿®å¤ï¼ˆå±å¹•ç‚¹äº®ï¼‰ | `Core/Src/stm32g4xx_it.c`, `TouchGFX/target/TouchGFXHAL.cpp` |
+| 2 | TIM7 å®šæ—¶å™¨å¯åœæ—¶åºä¿®å¤ | `TouchGFX/target/TouchGFXHAL.cpp` |
+| 3 | FreeRTOS å®‰å…¨ NVIC ä¼˜å…ˆçº§é…ç½® | `TouchGFX/target/TouchGFXHAL.cpp` |
+| 4 | Key_Task åˆ›å»ºï¼ˆ10ms æ‰«æå‘¨æœŸï¼‰ | `Core/Src/app_freertos.c` |
+| 5 | æŒ‰é”®æ¶ˆæŠ– + æ¾å¼€è§¦å‘äº‹ä»¶æµ | `Drivers/ZeMCU-G4/key.c`, `TouchGFX/target/KeyController.cpp` |
+| 6 | KeyController HAL æ³¨å†Œï¼ˆButtonController æ¡†æž¶ï¼‰ | `TouchGFX/target/TouchGFXHAL.cpp`, `KeyController.cpp` |
+| 7 | æŒ‰é”®â†’UI å¯¼èˆªï¼ˆHOME/IMPORT/LOG/RESET åˆ‡æ¢ï¼‰ | `TouchGFX/gui/src/containers/PageTable.cpp` |
+| 8 | TouchGFX_Task ç²¾ç®€ï¼ˆç§»é™¤è°ƒè¯•ä»£ç ï¼‰ | `TouchGFX/App/app_touchgfx.c` |
+| 9 | Model æŒ‰é”®æ¶ˆè´¹ç§»é™¤ï¼ˆé¿å…åŒè·¯ç«žäº‰ï¼‰ | `TouchGFX/gui/src/model/Model.cpp` |
+| 10 | åˆ†å‘ä¸­æž¢ â€” ç»Ÿä¸€æ¶ˆæ¯åè®®ï¼ˆDT_Msg_tï¼‰ | `TouchGFX/gui/include/gui/model/Data_Transfer.h` |
+| 11 | åˆ†å‘ä¸­æž¢ â€” è·¯ç”±è¡¨ + DT_Dispatch() | `TouchGFX/gui/src/model/Data_Transfer.c` |
+| 12 | åˆ†å‘ä¸­æž¢ â€” Systemâ†’GUI é€šçŸ¥å‘é€ APIï¼ˆ6ä¸ªï¼‰ | `TouchGFX/gui/src/model/Data_Transfer.c` |
+| 13 | åˆ†å‘ä¸­æž¢ â€” GUIâ†’System å‘½ä»¤è·¯ç”±ï¼ˆ7ä¸ª handlerï¼‰ | `TouchGFX/gui/src/model/Data_Transfer.c` |
+| 14 | åˆ†å‘ä¸­æž¢ â€” guiCmdQueue åŒå‘é—­çŽ¯ | `Core/Src/app_freertos.c`, `Model.cpp` |
+| 15 | ModelListener æ‰©å±•ï¼ˆ6ä¸ª onNotify* å›žè°ƒï¼‰ | `TouchGFX/gui/include/gui/model/ModelListener.hpp` |
+| 16 | Model::sendCommand() â€” Presenter å‘ä»¤å…¥å£ | `TouchGFX/gui/include/gui/model/Model.hpp`, `Model.cpp` |
+| 17 | Model::processQueue() å®žçŽ°å…¨éƒ¨ case åˆ†å‘ | `TouchGFX/gui/src/model/Model.cpp` |
+| 18 | .gitignore å®Œå–„ï¼ˆæž„å»ºäº§ç‰© + å¯†é’¥/å‡­è¯ä¿æŠ¤ï¼‰ | `.gitignore` |
+| 19 | AGENTS.md æ›´æ–°ï¼ˆÂ§12 ç§»æ¤æ—¥å¿— + Â§13 åè®®æ–‡æ¡£ï¼‰ | `AGENTS.md` |
+| 20 | Keil å·¥ç¨‹æ·»åŠ  KeyController.cpp | `MDK-ARM/pnp_1.uvprojx` |
 
-### 14.3 ÐÞ¸´µÄÎÊÌâ
+### 14.3 ä¿®å¤çš„é—®é¢˜
 
-| # | ÎÊÌâ | ¸ùÒò | ½â¾ö·½°¸ |
+| # | é—®é¢˜ | æ ¹å›  | è§£å†³æ–¹æ¡ˆ |
 |---|------|------|----------|
-| 1 | ÆÁÄ»²»ÁÁ£¬¿¨ºÚÆÁ | stm32g4xx_it.c ÖÐ touchgfxSignalVSync() ±»×¢ÊÍ | ISR ¸ÄÎªµ÷ÓÃ TouchGFX_VSYNC_IRQCallback() |
-| 2 | TIM7 ²»Æô¶¯ | TouchGFX_VSYNC_TimerInit Ö» Stop+Init | Ä©Î²¼Ó HAL_TIM_Base_Start_IT |
-| 3 | °´¼üÓ³Éä»ìÂÒ | KeyController Óë Model Ë«Â·Ïû·Ñ keyEventQueue | KeyController µ¥Â·Ïû·Ñ£»Model ÒÆ³ý°´¼ü´¦Àí |
-| 4 | °´ÏÂ¼´´¥·¢£¨ÆÚÍûËÉ¿ª£© | Model ´¦Àí type==1 | ¸ÄÎª type==0£¨ËÉ¿ª/µ¥»÷£© |
-| 5 | KeyController ±àÒë±¨´í | Î´¼ÓÈë Keil ±àÒëÁÐ±í | Ìí¼Óµ½ pnp_1.uvprojx |
-| 6 | LCD ³õÊ¼»¯¿¨ËÀ | HAL_Delay ÒÀÀµ Systick£¨FreeRTOS Æô¶¯Ç° uwTick=0£© | BusyDelay() Ìæ´ú HAL_Delay() |
-| 7 | ¶ÓÁÐÀàÐÍÃû³åÍ» | ÐÂ¾É DataTransferMsg_t / DT_Msg_t | Í³Ò»Îª DT_Msg_t |
+| 1 | å±å¹•ä¸äº®ï¼Œå¡é»‘å± | stm32g4xx_it.c ä¸­ touchgfxSignalVSync() è¢«æ³¨é‡Š | ISR æ”¹ä¸ºè°ƒç”¨ TouchGFX_VSYNC_IRQCallback() |
+| 2 | TIM7 ä¸å¯åŠ¨ | TouchGFX_VSYNC_TimerInit åª Stop+Init | æœ«å°¾åŠ  HAL_TIM_Base_Start_IT |
+| 3 | æŒ‰é”®æ˜ å°„æ··ä¹± | KeyController ä¸Ž Model åŒè·¯æ¶ˆè´¹ keyEventQueue | KeyController å•è·¯æ¶ˆè´¹ï¼›Model ç§»é™¤æŒ‰é”®å¤„ç† |
+| 4 | æŒ‰ä¸‹å³è§¦å‘ï¼ˆæœŸæœ›æ¾å¼€ï¼‰ | Model å¤„ç† type==1 | æ”¹ä¸º type==0ï¼ˆæ¾å¼€/å•å‡»ï¼‰ |
+| 5 | KeyController ç¼–è¯‘æŠ¥é”™ | æœªåŠ å…¥ Keil ç¼–è¯‘åˆ—è¡¨ | æ·»åŠ åˆ° pnp_1.uvprojx |
+| 6 | LCD åˆå§‹åŒ–å¡æ­» | HAL_Delay ä¾èµ– Systickï¼ˆFreeRTOS å¯åŠ¨å‰ uwTick=0ï¼‰ | BusyDelay() æ›¿ä»£ HAL_Delay() |
+| 7 | é˜Ÿåˆ—ç±»åž‹åå†²çª | æ–°æ—§ DataTransferMsg_t / DT_Msg_t | ç»Ÿä¸€ä¸º DT_Msg_t |
 
-### 14.4 ÐÂÔöµÄ API
+### 14.4 æ–°å¢žçš„ API
 
-#### System ¡ú GUI Í¨Öª£¨C º¯Êý£¬ÈÎÒâÈÎÎñ¿Éµ÷ÓÃ£©
+#### System â†’ GUI é€šçŸ¥ï¼ˆC å‡½æ•°ï¼Œä»»æ„ä»»åŠ¡å¯è°ƒç”¨ï¼‰
 ```c
 void DT_NotifySMTStatus(uint8_t is_smt);
-void DT_NotifyTemp(uint16_t temp);           // 0.1¡æ µ¥Î»
+void DT_NotifyTemp(uint16_t temp);           // 0.1â„ƒ å•ä½
 void DT_NotifyDownloadStatus(uint8_t status);
 void DT_NotifySMTProgress(uint8_t current, uint8_t total);
 void DT_NotifyMotorResetDone(void);
 void DT_NotifyCustom(uint8_t code, uint8_t param);
 ```
 
-#### GUI ¡ú System ÃüÁî£¨C++ ·½·¨£¬Presenter µ÷ÓÃ£©
+#### GUI â†’ System å‘½ä»¤ï¼ˆC++ æ–¹æ³•ï¼ŒPresenter è°ƒç”¨ï¼‰
 ```cpp
 // Model.hpp
 void Model::sendCommand(DT_MsgType_t type, int32_t p1 = 0, int32_t p2 = 0);
 ```
 
-#### ModelListener »Øµ÷£¨C++ Ðéº¯Êý£¬Presenter ¸²Ð´£©
+#### ModelListener å›žè°ƒï¼ˆC++ è™šå‡½æ•°ï¼ŒPresenter è¦†å†™ï¼‰
 ```cpp
 virtual void onNotifySMTStatus(uint8_t is_smt)        {}
 virtual void onNotifyTemp(uint16_t temp)               {}
@@ -1197,91 +1181,93 @@ virtual void onNotifyMotorResetDone()                  {}
 virtual void onNotifyCustom(uint8_t code, uint8_t param) {}
 ```
 
-### 14.5 ´úÂëÍ³¼Æ
+### 14.5 ä»£ç ç»Ÿè®¡
 
-| Àà±ð | ÐÞ¸Ä | ÐÂÔö | ºÏ¼Æ |
+| ç±»åˆ« | ä¿®æ”¹ | æ–°å¢ž | åˆè®¡ |
 |------|------|------|------|
-| ÎÄ¼þÊý | 7 | 1 (.gitignore ÍêÉÆ) | 8 |
-| ´úÂëÐÐ | ~300 ÐÐÖØÐ´ | ~250 ÐÐÐÂÔö | ~550 ÐÐ |
-| ÎÄµµÐÐ | 50 ÐÐ¸üÐÂ | ~330 ÐÐÐÂÔö | ~380 ÐÐ |
+| æ–‡ä»¶æ•° | 7 | 1 (.gitignore å®Œå–„) | 8 |
+| ä»£ç è¡Œ | ~300 è¡Œé‡å†™ | ~250 è¡Œæ–°å¢ž | ~550 è¡Œ |
+| æ–‡æ¡£è¡Œ | 50 è¡Œæ›´æ–° | ~330 è¡Œæ–°å¢ž | ~380 è¡Œ |
 
-### 14.6 ÈÔ´ýÍê³É
+### 14.6 ä»å¾…å®Œæˆ
 
-1. `Data_Transfer.c` ÖÐµÄ 7 ¸ö handler ¶àÊýÎª TODO Õ¼Î»£¬Ðè¶Ô½ÓÊµ¼ÊÏµÍ³º¯Êý
-2. IMPORT/LOG/RESET ÆÁÄ»Î´ÊµÏÖ `handleKeyEvent`£¬ÇÐ»»ºó°´¼üÎÞÏìÓ¦
-3. `Data_Transfer` È«¾Ö±äÁ¿ (`if_now_SMT` µÈ) Ó¦Öð²½Ç¨ÒÆµ½ `DT_Notify*` Ä£Ê½
-4. ·Ö·¢ÖÐÊàÄ¿Ç°ÓÉ `Model::tick()` Çý¶¯£¨~30Hz£©£¬¸ß¸ºÔØ³¡¾°¿É¿¼ÂÇ¶ÀÁ¢ `DT_DispatchTask`
+1. `Data_Transfer.c` ä¸­çš„ 7 ä¸ª handler å¤šæ•°ä¸º TODO å ä½ï¼Œéœ€å¯¹æŽ¥å®žé™…ç³»ç»Ÿå‡½æ•°
+2. IMPORT/LOG/RESET å±å¹•æœªå®žçŽ° `handleKeyEvent`ï¼Œåˆ‡æ¢åŽæŒ‰é”®æ— å“åº”
+3. `Data_Transfer` å…¨å±€å˜é‡ (`if_now_SMT` ç­‰) åº”é€æ­¥è¿ç§»åˆ° `DT_Notify*` æ¨¡å¼
+4. åˆ†å‘ä¸­æž¢ç›®å‰ç”± `Model::tick()` é©±åŠ¨ï¼ˆ~30Hzï¼‰ï¼Œé«˜è´Ÿè½½åœºæ™¯å¯è€ƒè™‘ç‹¬ç«‹ `DT_DispatchTask`
 
 
-## ???ESP32 ???? ? IoT ?? (v2, 2026-05-28)
+## åäº”ã€ESP32 é€šä¿¡æ¨¡å— â€” IoT äº’è” (v2, 2026-05-28)
 
-### 15.1 ????
+### 15.1 æ¨¡å—æ¦‚è¿°
 
-?? SPI4 ??? ESP32-C3 ????????????????????????? Web ????
-???? `esp-temp/ESP32-C3??????_v2.0.md`?
+é€šè¿‡ SPI4 æŽ¥å£ä¸Ž ESP32-C3 æ¨¡å—å…¨åŒå·¥é€šä¿¡ï¼Œå®žçŽ°è´´ç‰‡æœºçŠ¶æ€æ•°æ®å®žæ—¶æŽ¨é€è‡³å±€åŸŸç½‘ Web ä»ªè¡¨ç›˜ã€‚
+åè®®éµå¾ª `esp-temp/ESP32-C3é€šä¿¡æŽ¥å£è§„èŒƒ_v2.0.md`ã€‚
 
-**?????**
+**ä¸‰å±‚æž¶æž„ï¼š**
 
-| ? | ?? | ?? |
+| å±‚ | æ–‡ä»¶ | èŒè´£ |
 |----|------|------|
-| ??? | `Drivers/ZeMCU-G4/driver_esp32.c/h` | SPI4 128B ????? + CS(PE3) ?? + C3RESET(PC13) ??? |
-| ??? | `Task/app_esp_protocol.c/h` | ??(??/??/??)???(??)????????/????? |
-| ??? | `Task/app_esp_task.c/h` | ESP_Task 500ms ?? + ???????? + ?????? + ???? |
+| é©±åŠ¨å±‚ | `Drivers/ZeMCU-G4/driver_esp32.c/h` | SPI4 128B å…¨åŒå·¥æ”¶å‘ + CS(PE3) æŽ§åˆ¶ + C3RESET(PC13) ç¡¬å¤ä½ |
+| åè®®å±‚ | `Task/app_esp_protocol.c/h` | ç»„åŒ…(æ•°æ®/æŽ§åˆ¶/æŸ¥è¯¢)ã€è§£åŒ…(å“åº”)ã€å‘½ä»¤ç å®ã€æ¸©åº¦/è¿›åº¦æ ¼å¼åŒ– |
+| ä»»åŠ¡å±‚ | `Task/app_esp_task.c/h` | ESP_Task 500ms å¿ƒè·³ + è½®è¯¢åˆ†æ—¶æ•°æ®æŽ¨é€ + æŽ§åˆ¶å‘½ä»¤è·¯ç”± + å“åº”å¤„ç† |
 
-### 15.2 ????
+### 15.2 ä»»åŠ¡æž¶æž„
 
-| ?? | ? | ??? | ??/?? |
+| ä»»åŠ¡ | æ ˆ | ä¼˜å…ˆçº§ | å‘¨æœŸ/è§¦å‘ |
 |------|-----|--------|----------|
-| `ESP_Task` | 512 | Normal | ???? + 500ms ?? |
+| `ESP_Task` | 512 | Normal | äº‹ä»¶é©±åŠ¨ + 500ms å¿ƒè·³ |
 
-**??????**
-- `esp_cmd_queue` (8 ??) ? ???? ? ESP_Task??? WiFi ??/????
+**ä»»åŠ¡é—´é€šä¿¡ï¼š**
+- `esp_cmd_queue` (8 æ·±åº¦) â€” å…¶ä»–ä»»åŠ¡ â†’ ESP_Taskï¼Œå‘é€ WiFi å¼€å…³/æŸ¥è¯¢æŒ‡ä»¤
+- `esp_cmd_queue` åœ¨ `app_freertos.c` ä¸­å®šä¹‰å¹¶åˆ›å»ºï¼Œ`app_esp_task.h` é€šè¿‡ extern å£°æ˜Žä¾›å…¶ä»–æ¨¡å—å¼•ç”¨
 
-### 15.3 ???
+### 15.3 æ•°æ®æµ
 
 ```
-??????                         ESP_Task                      ESP32-C3
-(????)                            ?                              ?
-now_SMT/total_SMT ??????? ?? "32/50" ??? 0x10 0x01 ??SPI4???  ?? ? WebSocket
-if_now_SMT/Heater ??????? ?? "SMTing" ??? 0x10 0x02 ??SPI4???  ??
-HeaterStatus.state ?????? ?? "1"/"0"  ??? 0x10 0x03 ??SPI4???
-HeaterStatus.cur_temp ??? ?? "85.3"   ??? 0x10 0x04 ??SPI4???
+ç³»ç»ŸçŠ¶æ€å˜é‡                         ESP_Task                      ESP32-C3
+(å¤ç”¨çŽ°æœ‰)                            â”‚                              â”‚
+now_SMT/total_SMT â†’ è¿›åº¦ "32/50" â†’ 0x10 0x01 â”€â”€SPI4â”€â”€â–º  è§£æž â†’ WebSocket
+if_now_SMT/Heater â†’ çŠ¶æ€ "SMTing" â†’ 0x10 0x02 â”€â”€SPI4â”€â”€â–º  æŽ¨é€
+HeaterStatus.state â†’ åŠ çƒ­ "1"/"0" â†’ 0x10 0x03 â”€â”€SPI4â”€â”€â–º
+HeaterStatus.cur_temp â†’ æ¸©åº¦ "85.3" â†’ 0x10 0x04 â”€â”€SPI4â”€â”€â–º
 
-ESP_SendCommand(WIFI_ON) ??? esp_cmd_queue ??? 0x20 0x01 ??SPI4???  ?? WiFi
-                                                        ???SPI4??  0xF2 "1"
+ESP_SendCommand(WIFI_ON) â†’ esp_cmd_queue â†’ 0x20 0x01 â”€â”€SPI4â”€â”€â–º  å¯åŠ¨ WiFi
+                                                       â—„â”€â”€SPI4â”€â”€  0xF2 "1"
                               g_esp_wifi_connected = 1
 ```
 
-### 15.4 ????? (???????)
+### 15.4 å…¨å±€æ ‡å¿—ä½ (ä¾›åŽç»­æ¨¡å—å¤ç”¨)
 
-| ?? | ???? | ?? |
+| å˜é‡ | å®šä¹‰ä½ç½® | å«ä¹‰ |
 |------|----------|------|
-| `g_esp_wifi_enabled` | `app_esp_task.c` | WiFi ???? (0=?, 1=?) |
-| `g_esp_wifi_connected` | `app_esp_task.c` | WiFi ?????? (ESP ??) |
-| `g_esp_fault_code` | `app_esp_task.c` | ??? (0x00=???) |
-| `g_esp_last_rx_tick` | `app_esp_task.c` | ??????? tick |
+| `g_esp_wifi_enabled` | `app_esp_task.c` | WiFi åŠŸèƒ½å¼€å…³ (0=å…³, 1=å¼€) |
+| `g_esp_wifi_connected` | `app_esp_task.c` | WiFi å®žé™…è¿žæŽ¥çŠ¶æ€ (ESP å›žä¼ ) |
+| `g_esp_fault_code` | `app_esp_task.c` | æ•…éšœç  (0x00=æ— æ•…éšœ) |
+| `g_esp_last_rx_tick` | `app_esp_task.c` | æœ€åŽæ”¶åˆ°å“åº”çš„ tick |
 
-### 15.5 ?????
+### 15.5 å‘½ä»¤ç é€ŸæŸ¥
 
-| ??? | ??? | ?? | ???? |
+| ä¸»å‘½ä»¤ | å­å‘½ä»¤ | å«ä¹‰ | å‘é€æŽ¥å£ |
 |--------|--------|------|----------|
-| `0x10` | `0x01` | ???? | ESP_Task ???? |
-| `0x10` | `0x02` | ???? | ESP_Task ???? |
-| `0x10` | `0x03` | ????? | ESP_Task ???? |
-| `0x10` | `0x04` | ????? | ESP_Task ???? (??>0.5?C) |
-| `0x20` | `0x01` | ?? WiFi | `ESP_SendCommand(ESP_CMD_WIFI_ON)` |
-| `0x20` | `0x02` | ?? WiFi | `ESP_SendCommand(ESP_CMD_WIFI_OFF)` |
-| `0x30` | `0x01` | ???? | `ESP_SendCommand(ESP_CMD_QUERY_FAULT)` |
-| `0x30` | `0x02` | ?? WiFi | `ESP_SendCommand(ESP_CMD_QUERY_WIFI)` |
+| `0x10` | `0x01` | è´´ç‰‡è¿›åº¦ | ESP_Task è‡ªåŠ¨æŽ¨é€ |
+| `0x10` | `0x02` | è´´ç‰‡çŠ¶æ€ | ESP_Task è‡ªåŠ¨æŽ¨é€ |
+| `0x10` | `0x03` | åŠ çƒ­å°çŠ¶æ€ | ESP_Task è‡ªåŠ¨æŽ¨é€ |
+| `0x10` | `0x04` | åŠ çƒ­å°æ¸©åº¦ | ESP_Task è‡ªåŠ¨æŽ¨é€ (å˜åŒ–>0.5Â°C) |
+| `0x20` | `0x01` | æ‰“å¼€ WiFi | `ESP_SendCommand(ESP_CMD_WIFI_ON)` |
+| `0x20` | `0x02` | å…³é—­ WiFi | `ESP_SendCommand(ESP_CMD_WIFI_OFF)` |
+| `0x30` | `0x01` | æŸ¥è¯¢æ•…éšœ | `ESP_SendCommand(ESP_CMD_QUERY_FAULT)` |
+| `0x30` | `0x02` | æŸ¥è¯¢ WiFi | `ESP_SendCommand(ESP_CMD_QUERY_WIFI)` |
 
-### 15.6 ??? Bug
+### 15.6 å·²ä¿®å¤ Bug
 
-- **HostMotion ???????** `app_freertos.c` ? `osThreadNew(StartHostMotionTestTask, ...)` ??????????????
-- **SPI4_CS/C3RESET ??????** `ESP_GPIO_Init()` ? CS ? RST ??
+- **HostMotion ä»»åŠ¡é‡å¤åˆ›å»ºï¼š** `app_freertos.c` ä¸­ `osThreadNew(StartHostMotionTestTask, ...)` å‡ºçŽ°ä¸¤æ¬¡ï¼Œå·²åˆ é™¤æ— å¥æŸ„çš„é‚£è¡Œï¼Œä»…ä¿ç•™ `hostMotionTaskHandle = osThreadNew(...)`
+- **SPI4_CS/C3RESET ä¸Šç”µé»˜è®¤ä½Žï¼š** `ESP_GPIO_Init()` å°† CS å’Œ RST ç½®é«˜
+- **esp_cmd_queue é‡å¤å®šä¹‰ (L6200E)ï¼š** `app_esp_task.c` ä¸­ç§»é™¤å®šä¹‰ï¼Œç»Ÿä¸€ç”± `app_freertos.c` å®šä¹‰ï¼Œ`app_esp_task.h` é€šè¿‡ extern å£°æ˜Žå¼•ç”¨
 
-### 15.7 ??????
+### 15.7 æ–°å¢žæ–‡ä»¶æ¸…å•
 
-| ?? | ?? |
+| æ–‡ä»¶ | è¡Œæ•° |
 |------|------|
 | `Drivers/ZeMCU-G4/driver_esp32.c` | 67 |
 | `Drivers/ZeMCU-G4/driver_esp32.h` | 41 |
@@ -1289,64 +1275,64 @@ ESP_SendCommand(WIFI_ON) ??? esp_cmd_queue ??? 0x20 0x01 ??SPI4???  ?? WiFi
 | `Task/app_esp_protocol.h` | 143 |
 | `Task/app_esp_task.c` | 282 |
 | `Task/app_esp_task.h` | 55 |
-| `ESP32????_STM32?????_v2.md` | ???? |
+| `ESP32é€šä¿¡æ¨¡å—_STM32ç«¯å®žçŽ°æŠ¥å‘Š_v2.md` | æŠ¥å‘Šæ–‡æ¡£ |
 
-### 15.8 ????
+### 15.8 ä»å¾…å®Œæˆ
 
-1. Keil ???? (????????)
-2. ESP32 ??? (ESP ???????????)
-3. ????? WiFi ????
-4. TouchGFX GUI ?? WiFi ?????
+1. ESP32 ç«¯è”è°ƒ (ESP ç«¯éœ€æŒ‰åŒä¸€æŽ¥å£è§„èŒƒå®žçŽ°)
+2. ä¸Šä½æœºé›†æˆ WiFi å¼€å…³æŒ‡ä»¤
+3. TouchGFX GUI æ·»åŠ  WiFi çŠ¶æ€æŒ‡ç¤ºå™¨
 
-## Ê®Áù¡¢TMC2209 UART µ÷ÊÔ¼ÇÂ¼£¨2026-06-05~06£©
 
-### 16.1 ±³¾°
+## åå…­ã€TMC2209 UART è°ƒè¯•è®°å½•ï¼ˆ2026-06-05~06ï¼‰
 
-TMC2209 ÔÚ CubeMX ÖÐÌí¼Ó USART3 DMA ºó StartMotorTestTask ÎÞ·¨Çý¶¯µç»úÐý×ª¡£
-Í¬Ò»Ì×´úÂëÔÚ±ðÈË£¨ÎÞ DMA ÅäÖÃ£©µÄ¹¤³ÌÖÐ¿ÉÒÔÕý³£¹¤×÷¡£
+### 16.1 èƒŒæ™¯
 
-**×îÖÕÈ·ÈÏµÄÓ²¼þ¸ùÒò£º** TMC2209 Ä£×é±»´íÎó½Óµ½ÁË LPUART1 (PC0/PC1) ¶ø·Ç USART3 (PB9/PB11)¡£
-½ÓÏß¾ÀÕýºó UART Í¨ÐÅ»Ö¸´£¬µ«±©Â¶³öÒÔÏÂÈí¼þÎÊÌâ¡£
+TMC2209 åœ¨ CubeMX ä¸­æ·»åŠ  USART3 DMA åŽ StartMotorTestTask æ— æ³•é©±åŠ¨ç”µæœºæ—‹è½¬ã€‚
+åŒä¸€å¥—ä»£ç åœ¨åˆ«äººï¼ˆæ—  DMA é…ç½®ï¼‰çš„å·¥ç¨‹ä¸­å¯ä»¥æ­£å¸¸å·¥ä½œã€‚
 
-### 16.2 ÒÑÐÞ¸´µÄÈí¼þÎÊÌâ
+**æœ€ç»ˆç¡®è®¤çš„ç¡¬ä»¶æ ¹å› ï¼š** TMC2209 æ¨¡ç»„è¢«é”™è¯¯æŽ¥åˆ°äº† LPUART1 (PC0/PC1) è€Œéž USART3 (PB9/PB11)ã€‚
+æŽ¥çº¿çº æ­£åŽ UART é€šä¿¡æ¢å¤ï¼Œä½†æš´éœ²å‡ºä»¥ä¸‹è½¯ä»¶é—®é¢˜ã€‚
 
-#### ÎÊÌâ 1£ºDMA ¾ä±ú¸ÉÈÅ TMC ×èÈûÊ½Í¨ÐÅ
+### 16.2 å·²ä¿®å¤çš„è½¯ä»¶é—®é¢˜
 
-**ÎÄ¼þ£º** Drivers/ZeMCU-G4/driver_tmc2209.c ¡ª TMC_Init()
+#### é—®é¢˜ 1ï¼šDMA å¥æŸ„å¹²æ‰° TMC é˜»å¡žå¼é€šä¿¡
 
-**¸ùÒò£º** CubeMX ÆôÓÃ USART3 DMA ºó£¬huart3.hdmarx / huart3.hdmatx ·Ç NULL¡£
-UART_Error_Handler ¡ú UART_StartReceive_DMA(UART_CH3) »áÕæÕýÆô¶¯ DMA ¿ÕÏÐ½ÓÊÕ£¬
-Íµ×ß TMC2209 Ó¦´ð×Ö½Ú£¬µ¼ÖÂ×èÈûÊ½ HAL_UART_Receive ³¬Ê±¡£
+**æ–‡ä»¶ï¼š** Drivers/ZeMCU-G4/driver_tmc2209.c â€” TMC_Init()
 
-**ÐÞ¸´£º** TMC_Init ÖÐÔÚ HAL_UART_DMAStop + HAL_UART_Abort Ö®ºóÁ¢¼´ÖÃ NULL£º
+**æ ¹å› ï¼š** CubeMX å¯ç”¨ USART3 DMA åŽï¼Œhuart3.hdmarx / huart3.hdmatx éž NULLã€‚
+UART_Error_Handler â†’ UART_StartReceive_DMA(UART_CH3) ä¼šçœŸæ­£å¯åŠ¨ DMA ç©ºé—²æŽ¥æ”¶ï¼Œ
+å·èµ° TMC2209 åº”ç­”å­—èŠ‚ï¼Œå¯¼è‡´é˜»å¡žå¼ HAL_UART_Receive è¶…æ—¶ã€‚
+
+**ä¿®å¤ï¼š** TMC_Init ä¸­åœ¨ HAL_UART_DMAStop + HAL_UART_Abort ä¹‹åŽç«‹å³ç½® NULLï¼š
 `c
-huart3.hdmarx = NULL;   // ¶Ï¿ª DMA RX ¾ä±ú
-huart3.hdmatx = NULL;   // ¶Ï¿ª DMA TX ¾ä±ú
+huart3.hdmarx = NULL;   // æ–­å¼€ DMA RX å¥æŸ„
+huart3.hdmatx = NULL;   // æ–­å¼€ DMA TX å¥æŸ„
 `
 
-#### ÎÊÌâ 2£ºµ¥Ïß UART »ØÉùµ¼ÖÂ ORE ×èÈû RXNE
+#### é—®é¢˜ 2ï¼šå•çº¿ UART å›žå£°å¯¼è‡´ ORE é˜»å¡ž RXNE
 
-**ÎÄ¼þ£º** Drivers/ZeMCU-G4/driver_tmc2209.c ¡ª TMC_FlushRX()
+**æ–‡ä»¶ï¼š** Drivers/ZeMCU-G4/driver_tmc2209.c â€” TMC_FlushRX()
 
-**¸ùÒò£º** TMC2209 µ¥Ïß UART ÉÏ STM32 Ã¿·¢Ò»×Ö½Ú£¬RX ½ÅÍ¬Ê±ÊÕµ½»ØÉù¡£
-HAL_UART_Transmit ×èÈûÄ£Ê½ÏÂ²»¹Ü RX£¬µ¼ÖÂ»ØÉùÀÛ»ý´¥·¢ ORE£¨Òç³ö´íÎó£©¡£
-**STM32G4 Çå³ý ORE ±ØÐëÐ´ ICR ¼Ä´æÆ÷**£¬¶Á ISR/RDR ·½Ê½ÎÞÐ§£¨ÓëÀÏ STM32 ²»Í¬£©¡£
+**æ ¹å› ï¼š** TMC2209 å•çº¿ UART ä¸Š STM32 æ¯å‘ä¸€å­—èŠ‚ï¼ŒRX è„šåŒæ—¶æ”¶åˆ°å›žå£°ã€‚
+HAL_UART_Transmit é˜»å¡žæ¨¡å¼ä¸‹ä¸ç®¡ RXï¼Œå¯¼è‡´å›žå£°ç´¯ç§¯è§¦å‘ OREï¼ˆæº¢å‡ºé”™è¯¯ï¼‰ã€‚
+**STM32G4 æ¸…é™¤ ORE å¿…é¡»å†™ ICR å¯„å­˜å™¨**ï¼Œè¯» ISR/RDR æ–¹å¼æ— æ•ˆï¼ˆä¸Žè€ STM32 ä¸åŒï¼‰ã€‚
 
-**ÐÞ¸´£º** TMC_FlushRX() ÔÚ¶ÁÍê RXNE ºó¼ÓÈë£º
+**ä¿®å¤ï¼š** TMC_FlushRX() åœ¨è¯»å®Œ RXNE åŽåŠ å…¥ï¼š
 `c
 if (__HAL_UART_GET_FLAG(&huart3, UART_FLAG_ORE)) {
-    __HAL_UART_CLEAR_FLAG(&huart3, UART_CLEAR_OREF);  // Ð´ ICR Çå ORE
+    __HAL_UART_CLEAR_FLAG(&huart3, UART_CLEAR_OREF);  // å†™ ICR æ¸… ORE
 }
 `
 
-#### ÎÊÌâ 3£ºTMC_ReadReg_Internal ¶ÁÇëÇó·¢Íêºó FlushRX ³ÔµôÊ××Ö½Ú
+#### é—®é¢˜ 3ï¼šTMC_ReadReg_Internal è¯»è¯·æ±‚å‘å®ŒåŽ FlushRX åƒæŽ‰é¦–å­—èŠ‚
 
-**ÎÄ¼þ£º** Drivers/ZeMCU-G4/driver_tmc2209.c ¡ª TMC_ReadReg_Internal()
+**æ–‡ä»¶ï¼š** Drivers/ZeMCU-G4/driver_tmc2209.c â€” TMC_ReadReg_Internal()
 
-**¸ùÒò£º** HAL_UART_Transmit ·¢¶ÁÇëÇóºó£¬TMC_FlushRX ÔÚ TC µÈ´ýºóÈÔ±»µ÷ÓÃ£¬
-µ« TMC2209 ÔÚ ~17¦Ìs ÄÚ¼´¿ªÊ¼Ó¦´ð£¬FlushRX Îó½«µÚÒ»¸öÓ¦´ð×Ö½Úµ±×ö²ÐÁô»ØÉù¶Á×ß¡£
+**æ ¹å› ï¼š** HAL_UART_Transmit å‘è¯»è¯·æ±‚åŽï¼ŒTMC_FlushRX åœ¨ TC ç­‰å¾…åŽä»è¢«è°ƒç”¨ï¼Œ
+ä½† TMC2209 åœ¨ ~17Î¼s å†…å³å¼€å§‹åº”ç­”ï¼ŒFlushRX è¯¯å°†ç¬¬ä¸€ä¸ªåº”ç­”å­—èŠ‚å½“åšæ®‹ç•™å›žå£°è¯»èµ°ã€‚
 
-**ÐÞ¸´£º** ¶ÁÇëÇó¸ÄÎªÖð×Ö½Ú·¢ËÍ + Í¬²½¶Á»ØÉùÏì£º
+**ä¿®å¤ï¼š** è¯»è¯·æ±‚æ”¹ä¸ºé€å­—èŠ‚å‘é€ + åŒæ­¥è¯»å›žå£°å“ï¼š
 `c
 for (int i = 0; i < TMC_READ_REQUEST_LEN; i++) {
     while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TXE));
@@ -1356,241 +1342,213 @@ for (int i = 0; i < TMC_READ_REQUEST_LEN; i++) {
     if (tmo) { volatile uint32_t echo = huart3.Instance->RDR; (void)echo; }
 }
 while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TC));
-// ²»ÔÙµ÷ÓÃ TMC_FlushRX ¡ª »ØÉùÒÑÔÚÖð×Ö½ÚÑ­»·ÖÐÏû·ÑÍê±Ï
+// ä¸å†è°ƒç”¨ TMC_FlushRX â€” å›žå£°å·²åœ¨é€å­—èŠ‚å¾ªçŽ¯ä¸­æ¶ˆè´¹å®Œæ¯•
 `
 
-#### ÎÊÌâ 4£ºTMC2209 Ó¦´ð¸ñÊ½¼æÈÝ£¨7 ×Ö½Ú vs 8 ×Ö½Ú£©
+#### é—®é¢˜ 4ï¼šTMC2209 åº”ç­”æ ¼å¼å…¼å®¹ï¼ˆ7 å­—èŠ‚ vs 8 å­—èŠ‚ï¼‰
 
-**ÎÄ¼þ£º** Drivers/ZeMCU-G4/driver_tmc2209.c ¡ª TMC_ReadReg_Internal()
+**æ–‡ä»¶ï¼š** Drivers/ZeMCU-G4/driver_tmc2209.c â€” TMC_ReadReg_Internal()
 
-**¸ùÒò£º** ´Ë TMC2209 Ä£×éÊ¹ÓÃ 7 ×Ö½ÚÓ¦´ð¸ñÊ½£¨sync+addr+data[4]+crc£©£¬
-²»º¬¼Ä´æÆ÷µØÖ·»ØÏÔ×Ö½Ú¡£´úÂëÔ­±¾Ö»ÄÜ´¦Àí 8 ×Ö½Ú¸ñÊ½¡£
+**æ ¹å› ï¼š** æ­¤ TMC2209 æ¨¡ç»„ä½¿ç”¨ 7 å­—èŠ‚åº”ç­”æ ¼å¼ï¼ˆsync+addr+data[4]+crcï¼‰ï¼Œ
+ä¸å«å¯„å­˜å™¨åœ°å€å›žæ˜¾å­—èŠ‚ã€‚ä»£ç åŽŸæœ¬åªèƒ½å¤„ç† 8 å­—èŠ‚æ ¼å¼ã€‚
 
-**ÐÞ¸´£º** ½ÓÊÕÂß¼­×Ô¶¯ÊÊÅä£º
+**ä¿®å¤ï¼š** æŽ¥æ”¶é€»è¾‘è‡ªåŠ¨é€‚é…ï¼š
 `c
-uint8_t data_ofs = (rx_count == 8) ? 3 : 2;  // 8×Ö½Ú¸ñÊ½ data ÔÚ [3-6]£¬7×Ö½ÚÔÚ [2-5]
+uint8_t data_ofs = (rx_count == 8) ? 3 : 2;  // 8å­—èŠ‚æ ¼å¼ data åœ¨ [3-6]ï¼Œ7å­—èŠ‚åœ¨ [2-5]
 uint8_t crc_ofs = rx_count - 1;
 `
 
-#### ÎÊÌâ 5£ºTMC2209 Ó¦´ð CRC Óë±ê×¼²»·û
+#### é—®é¢˜ 5ï¼šTMC2209 åº”ç­” CRC ä¸Žæ ‡å‡†ä¸ç¬¦
 
-**ÎÄ¼þ£º** Drivers/ZeMCU-G4/driver_tmc2209.c ¡ª TMC_ReadReg_Internal()
+**æ–‡ä»¶ï¼š** Drivers/ZeMCU-G4/driver_tmc2209.c â€” TMC_ReadReg_Internal()
 
-**¸ùÒò£º** ´Ë TMC2209 Ä£×éµÄ¶ÁÓ¦´ð CRC ¼ÆËã½á¹ûÓë±ê×¼ CRC-8-ATM ²»Ò»ÖÂ
-£¨±ê×¼¼ÆËã 0x67£¬Êµ¼Ê·µ»Ø 0x01£©¡£µ«¶ÁÐ´Í¨ÐÅ¾ùÕý³££¬Êý¾ÝÕýÈ·¡£
+**æ ¹å› ï¼š** æ­¤ TMC2209 æ¨¡ç»„çš„è¯»åº”ç­” CRC è®¡ç®—ç»“æžœä¸Žæ ‡å‡† CRC-8-ATM ä¸ä¸€è‡´
+ï¼ˆæ ‡å‡†è®¡ç®— 0x67ï¼Œå®žé™…è¿”å›ž 0x01ï¼‰ã€‚ä½†è¯»å†™é€šä¿¡å‡æ­£å¸¸ï¼Œæ•°æ®æ­£ç¡®ã€‚
 
-**ÐÞ¸´£º** CRC ²»Æ¥Åä¸ÄÎª¾¯¸æ¶ø·ÇÖÂÃü´íÎó£¬Êý¾ÝÖ±½ÓÐÅÈÎÊ¹ÓÃ¡£
+**ä¿®å¤ï¼š** CRC ä¸åŒ¹é…æ”¹ä¸ºè­¦å‘Šè€Œéžè‡´å‘½é”™è¯¯ï¼Œæ•°æ®ç›´æŽ¥ä¿¡ä»»ä½¿ç”¨ã€‚
 
-#### ÎÊÌâ 6£ºTMC2209 ³õÊ¼»¯Ê±Ðò
+#### é—®é¢˜ 6ï¼šTMC2209 åˆå§‹åŒ–æ—¶åº
 
-**ÎÄ¼þ£º** Drivers/ZeMCU-G4/driver_tmc2209.c ¡ª TMC_Init()
+**æ–‡ä»¶ï¼š** Drivers/ZeMCU-G4/driver_tmc2209.c â€” TMC_Init()
 
-**¸ùÒò£º** Ô­´úÂëÔÚ TMC2209 ½ûÓÃÆÚ¼äÐ´ÅäÖÃ¼Ä´æÆ÷£¬²¿·ÖÄ£×é£¨VCCIO ÓÉÄÚ²¿ LDO ¹©µç£©
-ENN=HIGH Ê± LDO ¹Ø¶Ï£¬Êý×ÖÂß¼­µôµç£¬UART ²»¹¤×÷£¬ËùÓÐÅäÖÃÐ´ÈëÎÞÐ§¡£
-´ËÍâ TMC2209 ÉÏµçºóÐèÒª ~200ms ÎÈ¶¨Ê±¼ä¡£
+**æ ¹å› ï¼š** åŽŸä»£ç åœ¨ TMC2209 ç¦ç”¨æœŸé—´å†™é…ç½®å¯„å­˜å™¨ï¼Œéƒ¨åˆ†æ¨¡ç»„ï¼ˆVCCIO ç”±å†…éƒ¨ LDO ä¾›ç”µï¼‰
+ENN=HIGH æ—¶ LDO å…³æ–­ï¼Œæ•°å­—é€»è¾‘æŽ‰ç”µï¼ŒUART ä¸å·¥ä½œï¼Œæ‰€æœ‰é…ç½®å†™å…¥æ— æ•ˆã€‚
+æ­¤å¤– TMC2209 ä¸Šç”µåŽéœ€è¦ ~200ms ç¨³å®šæ—¶é—´ã€‚
 
-**ÐÞ¸´£º** ÖØ¹¹³õÊ¼»¯Ë³Ðò£º
-1. TMC_SetEnable(false) ¡ú Ó²¼þ¸´Î»
-2. HAL_Delay(10) ¡ú ¸´Î»±£³Ö
-3. DMA ½Ó¹Ü + TX ÍÆÍìÅäÖÃ
-4. TMC_SetEnable(true) ¡ú ÏÈÊ¹ÄÜ
-5. vTaskDelay(200) ¡ú µÈ LDO/Õñµ´Æ÷ÎÈ¶¨
-6. Ð´ GCONF/CHOPCONF/PWMCONF/IHOLD_IRUN/TPOWERDOWN
+**ä¿®å¤ï¼š** é‡æž„åˆå§‹åŒ–é¡ºåºï¼š
+1. TMC_SetEnable(false) â†’ ç¡¬ä»¶å¤ä½
+2. HAL_Delay(10) â†’ å¤ä½ä¿æŒ
+3. DMA æŽ¥ç®¡ + TX æŽ¨æŒ½é…ç½®
+4. TMC_SetEnable(true) â†’ å…ˆä½¿èƒ½
+5. vTaskDelay(200) â†’ ç­‰ LDO/æŒ¯è¡å™¨ç¨³å®š
+6. å†™ GCONF/CHOPCONF/PWMCONF/IHOLD_IRUN/TPOWERDOWN
 
-#### ÎÊÌâ 7£ºTX Òý½ÅÇý¶¯Ä£Ê½
+#### é—®é¢˜ 7ï¼šTX å¼•è„šé©±åŠ¨æ¨¡å¼
 
-**½áÂÛ£º** ¾­¹ý²âÊÔ£¬TX ÍÆÍìÄ£Ê½£¨GPIO_MODE_AF_PP£©ÅäºÏ 1k¦¸ ´®Áªµç×èÊÇÕýÈ·µÄ¡£
-¿ªÂ©Ä£Ê½£¨GPIO_MODE_AF_OD£©ÉÏÉýÑØ¹ýÂýµ¼ÖÂÐÅºÅÖÊÁ¿ÎÊÌâ¡£´Ë TMC2209 Ä£×éµØÖ·Îª 0x00£¬
-²¨ÌØÂÊ 115200£¬¹¤×÷Õý³£¡£
+**ç»“è®ºï¼š** ç»è¿‡æµ‹è¯•ï¼ŒTX æŽ¨æŒ½æ¨¡å¼ï¼ˆGPIO_MODE_AF_PPï¼‰é…åˆ 1kÎ© ä¸²è”ç”µé˜»æ˜¯æ­£ç¡®çš„ã€‚
+å¼€æ¼æ¨¡å¼ï¼ˆGPIO_MODE_AF_ODï¼‰ä¸Šå‡æ²¿è¿‡æ…¢å¯¼è‡´ä¿¡å·è´¨é‡é—®é¢˜ã€‚æ­¤ TMC2209 æ¨¡ç»„åœ°å€ä¸º 0x00ï¼Œ
+æ³¢ç‰¹çŽ‡ 115200ï¼Œå·¥ä½œæ­£å¸¸ã€‚
 
-### 16.3 µç»úÅ¤¾Øµ÷ÓÅ
+### 16.3 ç”µæœºæ‰­çŸ©è°ƒä¼˜
 
-| ²ÎÊý | ×îÖÕÖµ | ËµÃ÷ |
+| å‚æ•° | æœ€ç»ˆå€¼ | è¯´æ˜Ž |
 |------|--------|------|
-| ÔËÐÐµçÁ÷ | 1000mA (TMC2209_MOTOR_RUN_CURRENT) | Ô­ 800mA Å¤¾Ø²»×ã |
-| Õ¶²¨Ä£Ê½ | spreadCycle (GCONF_EN_SPREADCYCLE) | ±È StealthChop Å¤¾Ø´ó |
-| Î¢²½·Ö±æÂÊ | 256 (MRES=0) | ±£³Ö¾«¶È |
-| ²âÊÔËÙ¶È | 40000 ¦Ìsteps/s | ~47 RPM |
+| è¿è¡Œç”µæµ | 1000mA (TMC2209_MOTOR_RUN_CURRENT) | åŽŸ 800mA æ‰­çŸ©ä¸è¶³ |
+| æ–©æ³¢æ¨¡å¼ | spreadCycle (GCONF_EN_SPREADCYCLE) | æ¯” StealthChop æ‰­çŸ©å¤§ |
+| å¾®æ­¥åˆ†è¾¨çŽ‡ | 256 (MRES=0) | ä¿æŒç²¾åº¦ |
+| æµ‹è¯•é€Ÿåº¦ | 40000 Î¼steps/s | ~47 RPM |
 
-### 16.4 µ÷ÊÔÕï¶Ï·½·¨×Ü½á
+### 16.4 è°ƒè¯•è¯Šæ–­æ–¹æ³•æ€»ç»“
 
-| Õï¶ÏÊÖ¶Î | ÓÃÍ¾ |
+| è¯Šæ–­æ‰‹æ®µ | ç”¨é€” |
 |----------|------|
-| USART_ISR ¼Ä´æÆ÷´òÓ¡ | ÅÐ¶Ï ORE/IDLE/RXNE ×´Ì¬ |
-| Öð×Ö½ÚÊÕ·¢ + »ØÉùÆ¥Åä¼ì²é | È·ÈÏ TX¡úRX ÎïÀí²ã |
-| µØÖ·É¨Ãè£¨0x00~0x03 ¶Á IOIN£© | ¶¨Î» TMC2209 Êµ¼ÊµØÖ· |
-| Ô­Ê¼Ó¦´ð×Ö½Ú´òÓ¡ | ·ÖÎö CRC/¸ñÊ½ÎÊÌâ |
-| GCONF Ð´ºó¶Á»ØÑéÖ¤ | È·ÈÏ¼Ä´æÆ÷Ð´ÈëÊÇ·ñÉúÐ§ |
-| CRC Ð£×¼£¨4 ÖÖ·½°¸²âÊÔ£© | ÅÅ²é·Ç±ê×¼ CRC ÊµÏÖ |
+| USART_ISR å¯„å­˜å™¨æ‰“å° | åˆ¤æ–­ ORE/IDLE/RXNE çŠ¶æ€ |
+| é€å­—èŠ‚æ”¶å‘ + å›žå£°åŒ¹é…æ£€æŸ¥ | ç¡®è®¤ TXâ†’RX ç‰©ç†å±‚ |
+| åœ°å€æ‰«æï¼ˆ0x00~0x03 è¯» IOINï¼‰ | å®šä½ TMC2209 å®žé™…åœ°å€ |
+| åŽŸå§‹åº”ç­”å­—èŠ‚æ‰“å° | åˆ†æž CRC/æ ¼å¼é—®é¢˜ |
+| GCONF å†™åŽè¯»å›žéªŒè¯ | ç¡®è®¤å¯„å­˜å™¨å†™å…¥æ˜¯å¦ç”Ÿæ•ˆ |
+| CRC æ ¡å‡†ï¼ˆ4 ç§æ–¹æ¡ˆæµ‹è¯•ï¼‰ | æŽ’æŸ¥éžæ ‡å‡† CRC å®žçŽ° |
 
-### 16.5 Éæ¼°ÎÄ¼þ
+### 16.5 æ¶‰åŠæ–‡ä»¶
 
-| ÎÄ¼þ | ±ä¸ü |
+| æ–‡ä»¶ | å˜æ›´ |
 |------|------|
-| Drivers/ZeMCU-G4/driver_tmc2209.c | ºËÐÄÐÞ¸Ä£ºFlushRX ICRÇåORE¡¢Öð×Ö½ÚÊÕ·¢¡¢7/8×Ö½Ú¼æÈÝ¡¢CRC·ÇÖÂÃü¡¢³õÊ¼»¯Ê±ÐòÖØ¹¹ |
-| Drivers/ZeMCU-G4/driver_tmc2209.h | µçÁ÷ 800¡ú1000mA¡¢GCONF ¼Ó spreadCycle |
-| Task/app_test.c | ²âÊÔËÙ¶Èµ÷Õû |
+| Drivers/ZeMCU-G4/driver_tmc2209.c | æ ¸å¿ƒä¿®æ”¹ï¼šFlushRX ICRæ¸…OREã€é€å­—èŠ‚æ”¶å‘ã€7/8å­—èŠ‚å…¼å®¹ã€CRCéžè‡´å‘½ã€åˆå§‹åŒ–æ—¶åºé‡æž„ |
+| Drivers/ZeMCU-G4/driver_tmc2209.h | ç”µæµ 800â†’1000mAã€GCONF åŠ  spreadCycle |
+| Task/app_test.c | æµ‹è¯•é€Ÿåº¦è°ƒæ•´ |
 
-### 16.6 ¹Ø¼ü¾­Ñé
+### 16.6 å…³é”®ç»éªŒ
 
-1. **STM32G4 Çå ORE ±ØÐëÓÃ ICR**£¬¶Á ISR/RDR ·½Ê½ÔÚ G4 ÉÏÎÞÐ§
-2. µ¥Ïß UART µÄ TX ÍÆÍì + 1k¦¸ ÏÞÁ÷µç×èÊÇÕýÈ·ÅäÖÃ£¬¿ªÂ©·´¶øÓÐº¦
-3. TMC2209 ÉÏµçºóÐè 200ms+ ÎÈ¶¨£¬LDO ¹©µçÄ£×éÔÚ ENN=HIGH Ê± UART µôµç
-4. ´Ë TMC2209 Ä£×éÊ¹ÓÃ 7 ×Ö½ÚÓ¦´ð¸ñÊ½ + ·Ç±ê×¼ CRC£¬µ«Êý¾ÝºÍ¶ÁÐ´¹¦ÄÜÕý³£
-5. huart3.hdmarx/hdmatx ±ØÐëÔÚ TMC Ê¹ÓÃÇ°ÖÃ NULL£¬·ñÔò UART_Error_Handler »áÖØÆô DMA Íµ×ßÊý¾Ý
+1. **STM32G4 æ¸… ORE å¿…é¡»ç”¨ ICR**ï¼Œè¯» ISR/RDR æ–¹å¼åœ¨ G4 ä¸Šæ— æ•ˆ
+2. å•çº¿ UART çš„ TX æŽ¨æŒ½ + 1kÎ© é™æµç”µé˜»æ˜¯æ­£ç¡®é…ç½®ï¼Œå¼€æ¼åè€Œæœ‰å®³
+3. TMC2209 ä¸Šç”µåŽéœ€ 200ms+ ç¨³å®šï¼ŒLDO ä¾›ç”µæ¨¡ç»„åœ¨ ENN=HIGH æ—¶ UART æŽ‰ç”µ
+4. æ­¤ TMC2209 æ¨¡ç»„ä½¿ç”¨ 7 å­—èŠ‚åº”ç­”æ ¼å¼ + éžæ ‡å‡† CRCï¼Œä½†æ•°æ®å’Œè¯»å†™åŠŸèƒ½æ­£å¸¸
+5. huart3.hdmarx/hdmatx å¿…é¡»åœ¨ TMC ä½¿ç”¨å‰ç½® NULLï¼Œå¦åˆ™ UART_Error_Handler ä¼šé‡å¯ DMA å·èµ°æ•°æ®
 
 
-### 16.7 TMC2209 Ê¹ÄÜ/¹Ø±ÕÉè¼ÆÄ£Ê½£¨2026-06-11~12£©
+### 16.7 TMC2209 ä½¿èƒ½/å…³é—­è®¾è®¡æ¨¡å¼ï¼ˆ2026-06-11~12ï¼‰
 
-**±³¾°£º** ¡ì16.2 ½â¾öÁË TMC2209 Í¨ÐÅ²ãµÄËùÓÐÎÊÌâ£¨DMA ¸ÉÈÅ¡¢ORE¡¢Ó¦´ð¸ñÊ½¡¢³õÊ¼»¯Ê±Ðò£©£¬
-µ«ÒÅÁôÁËÒ»¸öÏµÍ³¼¶ÎÊÌâ£º`TMC_Init()` Íê³Éºó TMC2209 Çý¶¯Ò»Ö±±£³ÖÊ¹ÄÜ×´Ì¬£¨ENN=LOW£©£¬
-¼´Ê¹ R Öá²»Ðý×ª£¬µç»úÏßÈ¦Ò²³ÖÐøÍ¨µç£¬µ¼ÖÂ·¢ÈÈºÍÇ±ÔÚÔëÉù¡£
+**èƒŒæ™¯ï¼š** Â§16.2 è§£å†³äº† TMC2209 é€šä¿¡å±‚çš„æ‰€æœ‰é—®é¢˜ï¼ˆDMA å¹²æ‰°ã€OREã€åº”ç­”æ ¼å¼ã€åˆå§‹åŒ–æ—¶åºï¼‰ï¼Œ
+ä½†é—ç•™äº†ä¸€ä¸ªç³»ç»Ÿçº§é—®é¢˜ï¼š`TMC_Init()` å®ŒæˆåŽ TMC2209 é©±åŠ¨ä¸€ç›´ä¿æŒä½¿èƒ½çŠ¶æ€ï¼ˆENN=LOWï¼‰ï¼Œ
+å³ä½¿ R è½´ä¸æ—‹è½¬ï¼Œç”µæœºçº¿åœˆä¹ŸæŒç»­é€šç”µï¼Œå¯¼è‡´å‘çƒ­å’Œæ½œåœ¨å™ªå£°ã€‚
 
-**Éè¼Æ¾ö²ß£º** ²ÉÈ¡¡¸ÓÃµ½²Å¿ª£¬ÓÃÍê¼´¹Ø¡¹²ßÂÔ¡£
+**è®¾è®¡å†³ç­–ï¼š** é‡‡å–ã€Œç”¨åˆ°æ‰å¼€ï¼Œç”¨å®Œå³å…³ã€ç­–ç•¥ã€‚
 
-**`TMC_Init()` ÐÐÎª±ä¸ü£º** Ð´ÍêÈ«²¿ÅäÖÃ¼Ä´æÆ÷ºóµ÷ÓÃ `TMC_SetEnable(false)` ¹Ø±ÕÇý¶¯¡£
-µ÷ÓÃ·½ÎÞÐè¶îÍâ²Ù×÷¡ª¡ª³õÊ¼»¯Íê³ÉÊ± TMC2209 ÒÑ´¦ÓÚ°²È«¹Ø±Õ×´Ì¬¡£
+**`TMC_Init()` è¡Œä¸ºå˜æ›´ï¼š** å†™å®Œå…¨éƒ¨é…ç½®å¯„å­˜å™¨åŽè°ƒç”¨ `TMC_SetEnable(false)` å…³é—­é©±åŠ¨ã€‚
+è°ƒç”¨æ–¹æ— éœ€é¢å¤–æ“ä½œâ€”â€”åˆå§‹åŒ–å®Œæˆæ—¶ TMC2209 å·²å¤„äºŽå®‰å…¨å…³é—­çŠ¶æ€ã€‚
 
-**`TMC_ENABLE_DELAY_MS` ºê£º** ¶¨ÒåÔÚ `driver_tmc2209.h`£¬Öµ 50ms¡£
-È¡´úÖ®Ç°É¢ÂäÔÚ¸÷´¦µÄÓ²±àÂëÑÓÊ±£¨200ms¡¢10ms ²»Í³Ò»£©£¬ËùÓÐµ÷ÓÃµãÍ³Ò»ÒýÓÃ¡£
+**`TMC_ENABLE_DELAY_MS` å®ï¼š** å®šä¹‰åœ¨ `driver_tmc2209.h`ï¼Œå€¼ 50msã€‚
+å–ä»£ä¹‹å‰æ•£è½åœ¨å„å¤„çš„ç¡¬ç¼–ç å»¶æ—¶ï¼ˆ200msã€10ms ä¸ç»Ÿä¸€ï¼‰ï¼Œæ‰€æœ‰è°ƒç”¨ç‚¹ç»Ÿä¸€å¼•ç”¨ã€‚
 
-**`r_axis_rotate` °ü¹üÄ£Ê½£º**
+**`r_axis_rotate` åŒ…è£¹æ¨¡å¼ï¼š**
 ```
-TMC_SetEnable(true) ¡ú vTaskDelay(TMC_ENABLE_DELAY_MS)
-  ¡ú TMC_SetSpeed(vactual) ¡ú vTaskDelay(run_time_ms)
-  ¡ú TMC_SetSpeed(0) ¡ú vTaskDelay(R_ACCEL_DELAY)
-  ¡ú TMC_SetEnable(false)
+TMC_SetEnable(true) â†’ vTaskDelay(TMC_ENABLE_DELAY_MS)
+  â†’ TMC_SetSpeed(vactual) â†’ vTaskDelay(run_time_ms)
+  â†’ TMC_SetSpeed(0) â†’ vTaskDelay(R_ACCEL_DELAY)
+  â†’ TMC_SetEnable(false)
 ```
-ÌáÇ°·µ»ØÂ·¾¶£¨`fabsf(delta) < 0.5f`£©°²È«£º´ËÊ± TMC2209 ´¦ÓÚ¹Ø±Õ×´Ì¬¡£
+æå‰è¿”å›žè·¯å¾„ï¼ˆ`fabsf(delta) < 0.5f`ï¼‰å®‰å…¨ï¼šæ­¤æ—¶ TMC2209 å¤„äºŽå…³é—­çŠ¶æ€ã€‚
 
-**CubeMX PD15 Ä¬ÈÏÖµÏÝÚå£º** PD15(TMC1_EN) ÔÚ CubeMX ÖÐÎª GPIO_Output£¬Ä¬ÈÏ LOW¡£
-ENN µÍÓÐÐ§ ¡ú ´Ó boot Æð TMC2209 Ê¹ÄÜ¡£Ö®Ç°ÒÀÀµ `Host_Task` ÔÚÆô¶¯Ê±À­¸ß PD15£¬
-µ« `Host_Task` ¿ÉÄÜ±»×¢ÊÍ£¨ÈçÔËÐÐ `StartCamTestTask` Ê±£©¡£**ÈÎºÎ²»Ê¹ÓÃ R ÖáµÄÈÎÎñ±ØÐëÔÚÆô¶¯Ê±µ÷ÓÃ `TMC_SetEnable(false)`¡£**
+**CubeMX PD15 é»˜è®¤å€¼é™·é˜±ï¼š** PD15(TMC1_EN) åœ¨ CubeMX ä¸­ä¸º GPIO_Outputï¼Œé»˜è®¤ LOWã€‚
+ENN ä½Žæœ‰æ•ˆ â†’ ä»Ž boot èµ· TMC2209 ä½¿èƒ½ã€‚ä¹‹å‰ä¾èµ– `Host_Task` åœ¨å¯åŠ¨æ—¶æ‹‰é«˜ PD15ï¼Œ
+ä½† `Host_Task` å¯èƒ½è¢«æ³¨é‡Šï¼ˆå¦‚è¿è¡Œ `StartCamTestTask` æ—¶ï¼‰ã€‚**ä»»ä½•ä¸ä½¿ç”¨ R è½´çš„ä»»åŠ¡å¿…é¡»åœ¨å¯åŠ¨æ—¶è°ƒç”¨ `TMC_SetEnable(false)`ã€‚**
 
-**¸÷ÈÎÎñ TMC2209 ×´Ì¬ËÙ²é£º**
+**å„ä»»åŠ¡ TMC2209 çŠ¶æ€é€ŸæŸ¥ï¼š**
 
-| ÈÎÎñ | TMC2209 ×´Ì¬ | »úÖÆ |
+| ä»»åŠ¡ | TMC2209 çŠ¶æ€ | æœºåˆ¶ |
 |------|-------------|------|
-| `Host_Task` | Æô¶¯Ê±¹Ø±Õ | `TMC_SetEnable(false)` |
-| `StartCamTestTask` | Æô¶¯Ê±¹Ø±Õ | `TMC_SetEnable(false)` |
-| `StartPickPlaceTestTask` | `TMC_Init` ºó×Ô¶¯¹Ø±Õ | `TMC_Init()` Ä©Î²¹Ø±Õ |
-| `MotionTask_Func` | `TMC_Init` ºó×Ô¶¯¹Ø±Õ | `TMC_Init()` Ä©Î²¹Ø±Õ |
-| `StartMotorTestTask` | Ñ­»·ÄÚÃ¿´Î¿ª¡úÓÃ¡ú¹Ø | ÏÔÊ½°ü¹ü |
-| `r_axis_rotate` (Í¨ÓÃ) | Ã¿´Îµ÷ÓÃ¿ª¡úÓÃ¡ú¹Ø | º¯ÊýÄÚ°ü¹ü |
+| `Host_Task` | å¯åŠ¨æ—¶å…³é—­ | `TMC_SetEnable(false)` |
+| `StartCamTestTask` | å¯åŠ¨æ—¶å…³é—­ | `TMC_SetEnable(false)` |
+| `StartPickPlaceTestTask` | `TMC_Init` åŽè‡ªåŠ¨å…³é—­ | `TMC_Init()` æœ«å°¾å…³é—­ |
+| `MotionTask_Func` | `TMC_Init` åŽè‡ªåŠ¨å…³é—­ | `TMC_Init()` æœ«å°¾å…³é—­ |
+| `StartMotorTestTask` | å¾ªçŽ¯å†…æ¯æ¬¡å¼€â†’ç”¨â†’å…³ | æ˜¾å¼åŒ…è£¹ |
+| `r_axis_rotate` (é€šç”¨) | æ¯æ¬¡è°ƒç”¨å¼€â†’ç”¨â†’å…³ | å‡½æ•°å†…åŒ…è£¹ |
 
-**·ç¸ñÍ³Ò»£º** ËùÓÐÑÓÊ±Í³Ò»Ê¹ÓÃ `vTaskDelay(pdMS_TO_TICKS(...))`£¬²»ÔÙ»ìÓÃ `osDelay`¡£
+**é£Žæ ¼ç»Ÿä¸€ï¼š** æ‰€æœ‰å»¶æ—¶ç»Ÿä¸€ä½¿ç”¨ `vTaskDelay(pdMS_TO_TICKS(...))`ï¼Œä¸å†æ··ç”¨ `osDelay`ã€‚
 
-**Éæ¼°ÎÄ¼þ£º**
-| ÎÄ¼þ | ¸Ä¶¯ |
+**æ¶‰åŠæ–‡ä»¶ï¼š**
+| æ–‡ä»¶ | æ”¹åŠ¨ |
 |------|------|
-| `driver_tmc2209.h` | ÐÂÔö `TMC_ENABLE_DELAY_MS 50` |
-| `driver_tmc2209.c` | `TMC_Init()` Ä©Î²¹Ø±Õ + ÑÓÊ±¸Äºê |
-| `app_motion.c` | `r_axis_rotate` °ü¹üÊ¹ÄÜ/¹Ø±Õ + ÑÓÊ±¸Äºê + `osDelay`¡ú`vTaskDelay` |
-| `app_test.c` | `StartMotorTestTask` °ü¹ü + `StartCamTestTask` ¹Ø±Õ |
-| `app_host.c` | Âã GPIO Ð´ ¡ú `TMC_SetEnable(false)` |
+| `driver_tmc2209.h` | æ–°å¢ž `TMC_ENABLE_DELAY_MS 50` |
+| `driver_tmc2209.c` | `TMC_Init()` æœ«å°¾å…³é—­ + å»¶æ—¶æ”¹å® |
+| `app_motion.c` | `r_axis_rotate` åŒ…è£¹ä½¿èƒ½/å…³é—­ + å»¶æ—¶æ”¹å® + `osDelay`â†’`vTaskDelay` |
+| `app_test.c` | `StartMotorTestTask` åŒ…è£¹ + `StartCamTestTask` å…³é—­ |
+| `app_host.c` | è£¸ GPIO å†™ â†’ `TMC_SetEnable(false)` |
 
-## Ê®Æß¡¢PickPlace ÁªºÏ²âÊÔÈÎÎñ£¨2026-06-04~10£©
+## åä¸ƒã€PickPlace è”åˆæµ‹è¯•ä»»åŠ¡ï¼ˆ2026-06-04~10ï¼‰
 
-> **×´Ì¬£ºÒÑÆúÓÃ¡£** ´Ë²âÊÔÈÎÎñµÄ¹¦ÄÜ£¨Z Öá¶æ»ú¡¢DRV8803¡¢TMC2209£©ÒÑºÏ²¢µ½ `Host_Task` µÄ³õÊ¼»¯Á÷³ÌÖÐ£¨¼û ¡ì9.8-5/6£©¡£`StartPickPlaceTestTask` ÔÚ `app_freertos.c` ÖÐ´¦ÓÚ×¢ÊÍ×´Ì¬¡£
+> **çŠ¶æ€ï¼šå·²å¼ƒç”¨ã€‚** æ­¤æµ‹è¯•ä»»åŠ¡çš„åŠŸèƒ½ï¼ˆZ è½´èˆµæœºã€DRV8803ã€TMC2209ï¼‰å·²åˆå¹¶åˆ° `Host_Task` çš„åˆå§‹åŒ–æµç¨‹ä¸­ï¼ˆè§ Â§9.8-5/6ï¼‰ã€‚`StartPickPlaceTestTask` åœ¨ `app_freertos.c` ä¸­å¤„äºŽæ³¨é‡ŠçŠ¶æ€ã€‚
 
-### 17.1 ¸ÅÊö
+### 17.1 æ¦‚è¿°
 
-`StartPickPlaceTestTask` Î»ÓÚ `Task/app_test.c`£¬ÓÃÓÚ²âÊÔ Z Öá¶æ»ú + Îü×ìÆø±Ã + µç´Å·§ + R ÖáµÄÁªºÏ¹¤×÷Á÷³Ì¡£
+`StartPickPlaceTestTask` ä½äºŽ `Task/app_test.c`ï¼Œç”¨äºŽæµ‹è¯• Z è½´èˆµæœº + å¸å˜´æ°”æ³µ + ç”µç£é˜€ + R è½´çš„è”åˆå·¥ä½œæµç¨‹ã€‚
 
-**ÈÎÎñÊôÐÔ£º** Õ» 2048B£¬ÓÅÏÈ¼¶ Normal£¬Ãû `"PickPlace"`
+**ä»»åŠ¡å±žæ€§ï¼š** æ ˆ 2048Bï¼Œä¼˜å…ˆçº§ Normalï¼Œå `"PickPlace"`
 
-**³õÊ¼»¯Ë³Ðò£º**
-1. `DRV8803_Init()` ¡ú `EnableChip(1)` + `EnableChip(2)` ¡ª Ê¹ÄÜ 12V ºÍ 24V Á½¸ö DRV8803 Ð¾Æ¬
-2. `Servo_Init(&htim2)` ¡ú `DRV8803_SetOutput(&Port_12VO4, true)` ¡ª TIM2_CH3(PB10) 50Hz PWM + ¶æ»úÉÏµç
-3. `TMC_Init()` ¡ª R Öá TMC2209 ³õÊ¼»¯
+**åˆå§‹åŒ–é¡ºåºï¼š**
+1. `DRV8803_Init()` â†’ `EnableChip(1)` + `EnableChip(2)` â€” ä½¿èƒ½ 12V å’Œ 24V ä¸¤ä¸ª DRV8803 èŠ¯ç‰‡
+2. `Servo_Init(&htim2)` â†’ `DRV8803_SetOutput(&Port_12VO4, true)` â€” TIM2_CH3(PB10) 50Hz PWM + èˆµæœºä¸Šç”µ
+3. `TMC_Init()` â€” R è½´ TMC2209 åˆå§‹åŒ–
 
-**²âÊÔÑ­»·£º**
+**æµ‹è¯•å¾ªçŽ¯ï¼š**
 
-| ²½Öè | ¶¯×÷ | ¶æ»ú | Æø±Ã(PE11) | µç´Å·§(PA6) |
+| æ­¥éª¤ | åŠ¨ä½œ | èˆµæœº | æ°”æ³µ(PE11) | ç”µç£é˜€(PA6) |
 |------|------|------|-----------|------------|
-| Ê°È¡ | ¶æ»ú¡ú30¡ã + Æø±ÃON + ·§ON | PB10¡ú30¡ã | HIGH | LOW(µ¼Í¨) |
-| Ìù×° | ·§OFF + ±ÃOFF + ¶æ»ú¡ú120¡ã | PB10¡ú120¡ã | LOW | HIGH(¹Ø¶Ï) |
-| RÕý×ª | Ð±ÆÂ 5000¡ú80000 ¦Ìstep/s | ¡ª | ¡ª | ¡ª |
-| R·´×ª | Ð±ÆÂ -5000¡ú-80000 ¦Ìstep/s | ¡ª | ¡ª | ¡ª |
+| æ‹¾å– | èˆµæœºâ†’30Â° + æ°”æ³µON + é˜€ON | PB10â†’30Â° | HIGH | LOW(å¯¼é€š) |
+| è´´è£… | é˜€OFF + æ³µOFF + èˆµæœºâ†’120Â° | PB10â†’120Â° | LOW | HIGH(å…³æ–­) |
+| Ræ­£è½¬ | æ–œå¡ 5000â†’80000 Î¼step/s | â€” | â€” | â€” |
+| Råè½¬ | æ–œå¡ -5000â†’-80000 Î¼step/s | â€” | â€” | â€” |
 
-### 17.2 ¹Ø¼üÊµÏÖÏ¸½Ú
+### 17.2 å…³é”®å®žçŽ°ç»†èŠ‚
 
-**R ÖáËÙ¶ÈÐ±ÆÂ£º** TMC2209 VACTUAL Ä£Ê½ÎÞ¼«±äËÙ/¼ÓËÙÐ±ÆÂ¡£Ö±½ÓÌøÈ«ËÙÊ±¾²Ä¦²ÁÁ¦»á¿¨×¡µç»ú£¬Ðè´Ó 5000 ¦Ìstep/s Æð²½£¬Ã¿¼¶ +8000£¬40ms/¼¶£¬Öð²½ÌáÉýÖÁ 80000¡£
+**R è½´é€Ÿåº¦æ–œå¡ï¼š** TMC2209 VACTUAL æ¨¡å¼æ— æžå˜é€Ÿ/åŠ é€Ÿæ–œå¡ã€‚ç›´æŽ¥è·³å…¨é€Ÿæ—¶é™æ‘©æ“¦åŠ›ä¼šå¡ä½ç”µæœºï¼Œéœ€ä»Ž 5000 Î¼step/s èµ·æ­¥ï¼Œæ¯çº§ +8000ï¼Œ40ms/çº§ï¼Œé€æ­¥æå‡è‡³ 80000ã€‚
 
-**µç´Å·§¿ØÖÆ£º** ÒÑÐÞÕýÎªÍ¨¹ýÓïÒå»¯½Ó¿Ú `Valve_On()/Valve_Off()` ¿ØÖÆ£¨¼û ¡ì9.12£©¡£Êµ¼ÊÓ²¼þÎª±ê×¼ DRV8803£ºIN=HIGH¡úOUT=LOW¡úµ¼Í¨¡£²»ÔÙÊ¹ÓÃ BSRR Ö±Ð´¡£
-**µ÷ÊÔ¿ª¹Ø£º**
-- `PICKPLACE_VERBOSE`£¨app_test.c£©¡ª ¿ªÆô VACTUAL/DRV_STATUS ¶Á»ØÐ£Ñé
-- `SERVO_DEBUG`£¨driver_servo.h£©¡ª ¿ªÆô TIM ¼Ä´æÆ÷Õï¶ÏÊä³ö
+**ç”µç£é˜€æŽ§åˆ¶ï¼š** å·²ä¿®æ­£ä¸ºé€šè¿‡è¯­ä¹‰åŒ–æŽ¥å£ `Valve_On()/Valve_Off()` æŽ§åˆ¶ï¼ˆè§ Â§9.12ï¼‰ã€‚å®žé™…ç¡¬ä»¶ä¸ºæ ‡å‡† DRV8803ï¼šIN=HIGHâ†’OUT=LOWâ†’å¯¼é€šã€‚ä¸å†ä½¿ç”¨ BSRR ç›´å†™ã€‚
+**è°ƒè¯•å¼€å…³ï¼š**
+- `PICKPLACE_VERBOSE`ï¼ˆapp_test.cï¼‰â€” å¼€å¯ VACTUAL/DRV_STATUS è¯»å›žæ ¡éªŒ
+- `SERVO_DEBUG`ï¼ˆdriver_servo.hï¼‰â€” å¼€å¯ TIM å¯„å­˜å™¨è¯Šæ–­è¾“å‡º
 
-### 17.3 Éæ¼°ÎÄ¼þ
+### 17.3 æ¶‰åŠæ–‡ä»¶
 
-| ÎÄ¼þ | ½ÇÉ« |
+| æ–‡ä»¶ | è§’è‰² |
 |------|------|
-| Task/app_test.c | StartPickPlaceTestTask + ¸¨Öúº¯Êý |
-| Task/app_test.h | º¯ÊýÉùÃ÷ + ÈÎÎñÊôÐÔ |
-| Core/Src/app_freertos.c | ÈÎÎñ´´½¨£¨pickPlaceTestTaskHandle£© |
-| Drivers/ZeMCU-G4/driver_servo.c/h | ¶æ»ú PWM Çý¶¯ |
-| Drivers/ZeMCU-G4/driver_drv8803.c/h | DRV8803 ¶Ë¿ÚÇý¶¯ |
-| Drivers/ZeMCU-G4/driver_tmc2209.c/h | R Öá TMC2209 Çý¶¯ |
+| Task/app_test.c | StartPickPlaceTestTask + è¾…åŠ©å‡½æ•° |
+| Task/app_test.h | å‡½æ•°å£°æ˜Ž + ä»»åŠ¡å±žæ€§ |
+| Core/Src/app_freertos.c | ä»»åŠ¡åˆ›å»ºï¼ˆpickPlaceTestTaskHandleï¼‰ |
+| Drivers/ZeMCU-G4/driver_servo.c/h | èˆµæœº PWM é©±åŠ¨ |
+| Drivers/ZeMCU-G4/driver_drv8803.c/h | DRV8803 ç«¯å£é©±åŠ¨ |
+| Drivers/ZeMCU-G4/driver_tmc2209.c/h | R è½´ TMC2209 é©±åŠ¨ |
 
 
-## Ê®°Ë¡¢¶æ»úÇý¶¯¸Ä½ø¼ÇÂ¼£¨2026-06£©
+## åå…«ã€èˆµæœºé©±åŠ¨æ”¹è¿›è®°å½•ï¼ˆ2026-06ï¼‰
 
-### 18.1 CubeMX AF Ó³Éä Bug
+### 18.1 CubeMX AF æ˜ å°„ Bug
 
-**ÎÊÌâ£º** CubeMX Éú³ÉµÄ `HAL_TIM_MspPostInit` ÖÐ PE8(TIM5_CH3) ±»ÉèÎª `GPIO_AF1_TIM5`(AF1)£¬µ« STM32G474 ÉÏ PE8¡úTIM5_CH3 ¶ÔÓ¦ AF2¡£AF1 Êµ¼ÊÊÇ TIM1_CH1N£¬µ¼ÖÂ TIM5_CH3 PWM ÎÞ·¨Êä³öµ½ PE8¡£
+**é—®é¢˜ï¼š** CubeMX ç”Ÿæˆçš„ `HAL_TIM_MspPostInit` ä¸­ PE8(TIM5_CH3) è¢«è®¾ä¸º `GPIO_AF1_TIM5`(AF1)ï¼Œä½† STM32G474 ä¸Š PE8â†’TIM5_CH3 å¯¹åº” AF2ã€‚AF1 å®žé™…æ˜¯ TIM1_CH1Nï¼Œå¯¼è‡´ TIM5_CH3 PWM æ— æ³•è¾“å‡ºåˆ° PE8ã€‚
 
-**ÐÞ¸´£º** `driver_servo.c` µÄ `Servo_Init()` ÄÚ¼ì²â `htim->Instance == TIM5` Ê±£¬ÓÃ AF=0x02 ÖØÐÂ³õÊ¼»¯ PE8¡£
+**ä¿®å¤ï¼š** `driver_servo.c` çš„ `Servo_Init()` å†…æ£€æµ‹ `htim->Instance == TIM5` æ—¶ï¼Œç”¨ AF=0x02 é‡æ–°åˆå§‹åŒ– PE8ã€‚
 
-**×¢Òâ£º** TIM2_CH3(PB10) µÄ AF ÅäÖÃÔÚ CubeMX ÖÐÊÇÕýÈ·µÄ£¬²»ÐèÒªÐÞ¸´¡£
+**æ³¨æ„ï¼š** TIM2_CH3(PB10) çš„ AF é…ç½®åœ¨ CubeMX ä¸­æ˜¯æ­£ç¡®çš„ï¼Œä¸éœ€è¦ä¿®å¤ã€‚
 
-### 18.2 TIM5 ¶àÍ¨µÀ HAL ×´Ì¬Ëø
+### 18.2 TIM5 å¤šé€šé“ HAL çŠ¶æ€é”
 
-**ÎÊÌâ£º** TIM5_CH1(PB2, 24V_C1) ±»ÆäËû´úÂëÏÈµ÷ÓÃ `HAL_TIM_PWM_Start` Æô¶¯ºó£¬`htim5.State` ±äÎª BUSY¡£Ö®ºó `Servo_Init` µ÷ÓÃ `HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3)` Ê± HAL ×´Ì¬¼ì²é·µ»Ø HAL_ERROR£¬CC3E(CCER bit8) Î´±»ÖÃÎ»¡£
+**é—®é¢˜ï¼š** TIM5_CH1(PB2, 24V_C1) è¢«å…¶ä»–ä»£ç å…ˆè°ƒç”¨ `HAL_TIM_PWM_Start` å¯åŠ¨åŽï¼Œ`htim5.State` å˜ä¸º BUSYã€‚ä¹‹åŽ `Servo_Init` è°ƒç”¨ `HAL_TIM_PWM_Start(&htim5, TIM_CHANNEL_3)` æ—¶ HAL çŠ¶æ€æ£€æŸ¥è¿”å›ž HAL_ERRORï¼ŒCC3E(CCER bit8) æœªè¢«ç½®ä½ã€‚
 
-**ÐÞ¸´£º** ÁÙÊ±±£´æ `htim->State` ¡ú ÉèÎª `HAL_TIM_STATE_READY` ¡ú µ÷ÓÃ `HAL_TIM_PWM_Start` ¡ú »¹Ô­ State¡£´Ë²Ù×÷ÔÚÈÎÎñÆô¶¯½×¶ÎÎÞ²¢·¢·çÏÕ¡£
+**ä¿®å¤ï¼š** ä¸´æ—¶ä¿å­˜ `htim->State` â†’ è®¾ä¸º `HAL_TIM_STATE_READY` â†’ è°ƒç”¨ `HAL_TIM_PWM_Start` â†’ è¿˜åŽŸ Stateã€‚æ­¤æ“ä½œåœ¨ä»»åŠ¡å¯åŠ¨é˜¶æ®µæ— å¹¶å‘é£Žé™©ã€‚
 
-### 18.3 ¶æ»ú¸ÄÎª TIM2_CH3
+### 18.3 èˆµæœºæ”¹ä¸º TIM2_CH3
 
-¶æ»úÐÅºÅ´Ó PE8(TIM5_CH3) Ç¨ÒÆµ½ PB10(TIM2_CH3)¡£CubeMX ÖÐÐèÅäÖÃ£º
-- TIM2: PSC=169, ARR=19999 ¡ú 50Hz
+èˆµæœºä¿¡å·ä»Ž PE8(TIM5_CH3) è¿ç§»åˆ° PB10(TIM2_CH3)ã€‚CubeMX ä¸­éœ€é…ç½®ï¼š
+- TIM2: PSC=169, ARR=19999 â†’ 50Hz
 - TIM2_CH3: PWM Generation CH3
 
-TIM2_CH1(PA0, 12V_C1) ÊÜ´ËÆµÂÊ±ä¸üÓ°Ïì´Ó ~1kHz ½µµ½ 50Hz£¬µ«ÓÉÓÚ 12V_C1 pulse Ô¶³¬ ARR Êµ¼ÊÖ»ÊÇ¿ª¹Ø¿ØÖÆ£¬²»ÊÜÓ°Ïì¡£
+TIM2_CH1(PA0, 12V_C1) å—æ­¤é¢‘çŽ‡å˜æ›´å½±å“ä»Ž ~1kHz é™åˆ° 50Hzï¼Œä½†ç”±äºŽ 12V_C1 pulse è¿œè¶… ARR å®žé™…åªæ˜¯å¼€å…³æŽ§åˆ¶ï¼Œä¸å—å½±å“ã€‚
 
-### 18.4 SERVO_DEBUG Õï¶Ï
+### 18.4 SERVO_DEBUG è¯Šæ–­
 
-ÔÚ `driver_servo.h` ÖÐ¶¨Òå `SERVO_DEBUG` ºó£¬`Servo_Init()` »áÊä³ö TIM PSC/ARR/CCR/CR1/CCER ¼Ä´æÆ÷Öµ£¬ÓÃÓÚÑéÖ¤ PWM ÅäÖÃ¡£µ÷ÊÔÍê³Éºó×¢ÊÍµô¼´¿É»Ö¸´¸É¾»±àÒë¡£
+åœ¨ `driver_servo.h` ä¸­å®šä¹‰ `SERVO_DEBUG` åŽï¼Œ`Servo_Init()` ä¼šè¾“å‡º TIM PSC/ARR/CCR/CR1/CCER å¯„å­˜å™¨å€¼ï¼Œç”¨äºŽéªŒè¯ PWM é…ç½®ã€‚è°ƒè¯•å®ŒæˆåŽæ³¨é‡ŠæŽ‰å³å¯æ¢å¤å¹²å‡€ç¼–è¯‘ã€‚
 
 
-## Ê®¾Å¡¢DRV8803 ¶Ë¿ÚÓ³ÉäÓëÊ¹ÓÃ×¢ÒâÊÂÏî
+## åä¹ã€DRV8803 ç«¯å£æ˜ å°„ä¸Žä½¿ç”¨æ³¨æ„äº‹é¡¹
 
-### 19.1 µ±Ç°Êµ¼Ê½ÓÏß
-
-| Âß¼­¶Ë¿Ú | ¿ª¹ØÒý½Å | PWM Òý½Å | Êµ¼ÊÓÃÍ¾ |
-|----------|---------|---------|----------|
-| Port_12VO1 | PE11 | ¡ª | Îü×ìÆø±Ã |
-| Port_12VO2 | PE12 | ¡ª | Ô¤Áô |
-| Port_12VO3 | PE13 | PE8(TIM5_CH3) | Ô¤Áô(PWM) |
-| Port_12VO4 | PE14 | PB10(TIM2_CH3) | ZÖá¶æ»ú¹©µç+PWM |
-| Port_24VO1 | PA6 | ¡ª | µç´Å·§(µÍ¶Ë¿ª¹Ø) |
-| Port_24VO2 | PA7 | ¡ª | Ô¤Áô |
-| Port_24VO3 | PC4 | PB1(TIM3_CH4) | Ô¤Áô(PWM) |
-| Port_24VO4 | PC5 | PB2(TIM5_CH1) | 24V_C1(PWM) |
-
-### 19.2 API Ê¹ÓÃÒªµã
-
-- `DRV8803_Init()` ºó±ØÐë·Ö±ðµ÷ÓÃ `DRV8803_EnableChip(1, true)` ºÍ `DRV8803_EnableChip(2, true)` Ê¹ÄÜ U12/U13
-- `DRV8803_SetOutput()` ½ö²Ù×÷¿ª¹ØÒý½Å(pins[0])£¬HIGH=µ¼Í¨(HIGH-side ON)
-- **24V ¶Ë¿Ú£¨Port_24VO1 µÈ£©ÊÇµÍ¶Ë¿ª¹Ø**£º`DRV8803_SetOutput` µÄ on/off Âß¼­ÓëÊä³ö×´Ì¬Ïà·´¡£on=true Ê± OUT À­ 24V£¨¸ºÔØ¹Ø£©£¬on=false Ê± OUT À­ GND£¨¸ºÔØ¿ª£©
-- PWM Òý½Å(pins[1])ÓÉÉÏ²ãÍ¨¹ý HAL ¶¨Ê±Æ÷ API ¿ØÖÆ£¬²»×ß DRV8803_SetOutput
-- `DRV8803_Init()` »á½«ËùÓÐ¶Ë¿ÚÒý½ÅÀ­µÍ£¬Ê¹ÄÜÐ¾Æ¬ºó 24V ¶Ë¿ÚÄ¬ÈÏ´¦ÓÚ"µ¼Í¨"×´Ì¬£¨OUT=GND£©£¬ÐèÔÚ³õÊ¼»¯Íê³ÉºóÖ÷¶¯À­¸ß¹Ø¶Ï
-
-### 19.3 ¹ÊÕÏÅÅ²é
-
-| ÏÖÏó | ¼ì²éÏî |
-|------|--------|
-| 12V ¶Ë¿Ú²»¹¤×÷ | PE9(EN1) ÊÇ·ñÎª LOW |
-| 24V ¶Ë¿Ú²»¹¤×÷ | PA4(EN2) ÊÇ·ñÎª LOW¡¢PB0(RST2) ÊÇ·ñÎª LOW |
-| µç´Å·§²»¶¯ | PA6 ÊÇ·ñÓÐ HIGH¡úLOW Ìø±ä¡¢U13 ÊÇ·ñÊ¹ÄÜ¡¢24V ¹©µçÊÇ·ñÕý³£ |
-| ¶æ»ú²»×ª | PB10 ÊÇ·ñÓÐ 50Hz PWM¡¢PE14(¿ª¹Ø) ÊÇ·ñ HIGH |
+> æ­¤ç« èŠ‚çš„å†…å®¹å·²åˆå¹¶è‡³ Â§10.4ï¼ˆDRV8803 ç«¯å£å¯¹ç…§ä¸Žä½¿ç”¨ç¤ºä¾‹ï¼‰ï¼Œæ•…éšœæŽ’æŸ¥è¡¨è§ Â§10.4 æœ«å°¾ã€‚
