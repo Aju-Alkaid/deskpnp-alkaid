@@ -922,76 +922,77 @@ virtual void onNotifyCustom(uint8_t code, uint8_t param) {}
 3. `Data_Transfer` 全局变量 (`if_now_SMT` 等) 应逐步迁移到 `DT_Notify*` 模式
 4. 分发中枢目前由 `Model::tick()` 驱动（~30Hz），高负载场景可考虑独立 `DT_DispatchTask`
 
+## 十五、ESP32 通信模块 — IoT 互联 (v2, 2026-05-28)
 
-## ???ESP32 ???? ? IoT ?? (v2, 2026-05-28)
+### 15.1 模块概述
 
-### 15.1 ????
+通过 SPI4 接口与 ESP32-C3 模块全双工通信，实现贴片机状态数据实时推送至局域网 Web 仪表盘。
+协议遵循 `esp-temp/ESP32-C3通信接口规范_v2.0.md`。
 
-?? SPI4 ??? ESP32-C3 ????????????????????????? Web ????
-???? `esp-temp/ESP32-C3??????_v2.0.md`?
+**三层架构：**
 
-**?????**
-
-| ? | ?? | ?? |
+| 层 | 文件 | 职责 |
 |----|------|------|
-| ??? | `Drivers/ZeMCU-G4/driver_esp32.c/h` | SPI4 128B ????? + CS(PE3) ?? + C3RESET(PC13) ??? |
-| ??? | `Task/app_esp_protocol.c/h` | ??(??/??/??)???(??)????????/????? |
-| ??? | `Task/app_esp_task.c/h` | ESP_Task 500ms ?? + ???????? + ?????? + ???? |
+| 驱动层 | `Drivers/ZeMCU-G4/driver_esp32.c/h` | SPI4 128B 全双工收发 + CS(PE3) 控制 + C3RESET(PC13) 硬复位 |
+| 协议层 | `Task/app_esp_protocol.c/h` | 组包(数据/控制/查询)、解包(响应)、命令码宏、温度/进度格式化 |
+| 任务层 | `Task/app_esp_task.c/h` | ESP_Task 500ms 心跳 + 轮询分时数据推送 + 控制命令路由 + 响应处理 |
 
-### 15.2 ????
+### 15.2 任务架构
 
-| ?? | ? | ??? | ??/?? |
+| 任务 | 栈 | 优先级 | 周期/触发 |
 |------|-----|--------|----------|
-| `ESP_Task` | 512 | Normal | ???? + 500ms ?? |
+| `ESP_Task` | 512 | Normal | 事件驱动 + 500ms 心跳 |
 
-**??????**
-- `esp_cmd_queue` (8 ??) ? ???? ? ESP_Task??? WiFi ??/????
+**任务间通信：**
+- `esp_cmd_queue` (8 深度) — 其他任务 → ESP_Task，发送 WiFi 开关/查询指令
+- `esp_cmd_queue` 在 `app_freertos.c` 中定义并创建，`app_esp_task.h` 通过 extern 声明供其他模块引用
 
-### 15.3 ???
+### 15.3 数据流
 
 ```
-??????                         ESP_Task                      ESP32-C3
-(????)                            ?                              ?
-now_SMT/total_SMT ??????? ?? "32/50" ??? 0x10 0x01 ??SPI4???  ?? ? WebSocket
-if_now_SMT/Heater ??????? ?? "SMTing" ??? 0x10 0x02 ??SPI4???  ??
-HeaterStatus.state ?????? ?? "1"/"0"  ??? 0x10 0x03 ??SPI4???
-HeaterStatus.cur_temp ??? ?? "85.3"   ??? 0x10 0x04 ??SPI4???
+系统状态变量                         ESP_Task                      ESP32-C3
+(复用现有)                            │                              │
+now_SMT/total_SMT → 进度 "32/50" → 0x10 0x01 ──SPI4──►  解析 → WebSocket
+if_now_SMT/Heater → 状态 "SMTing" → 0x10 0x02 ──SPI4──►  推送
+HeaterStatus.state → 加热 "1"/"0" → 0x10 0x03 ──SPI4──►
+HeaterStatus.cur_temp → 温度 "85.3" → 0x10 0x04 ──SPI4──►
 
-ESP_SendCommand(WIFI_ON) ??? esp_cmd_queue ??? 0x20 0x01 ??SPI4???  ?? WiFi
-                                                        ???SPI4??  0xF2 "1"
+ESP_SendCommand(WIFI_ON) → esp_cmd_queue → 0x20 0x01 ──SPI4──►  启动 WiFi
+                                                       ◄──SPI4──  0xF2 "1"
                               g_esp_wifi_connected = 1
 ```
 
-### 15.4 ????? (???????)
+### 15.4 全局标志位 (供后续模块复用)
 
-| ?? | ???? | ?? |
+| 变量 | 定义位置 | 含义 |
 |------|----------|------|
-| `g_esp_wifi_enabled` | `app_esp_task.c` | WiFi ???? (0=?, 1=?) |
-| `g_esp_wifi_connected` | `app_esp_task.c` | WiFi ?????? (ESP ??) |
-| `g_esp_fault_code` | `app_esp_task.c` | ??? (0x00=???) |
-| `g_esp_last_rx_tick` | `app_esp_task.c` | ??????? tick |
+| `g_esp_wifi_enabled` | `app_esp_task.c` | WiFi 功能开关 (0=关, 1=开) |
+| `g_esp_wifi_connected` | `app_esp_task.c` | WiFi 实际连接状态 (ESP 回传) |
+| `g_esp_fault_code` | `app_esp_task.c` | 故障码 (0x00=无故障) |
+| `g_esp_last_rx_tick` | `app_esp_task.c` | 最后收到响应的 tick |
 
-### 15.5 ?????
+### 15.5 命令码速查
 
-| ??? | ??? | ?? | ???? |
+| 主命令 | 子命令 | 含义 | 发送接口 |
 |--------|--------|------|----------|
-| `0x10` | `0x01` | ???? | ESP_Task ???? |
-| `0x10` | `0x02` | ???? | ESP_Task ???? |
-| `0x10` | `0x03` | ????? | ESP_Task ???? |
-| `0x10` | `0x04` | ????? | ESP_Task ???? (??>0.5?C) |
-| `0x20` | `0x01` | ?? WiFi | `ESP_SendCommand(ESP_CMD_WIFI_ON)` |
-| `0x20` | `0x02` | ?? WiFi | `ESP_SendCommand(ESP_CMD_WIFI_OFF)` |
-| `0x30` | `0x01` | ???? | `ESP_SendCommand(ESP_CMD_QUERY_FAULT)` |
-| `0x30` | `0x02` | ?? WiFi | `ESP_SendCommand(ESP_CMD_QUERY_WIFI)` |
+| `0x10` | `0x01` | 贴片进度 | ESP_Task 自动推送 |
+| `0x10` | `0x02` | 贴片状态 | ESP_Task 自动推送 |
+| `0x10` | `0x03` | 加热台状态 | ESP_Task 自动推送 |
+| `0x10` | `0x04` | 加热台温度 | ESP_Task 自动推送 (变化>0.5°C) |
+| `0x20` | `0x01` | 打开 WiFi | `ESP_SendCommand(ESP_CMD_WIFI_ON)` |
+| `0x20` | `0x02` | 关闭 WiFi | `ESP_SendCommand(ESP_CMD_WIFI_OFF)` |
+| `0x30` | `0x01` | 查询故障 | `ESP_SendCommand(ESP_CMD_QUERY_FAULT)` |
+| `0x30` | `0x02` | 查询 WiFi | `ESP_SendCommand(ESP_CMD_QUERY_WIFI)` |
 
-### 15.6 ??? Bug
+### 15.6 已修复 Bug
 
-- **HostMotion ???????** `app_freertos.c` ? `osThreadNew(StartHostMotionTestTask, ...)` ??????????????
-- **SPI4_CS/C3RESET ??????** `ESP_GPIO_Init()` ? CS ? RST ??
+- **HostMotion 任务重复创建：** `app_freertos.c` 中 `osThreadNew(StartHostMotionTestTask, ...)` 出现两次，已删除无句柄的那行，仅保留 `hostMotionTaskHandle = osThreadNew(...)`
+- **SPI4_CS/C3RESET 上电默认低：** `ESP_GPIO_Init()` 将 CS 和 RST 置高
+- **esp_cmd_queue 重复定义 (L6200E)：** `app_esp_task.c` 中移除定义，统一由 `app_freertos.c` 定义，`app_esp_task.h` 通过 extern 声明引用
 
-### 15.7 ??????
+### 15.7 新增文件清单
 
-| ?? | ?? |
+| 文件 | 行数 |
 |------|------|
 | `Drivers/ZeMCU-G4/driver_esp32.c` | 67 |
 | `Drivers/ZeMCU-G4/driver_esp32.h` | 41 |
@@ -999,14 +1000,13 @@ ESP_SendCommand(WIFI_ON) ??? esp_cmd_queue ??? 0x20 0x01 ??SPI4???  ?? WiFi
 | `Task/app_esp_protocol.h` | 143 |
 | `Task/app_esp_task.c` | 282 |
 | `Task/app_esp_task.h` | 55 |
-| `ESP32????_STM32?????_v2.md` | ???? |
+| `ESP32通信模块_STM32端实现报告_v2.md` | 报告文档 |
 
-### 15.8 ????
+### 15.8 仍待完成
 
-1. Keil ???? (????????)
-2. ESP32 ??? (ESP ???????????)
-3. ????? WiFi ????
-4. TouchGFX GUI ?? WiFi ?????
+1. ESP32 端联调 (ESP 端需按同一接口规范实现)
+2. 上位机集成 WiFi 开关指令
+3. TouchGFX GUI 添加 WiFi 状态指示器
 
 ## 十六、TMC2209 UART 调试记录（2026-06-05~06）
 
