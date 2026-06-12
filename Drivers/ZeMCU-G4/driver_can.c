@@ -58,7 +58,7 @@ void can_filter_mask_config(FDCAN_HandleTypeDef *hfdcan)
     can_filter_init_structure.FilterType = FDCAN_FILTER_MASK;
     can_filter_init_structure.FilterConfig = FDCAN_FILTER_TO_RXFIFO0;
     can_filter_init_structure.FilterID1 = 0x00000000;//标准ID
-    can_filter_init_structure.FilterID2 = 0xFFE00000;//掩码（全通）      FilterID2：掩码位（1=忽略该位，0=必须匹配）
+    can_filter_init_structure.FilterID2 = 0x1FFC0000;//掩码（标准ID bit0~10全通）      FilterID2：掩码位（1=忽略该位，0=必须匹配）
     HAL_FDCAN_ConfigFilter(hfdcan, &can_filter_init_structure);
 
     // 全局滤波器, 直接拒绝不符合规则的标准数据帧, 扩展数据帧, 标准遥控帧, 扩展遥控帧
@@ -137,7 +137,7 @@ uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t 
     tx_header.FDFormat = FDCAN_CLASSIC_CAN;
     tx_header.TxEventFifoControl = FDCAN_NO_TX_EVENTS;
     tx_header.MessageMarker = 0;
-#if 0  // DEBUG_CAN_ISR — 已永久禁用（TX日志刷屏）
+#if 0  // DEBUG_CAN_ISR
 	     // ---- 调试打印（暂时加入）----
     PrintDebug("TX ID=%d LEN=%d DATA:", can_id, total_len);
     for (int i = 0; i < total_len; i++) {
@@ -212,7 +212,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
 								pkt.Status = 0xFF;          // 无意义
 						}
 						
-#ifdef DEBUG_CAN_ISR
+#if 0  // DEBUG_CAN_ISR
 						 PrintDebug("RX: ID=%d LEN=%d DATA:", header.Identifier, header.DataLength);
             for (int i = 0; i < header.DataLength; i++) {
                 PrintDebug(" %02X", rx_data[i]);

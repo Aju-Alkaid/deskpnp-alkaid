@@ -74,7 +74,7 @@ void Motor_Init(void) {
     osDelay(20);
 
     // 4. 开启同步标志（广播，双 X 轴必须）
-    motorSyncEnable(1);
+    motorSyncEnable(0);  // 关闭同步，三轴独立执行
     osDelay(20);
 
     // 5. 标定零点：将当前所有电机位置作为绝对零点
@@ -429,6 +429,9 @@ void motorSyncEnable(uint8_t enable) {
     tx[0] = 0x4A;
     tx[1] = enable ? 0x01 : 0x00;
     CAN_Transmit_Data(&hfdcan1, 0x00, tx, 2); // 广播
+    CAN_Transmit_Data(&hfdcan1, 0x01, tx, 2); // X1
+    CAN_Transmit_Data(&hfdcan1, 0x02, tx, 2); // X2
+    CAN_Transmit_Data(&hfdcan1, 0x03, tx, 2); // Y
 }
 
 /* 设置当前位置为零点 (0x92) */
@@ -437,7 +440,6 @@ void motorSetZero(uint8_t slaveAddr) {
     tx[0] = 0x92;
     CAN_Transmit_Data(&hfdcan1, slaveAddr, tx, 1);
 }
-
 
 //运行失败
 void runFail(void)
@@ -456,7 +458,6 @@ void runOK(void)
 				
 			}	
 }
-
 
 
 

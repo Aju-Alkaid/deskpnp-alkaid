@@ -1,8 +1,8 @@
-ï»¿#include "driver_uart.h"  
+#include "driver_uart.h"  
 #include "FreeRTOS.h"     
 #include "task.h"         
-#include <string.h>       // ç”¨äº strlen
-#include <stdio.h>        // ç”¨äº sprintf (å¯é€‰)
+#include <string.h>       // ÓÃÓÚ strlen
+#include <stdio.h>        // ÓÃÓÚ sprintf (¿ÉÑ¡)
 #include "driver_tmc2209.h"  
 #include <stdarg.h>
 #include "driver_drv8803.h"
@@ -10,28 +10,32 @@
 #include "app_test.h"
 #include "driver_can.h"
 #include "app_motion.h"
-#include <math.h>   // è§£å†³ fabsf æœªå£°æ˜
+#include <math.h>   // ½â¾ö fabsf Î´ÉùÃ÷
 #include "app_uart_parser.h"
 #include "app_vision.h"
 
-// ç®€å•çš„æ­¥è¿›è„‰å†²ç”Ÿæˆå‡½æ•° (éœ€æ ¹æ®ä½ çš„GPIOå®šä¹‰ä¿®æ”¹)
+// ¼òµ¥µÄ²½½øÂö³åÉú³Éº¯Êı (Ğè¸ù¾İÄãµÄGPIO¶¨ÒåĞŞ¸Ä)
 #define STEP_GPIO_PORT GPIOD
 #define STEP_PIN GPIO_PIN_12
 #define DIR_GPIO_PORT GPIOD
 #define DIR_PIN GPIO_PIN_13
 
-/* æµ‹è¯•ä»»åŠ¡å‚æ•° */
-#define DRV8803_TEST_PERIOD_MS  500   // é€šé“å¾ªç¯åˆ‡æ¢é—´éš”
-/* èˆµæœºæµ‹è¯•ä»»åŠ¡å‚æ•° */
-#define SERVO_TEST_CH            2            // PE8 â†’ TIM5_CH3 â†’ é€šé“ç´¢å¼• 2
-#define SERVO_SWING_STEP_DEG     0.5f         // æ¯æ­¥è§’åº¦å¢é‡
-#define SERVO_SWING_PERIOD_MS    10           // æ¯æ­¥å»¶æ—¶(ms)ï¼Œå†³å®šè¿åŠ¨é€Ÿåº¦
+/* ²âÊÔÈÎÎñ²ÎÊı */
+#define DRV8803_TEST_PERIOD_MS  500   // Í¨µÀÑ­»·ÇĞ»»¼ä¸ô
+/* ¶æ»ú²âÊÔÈÎÎñ²ÎÊı */
+#define SERVO_TEST_CH            2            // PE8 ¡ú TIM5_CH3 ¡ú Í¨µÀË÷Òı 2
+#define SERVO_SWING_STEP_DEG     0.5f         // Ã¿²½½Ç¶ÈÔöÁ¿
+#define SERVO_SWING_PERIOD_MS    10           // Ã¿²½ÑÓÊ±(ms)£¬¾ö¶¨ÔË¶¯ËÙ¶È
 
 
-/* ---- ä¸Šä½æœºè¿åŠ¨æµ‹è¯• å¸¸é‡ ---- */
+/* ---- Õï¶ÏÈÕÖ¾¿ª¹Ø£¨µ÷ÊÔÍê³Éºó×¢ÊÍµô¼´¿É¹Ø±Õ£© ---- */
+#define DEBUG_MOVE         // move_xy_relative µ½Î»/³¬Ê±ÈÕÖ¾
+#define DEBUG_CAN_PROC     // CAN_Process_Task µ½Î»Ö¡ÈÕÖ¾
+
+/* ---- ÉÏÎ»»úÔË¶¯²âÊÔ ³£Á¿ ---- */
 
 
-/* å¤–éƒ¨å˜é‡ï¼šCANæ¥æ”¶é˜Ÿåˆ—ï¼ˆå·²åœ¨ driver_can.c ä¸­å®šä¹‰ï¼‰ */
+/* Íâ²¿±äÁ¿£ºCAN½ÓÊÕ¶ÓÁĞ£¨ÒÑÔÚ driver_can.c ÖĞ¶¨Òå£© */
 extern osMessageQueueId_t motor_event_queue;
 extern osMutexId_t g_debug_mutex;
 extern osThreadId_t hostMotionTaskHandle;
@@ -43,8 +47,8 @@ static char s_debug_buf[128];
 
 
 /**
- * @brief è½»é‡æ ¼å¼åŒ–æ ¸å¿ƒï¼Œæ›¿ä»£ vsnprintfï¼Œæ ˆå ç”¨çº¦ 80 å­—èŠ‚
- * @note  æ”¯æŒ: %d %ld %u %.1f %.2f %02X %s %.*s åŠçº¯æ–‡æœ¬ï¼ˆå« UTF-8 ä¸­æ–‡ï¼‰
+ * @brief ÇáÁ¿¸ñÊ½»¯ºËĞÄ£¬Ìæ´ú vsnprintf£¬Õ»Õ¼ÓÃÔ¼ 80 ×Ö½Ú
+ * @note  Ö§³Ö: %d %ld %u %.1f %.2f %02X %s %.*s ¼°´¿ÎÄ±¾£¨º¬ UTF-8 ÖĞÎÄ£©
  */
 static int dbg_vformat(char* buf, int sz, const char* fmt, va_list args) {
     static const int pow10[] = {1, 10, 100, 1000, 10000, 100000, 1000000};
@@ -58,7 +62,7 @@ static int dbg_vformat(char* buf, int sz, const char* fmt, va_list args) {
         int zero = 0, prec = -1;
 
         if (ch == '0') { zero = 1; ch = *fmt++; }
-        if (ch >= '0' && ch <= '9') { ch = *fmt++; }  /* è·³è¿‡å®½åº¦ä½ (å¦‚ %02X çš„ 2) */
+        if (ch >= '0' && ch <= '9') { ch = *fmt++; }  /* Ìø¹ı¿í¶ÈÎ» (Èç %02X µÄ 2) */
         if (ch == '.') {
             ch = *fmt++;
             if (ch == '*') { prec = va_arg(args, int); ch = *fmt++; }
@@ -121,9 +125,9 @@ void StartMotorTestTask(void *argument);
 
 
 /**
- * @brief UART æµ‹è¯•ä»»åŠ¡
- * @param argument ä»»åŠ¡å‚æ•°
- * @note è¯¥ä»»åŠ¡è´Ÿè´£æµ‹è¯• CH340 çš„æ”¶å‘åŠŸèƒ½
+ * @brief UART ²âÊÔÈÎÎñ
+ * @param argument ÈÎÎñ²ÎÊı
+ * @note ¸ÃÈÎÎñ¸ºÔğ²âÊÔ CH340 µÄÊÕ·¢¹¦ÄÜ
  */
 void StartUartTestTask(void *argument)
 {
@@ -131,15 +135,15 @@ void StartUartTestTask(void *argument)
 		HAL_UART_Transmit(&huart1, (uint8_t*)"Test\r\n", 6, 100);
     for (;;)
     {
-        // é©±åŠ¨å¤„ç†ï¼ˆæ¬è¿ DMA æ•°æ®åˆ°åº”ç”¨ç¼“å†²åŒºï¼‰
+        // Çı¶¯´¦Àí£¨°áÔË DMA Êı¾İµ½Ó¦ÓÃ»º³åÇø£©
         UART_Driver_Process();
 
-        // æ£€æŸ¥æ˜¯å¦æœ‰æ–°æ•°æ®
+        // ¼ì²éÊÇ·ñÓĞĞÂÊı¾İ
         const uint8_t *rx_data = NULL;
         uint16_t rx_len = 0;
         if (UART_PeekData(UART_CH1, &rx_data, &rx_len))
         {
-            // æ„å»ºå›æ˜¾å¸§
+            // ¹¹½¨»ØÏÔÖ¡
             char echo_buf[300];
             int offset = snprintf(echo_buf, sizeof(echo_buf), "Recv(%d): ", rx_len);
             if (offset > 0 && offset < (int)sizeof(echo_buf))
@@ -151,11 +155,11 @@ void StartUartTestTask(void *argument)
                 echo_buf[offset++] = '\n';
                 echo_buf[offset] = '\0';
 
-                // å‘é€å›æ˜¾
+                // ·¢ËÍ»ØÏÔ
                 UART_SendData(UART_CH1, (uint8_t*)echo_buf, offset);
             }
 
-            // æ•°æ®å·²å¤„ç†ï¼Œæ¸…é™¤æ ‡å¿—
+            // Êı¾İÒÑ´¦Àí£¬Çå³ı±êÖ¾
             UART_ClearData(UART_CH1);
         }
 
@@ -163,7 +167,7 @@ void StartUartTestTask(void *argument)
     }
 }
 /**
- * @brief TMC2209 æµ‹è¯•ä»»åŠ¡
+ * @brief TMC2209 ²âÊÔÈÎÎñ
  */
 void StartMotorTestTask(void *argument) {
     vTaskDelay(pdMS_TO_TICKS(500));
@@ -174,8 +178,8 @@ void StartMotorTestTask(void *argument) {
         vTaskSuspend(NULL);
     }
 
-    // TMC2209 å†…éƒ¨è„‰å†²å‘ç”Ÿå™¨æ¨¡å¼ï¼šVACTUAL â‰  0 å³å¯ï¼Œæ— éœ€ RAMPMODE
-    int32_t speed = 40000;  // å¾®æ­¥/ç§’
+    // TMC2209 ÄÚ²¿Âö³å·¢ÉúÆ÷Ä£Ê½£ºVACTUAL ¡Ù 0 ¼´¿É£¬ÎŞĞè RAMPMODE
+    int32_t speed = 40000;  // Î¢²½/Ãë
 
     for (;;) {
         TMC_SetEnable(true);
@@ -187,19 +191,19 @@ void StartMotorTestTask(void *argument) {
         vTaskDelay(pdMS_TO_TICKS(50));
         TMC_SetEnable(false);
 
-        // åè½¬æ–¹å‘
+        // ·´×ª·½Ïò
         speed = -speed;
     }
 }
 
 /**
- * @brief ç®€å• PWM æ¨¡æ‹Ÿå‡½æ•°ï¼ˆä½¿ç”¨ä»»åŠ¡å»¶æ—¶äº§ç”Ÿæ–¹æ³¢ï¼‰
- * @param port : GPIO ç«¯å£
- * @param pin  : å¼•è„šå·
- * @param period_ms : å‘¨æœŸï¼ˆmsï¼‰
- * @param duty    : å ç©ºæ¯”ï¼ˆ0~100ï¼‰
- * @param cycles  : é‡å¤å‘¨æœŸæ•°
- * @note  è¯¥å‡½æ•°ä¼šé˜»å¡å½“å‰ä»»åŠ¡ï¼Œä»…ç”¨äºæµ‹è¯•æ¼”ç¤º
+ * @brief ¼òµ¥ PWM Ä£Äâº¯Êı£¨Ê¹ÓÃÈÎÎñÑÓÊ±²úÉú·½²¨£©
+ * @param port : GPIO ¶Ë¿Ú
+ * @param pin  : Òı½ÅºÅ
+ * @param period_ms : ÖÜÆÚ£¨ms£©
+ * @param duty    : Õ¼¿Õ±È£¨0~100£©
+ * @param cycles  : ÖØ¸´ÖÜÆÚÊı
+ * @note  ¸Ãº¯Êı»á×èÈûµ±Ç°ÈÎÎñ£¬½öÓÃÓÚ²âÊÔÑİÊ¾
  */
 static void SimplePWM(GPIO_TypeDef* port, uint16_t pin,
                       uint32_t period_ms, uint8_t duty, uint8_t cycles)
@@ -216,28 +220,28 @@ static void SimplePWM(GPIO_TypeDef* port, uint16_t pin,
 }
 
 /**
- * @brief DRV8803 æµ‹è¯•ä»»åŠ¡
- *   - åˆå§‹åŒ–èŠ¯ç‰‡é…ç½®
- *   - ä¾æ¬¡ä½¿èƒ½ä¸¤ä¸ªèŠ¯ç‰‡ï¼Œå¾ªç¯ç‚¹äº®æ¯ä¸ªé€šé“
- *   - æ§åˆ¶å¯¹åº”çš„ PWM çº¿äº§ç”Ÿå‘¼å¸æ•ˆæœ
- *   - æ•…éšœç›‘æµ‹ä¸å¤„ç†
+ * @brief DRV8803 ²âÊÔÈÎÎñ
+ *   - ³õÊ¼»¯Ğ¾Æ¬ÅäÖÃ
+ *   - ÒÀ´ÎÊ¹ÄÜÁ½¸öĞ¾Æ¬£¬Ñ­»·µãÁÁÃ¿¸öÍ¨µÀ
+ *   - ¿ØÖÆ¶ÔÓ¦µÄ PWM Ïß²úÉúºôÎüĞ§¹û
+ *   - ¹ÊÕÏ¼à²âÓë´¦Àí
  */
 void StartDrv8803TestTask(void *argument)
 {
-     PrintDebug("--- çœŸç©ºæ³µæµ‹è¯• (12VO1/PE11) ---\r\n");
+     PrintDebug("--- Õæ¿Õ±Ã²âÊÔ (12VO1/PE11) ---\r\n");
 
     DRV8803_Init();
 
     DRV8803_EnableChip(1, true);
-    DRV8803_EnableChip(2, true);   /* U13 24V èŠ¯ç‰‡ä½¿èƒ½ï¼ˆç”µç£é˜€ï¼‰ */
-    /* U13 ä¸Šç”µåç»™ IN5 ä¸€ä¸ªè·³å˜ç¡®ä¿è¾“å‡ºçŠ¶æ€ */
-    Valve_Off();                            /* é˜€å…³æ–­ PA6 LOW */
+    DRV8803_EnableChip(2, true);   /* U13 24V Ğ¾Æ¬Ê¹ÄÜ£¨µç´Å·§£© */
+    /* U13 ÉÏµçºó¸ø IN5 Ò»¸öÌø±äÈ·±£Êä³ö×´Ì¬ */
+    Valve_Off();                            /* ·§¹Ø¶Ï PA6 LOW */
     vTaskDelay(pdMS_TO_TICKS(2));
-    Valve_On();                             /* é˜€å¯¼é€š PA6 HIGH */
+    Valve_On();                             /* ·§µ¼Í¨ PA6 HIGH */
     
 
     Pump_On();
-    PrintDebug("12VO1 (PE11) çœŸç©ºæ³µå·²å¼€å¯.\r\n");
+    PrintDebug("12VO1 (PE11) Õæ¿Õ±ÃÒÑ¿ªÆô.\r\n");
 
     const TickType_t faultCheckPeriod = pdMS_TO_TICKS(100);
     for (;;)
@@ -255,37 +259,37 @@ void StartDrv8803TestTask(void *argument)
 }
 
 /**
- * @brief  èˆµæœºåŒ€é€Ÿæ‘†åŠ¨æµ‹è¯•ä»»åŠ¡
- * @note   èˆµæœºä» 0Â° å¹³æ»‘è½¬åˆ° 180Â°ï¼Œå†è¿”å› 0Â°ï¼Œå¾ªç¯å¾€å¤ã€‚
- *         ä½¿ç”¨éé˜»å¡ vTaskDelayï¼Œä¸å½±å“å…¶ä»– FreeRTOS ä»»åŠ¡ã€‚
+ * @brief  ¶æ»úÔÈËÙ°Ú¶¯²âÊÔÈÎÎñ
+ * @note   ¶æ»ú´Ó 0¡ã Æ½»¬×ªµ½ 180¡ã£¬ÔÙ·µ»Ø 0¡ã£¬Ñ­»·Íù¸´¡£
+ *         Ê¹ÓÃ·Ç×èÈû vTaskDelay£¬²»Ó°ÏìÆäËû FreeRTOS ÈÎÎñ¡£
  */
 void StartServoTestTask(void *argument)
 {
 
     PrintDebug("Servo Test Task Started (CH%d, 0-180 deg sweep).\r\n", SERVO_TEST_CH);
 
-    // ç¡®ä¿èˆµæœºæ¨¡å—å·²åˆå§‹åŒ–ï¼ˆè‹¥å·²åœ¨ main ä¸­è°ƒç”¨å¯çœç•¥ï¼Œé‡å¤è°ƒç”¨æ— å®³ï¼‰
+    // È·±£¶æ»úÄ£¿éÒÑ³õÊ¼»¯£¨ÈôÒÑÔÚ main ÖĞµ÷ÓÃ¿ÉÊ¡ÂÔ£¬ÖØ¸´µ÷ÓÃÎŞº¦£©
     Servo_Init(&htim5);
 
     float angle = 0.0f;
-    int8_t direction = 1; // 1:æ­£å‘(0â†’180Â°)ï¼Œ-1:åå‘(180â†’0Â°)
+    int8_t direction = 1; // 1:ÕıÏò(0¡ú180¡ã)£¬-1:·´Ïò(180¡ú0¡ã)
 
     for (;;)
     {
-        // è®¾ç½®å½“å‰è§’åº¦
+        // ÉèÖÃµ±Ç°½Ç¶È
         Servo_SetAngle(SERVO_TEST_CH, angle);
 
-        // è°ƒè¯•è¾“å‡ºï¼ˆæ¯ 100ms æ‰“å°ä¸€æ¬¡ï¼Œé¿å…ä¸²å£é˜»å¡å½±å“è¿åŠ¨å¹³æ»‘æ€§ï¼‰
+        // µ÷ÊÔÊä³ö£¨Ã¿ 100ms ´òÓ¡Ò»´Î£¬±ÜÃâ´®¿Ú×èÈûÓ°ÏìÔË¶¯Æ½»¬ĞÔ£©
         static uint32_t print_counter = 0;
         if (++print_counter >= (100 / SERVO_SWING_PERIOD_MS)) {
-            PrintDebug("Servo Angle: %.1fÂ°\r\n", angle);
+            PrintDebug("Servo Angle: %.1f¡ã\r\n", angle);
             print_counter = 0;
         }
 
-        // è®¡ç®—ä¸‹ä¸€æ­¥è§’åº¦
+        // ¼ÆËãÏÂÒ»²½½Ç¶È
         angle += direction * SERVO_SWING_STEP_DEG;
 
-        // è¾¹ç•Œå¤„ç†ï¼šåˆ°è¾¾ç«¯ç‚¹æ—¶åå‘å¹¶ç²¾ç¡®å½’ä½
+        // ±ß½ç´¦Àí£ºµ½´ï¶ËµãÊ±·´Ïò²¢¾«È·¹éÎ»
         if (angle >= 180.0f) {
             angle = 180.0f;
             direction = -1;
@@ -294,37 +298,37 @@ void StartServoTestTask(void *argument)
             direction = 1;
         }
 
-        // éé˜»å¡å»¶æ—¶ï¼Œè®©å‡º CPU ç»™å…¶ä»–ä»»åŠ¡
+        // ·Ç×èÈûÑÓÊ±£¬ÈÃ³ö CPU ¸øÆäËûÈÎÎñ
         vTaskDelay(pdMS_TO_TICKS(SERVO_SWING_PERIOD_MS));
     }
 }
 
 /**
- * @brief å‘é€å•ä¸ªç”µæœºç»å¯¹è¿åŠ¨æŒ‡ä»¤ï¼ˆåæ ‡ç»å¯¹æ¨¡å¼ F5ï¼‰
+ * @brief ·¢ËÍµ¥¸öµç»ú¾ø¶ÔÔË¶¯Ö¸Áî£¨×ø±ê¾ø¶ÔÄ£Ê½ F5£©
  */
 static void motor_move_abs(uint8_t id, int32_t coord, uint16_t speed, uint8_t acc) {
     positionMode3Run(id, speed, acc, coord);
 }
 
 /**
- * @brief å‘é€ä¸¤ä¸ªXè½´ç”µæœºç»å¯¹è¿åŠ¨æŒ‡ä»¤ï¼ˆä¸ç«‹å³æ‰§è¡Œï¼Œç­‰åŒæ­¥è§¦å‘ï¼‰
+ * @brief ·¢ËÍÁ½¸öXÖáµç»ú¾ø¶ÔÔË¶¯Ö¸Áî£¨²»Á¢¼´Ö´ĞĞ£¬µÈÍ¬²½´¥·¢£©
  */
 static void x_axis_move(int32_t x_coord) {
-    motor_move_abs(MOTOR_X1_ID, x_coord, 300, 10);  // X1ç”µæœº
-    motor_move_abs(MOTOR_X2_ID, x_coord, 300, 10);  // X2ç”µæœº
+    motor_move_abs(MOTOR_X1_ID, x_coord, 300, 10);  // X1µç»ú
+    motor_move_abs(MOTOR_X2_ID, x_coord, 300, 10);  // X2µç»ú
 }
 
 /**
- * @brief è§¦å‘åŒæ­¥å¯åŠ¨ï¼ˆå¹¿æ’­ 0x4Bï¼‰
+ * @brief ´¥·¢Í¬²½Æô¶¯£¨¹ã²¥ 0x4B£©
  */
 static void trigger_sync(void) {
-    motorSyncTrigger(0);  // å¹¿æ’­åœ°å€0
+    motorSyncTrigger(0);  // ¹ã²¥µØÖ·0
 }
 
 /**
- * @brief ç­‰å¾…å•ä¸ªç”µæœºè¿åŠ¨å®Œæˆ
- * @param timeout_ms æ€»è¶…æ—¶ï¼ˆæ¯«ç§’ï¼‰
- * @return 0=å…¨éƒ¨å®Œæˆ, -1=è¶…æ—¶
+ * @brief µÈ´ıµ¥¸öµç»úÔË¶¯Íê³É
+ * @param timeout_ms ×Ü³¬Ê±£¨ºÁÃë£©
+ * @return 0=È«²¿Íê³É, -1=³¬Ê±
  */
 static uint8_t wait_motor_done(uint8_t motor_id, uint32_t timeout_ms) {
     CAN_Rx_Packet_t pkt;
@@ -340,22 +344,22 @@ static uint8_t wait_motor_done(uint8_t motor_id, uint32_t timeout_ms) {
 
 
 /**
- * @brief ç­‰å¾…å¤šä¸ªç”µæœºè¿åŠ¨å®Œæˆ
- * @param motors ç”µæœºIDæ•°ç»„
- * @param num ç”µæœºæ•°é‡
- * @param timeout_ms æ€»è¶…æ—¶ï¼ˆæ¯«ç§’ï¼‰
- * @return 0=å…¨éƒ¨å®Œæˆ, -1=è¶…æ—¶
+ * @brief µÈ´ı¶à¸öµç»úÔË¶¯Íê³É
+ * @param motors µç»úIDÊı×é
+ * @param num µç»úÊıÁ¿
+ * @param timeout_ms ×Ü³¬Ê±£¨ºÁÃë£©
+ * @return 0=È«²¿Íê³É, -1=³¬Ê±
  */
 int wait_motors_done(const uint8_t *motors, int num, uint32_t timeout_ms) {
-    // ä¸´æ—¶è®°å½•å“ªäº›ç”µæœºå·²åˆ°ä½
-    bool done[4] = {false}; // å‡è®¾IDæœ€å¤§ä¸º3
+    // ÁÙÊ±¼ÇÂ¼ÄÄĞ©µç»úÒÑµ½Î»
+    bool done[4] = {false}; // ¼ÙÉèID×î´óÎª3
     int done_count = 0;
     uint32_t start = HAL_GetTick();
 
     while ((HAL_GetTick() - start) < timeout_ms) {
         CAN_Rx_Packet_t pkt;
         if (osMessageQueueGet(motor_event_queue, &pkt, NULL, 10) == osOK) {
-            // æ£€æŸ¥æ˜¯å¦æ˜¯F5è¿åŠ¨å®Œæˆçš„åº”ç­”
+            // ¼ì²éÊÇ·ñÊÇF5ÔË¶¯Íê³ÉµÄÓ¦´ğ
             if (pkt.FuncCode == 0xF5 && pkt.Status == 0x02) {
                 for (int i = 0; i < num; i++) {
                     if (pkt.ID == motors[i] && !done[motors[i]]) {
@@ -364,47 +368,47 @@ int wait_motors_done(const uint8_t *motors, int num, uint32_t timeout_ms) {
                         break;
                     }
                 }
-                if (done_count == num) return 0; // å…¨éƒ¨å®Œæˆ
+                if (done_count == num) return 0; // È«²¿Íê³É
             }
         }
-        osDelay(1); // è®©å‡ºCPU
+        osDelay(1); // ÈÃ³öCPU
     }
     return -1;
 }
 
 /**
- * @brief æµ‹è¯•ä»»åŠ¡ä¸»ä½“
+ * @brief ²âÊÔÈÎÎñÖ÷Ìå
  */
 void vMotorTestTask(void *pvParameters)   {
-    /* ---------- 1. å¯åŠ¨ CAN å¹¶æ¿€æ´»ä¸­æ–­ ---------- */
+    /* ---------- 1. Æô¶¯ CAN ²¢¼¤»îÖĞ¶Ï ---------- */
     CAN_Init(&hfdcan1, NULL);
     osDelay(500);
 
-    /* ---------- 2. å¹¿æ’­åˆå§‹åŒ– X1/X2/Y çš„åŸºç¡€çŠ¶æ€ ---------- */
-    // EN è®¾ä¸º Hold
+    /* ---------- 2. ¹ã²¥³õÊ¼»¯ X1/X2/Y µÄ»ù´¡×´Ì¬ ---------- */
+    // EN ÉèÎª Hold
     uint8_t en_hold[2] = {0x85, 0x02};
     CAN_Transmit_Data(&hfdcan1, 0, en_hold, 2); osDelay(50);
-    // è§£é™¤å µè½¬
+    // ½â³ı¶Â×ª
     uint8_t unblock[1] = {0x3D};
     CAN_Transmit_Data(&hfdcan1, 0, unblock, 1); osDelay(50);
-    // å…¨éƒ¨è®¾ä¸ºæ€»çº¿ FOC æ¨¡å¼
+    // È«²¿ÉèÎª×ÜÏß FOC Ä£Ê½
     uint8_t mode[2] = {0x82, 0x05};
     CAN_Transmit_Data(&hfdcan1, 0, mode, 2); osDelay(100);
-    // å…¨éƒ¨ä½¿èƒ½
+    // È«²¿Ê¹ÄÜ
     uint8_t en[2] = {0xF3, 0x01};
     CAN_Transmit_Data(&hfdcan1, 0, en, 2); osDelay(100);
-    // å…³é—­åŒæ­¥æ ‡å¿—ï¼ˆæ–¹ä¾¿ç‹¬ç«‹æµ‹è¯•ï¼‰
+    // ¹Ø±ÕÍ¬²½±êÖ¾£¨·½±ã¶ÀÁ¢²âÊÔ£©
     uint8_t sync_off[2] = {0x4A, 0x00};
     CAN_Transmit_Data(&hfdcan1, 0, sync_off, 2); osDelay(50);
 
-    /* ---------- 3. å•ç‹¬è®¾ç½®å„è½´çš„ç‰¹æœ‰å‚æ•° ---------- */
-    // è®¾ç½®ä½ç½®åˆ°è¾¾é˜ˆå€¼ï¼ˆID 1/2/3ï¼‰
+    /* ---------- 3. µ¥¶ÀÉèÖÃ¸÷ÖáµÄÌØÓĞ²ÎÊı ---------- */
+    // ÉèÖÃÎ»ÖÃµ½´ïãĞÖµ£¨ID 1/2/3£©
     motorSetArrivalThreshold(1);
     motorSetArrivalThreshold(2);
     motorSetArrivalThreshold(3);
     osDelay(20);
 
-    // æ ‡å®šå½“å‰ä½ç½®ä¸ºé›¶ç‚¹ï¼ˆæ‰€æœ‰è½´ï¼‰
+    // ±ê¶¨µ±Ç°Î»ÖÃÎªÁãµã£¨ËùÓĞÖá£©
     motorSetZero(1);
     motorSetZero(2);
     motorSetZero(3);
@@ -412,14 +416,14 @@ void vMotorTestTask(void *pvParameters)   {
 
     PrintDebug("=== XY 3?Axis Test Start ===\r\n");
 
-    /* ---------- 4. è¿åŠ¨æµ‹è¯•åºåˆ— ---------- */
+    /* ---------- 4. ÔË¶¯²âÊÔĞòÁĞ ---------- */
     const uint16_t speed = 300;
     const uint8_t  acc   = 10;
-    // å®šä¹‰å‡ ä¸ªç‚¹ä½ (åæ ‡å€¼ï¼Œä¸€åœˆ=16384)
-    // ç‚¹1ï¼šX=3åœˆ, Y=0
-    // ç‚¹2ï¼šX=3åœˆ, Y=3åœˆ
-    // ç‚¹3ï¼šX=0,    Y=3åœˆ
-    // ç‚¹4ï¼šX=0,    Y=0
+    // ¶¨Òå¼¸¸öµãÎ» (×ø±êÖµ£¬Ò»È¦=16384)
+    // µã1£ºX=3È¦, Y=0
+    // µã2£ºX=3È¦, Y=3È¦
+    // µã3£ºX=0,    Y=3È¦
+    // µã4£ºX=0,    Y=0
     struct { int32_t x; int32_t y; } points[] = {
         { 16384 * 3, 0 },
         { 16384 * 3, 16384 * 3 },
@@ -430,11 +434,11 @@ void vMotorTestTask(void *pvParameters)   {
     for (int i = 0; i < 4; i++) {
         PrintDebug("Point %d: X=%ld, Y=%ld\r\n", i, points[i].x, points[i].y);
         
-        osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES);   // æ¸…ç©ºæ—§æ ‡å¿—
-        // å‘ X1/X2 å‘é€ç»å¯¹ä½ç½®æŒ‡ä»¤ï¼ˆå®ƒä»¬åŒæ—¶è¿åŠ¨ï¼Œä½†ä¸ä¸¥æ ¼åŒæ­¥èµ·æ­¥ï¼Œæ—¶é—´å·®å¾ˆå°ï¼‰
+        osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES);   // Çå¿Õ¾É±êÖ¾
+        // Ïò X1/X2 ·¢ËÍ¾ø¶ÔÎ»ÖÃÖ¸Áî£¨ËüÃÇÍ¬Ê±ÔË¶¯£¬µ«²»ÑÏ¸ñÍ¬²½Æğ²½£¬Ê±¼ä²îºÜĞ¡£©
         positionMode3Run(1, speed, acc, points[i].x);
         positionMode3Run(2, speed, acc, points[i].x);
-        // å‘ Y è½´å‘é€ç»å¯¹ä½ç½®æŒ‡ä»¤
+        // Ïò Y Öá·¢ËÍ¾ø¶ÔÎ»ÖÃÖ¸Áî
         positionMode3Run(3, speed, acc, points[i].y);
 
         uint32_t flags = osEventFlagsWait(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR,
@@ -445,7 +449,7 @@ void vMotorTestTask(void *pvParameters)   {
             PrintDebug("Timeout!\r\n");
         }
 
-        osDelay(200);   // ç«™é—´åœé¡¿
+        osDelay(200);   // Õ¾¼äÍ£¶Ù
     }
 
     PrintDebug("=== XY 3?Axis Test Passed ===\r\n");
@@ -453,9 +457,9 @@ void vMotorTestTask(void *pvParameters)   {
 }
 
 /**
- * @brief ä¸Šä½æœºé€šè®¯æµ‹è¯•ä»»åŠ¡
- * @note  ç‹¬ç«‹äº Host_Taskï¼Œç”¨äºæ‰‹åŠ¨æµ‹è¯• UART1 é“¾è·¯å’Œè¡Œåè®®è§£æã€‚
- *        æ”¶åˆ°å‘½ä»¤åæ‰“å°è§£æç»“æœå¹¶å›æ˜¾ç»™ä¸Šä½æœºã€‚
+ * @brief ÉÏÎ»»úÍ¨Ñ¶²âÊÔÈÎÎñ
+ * @note  ¶ÀÁ¢ÓÚ Host_Task£¬ÓÃÓÚÊÖ¶¯²âÊÔ UART1 Á´Â·ºÍĞĞĞ­Òé½âÎö¡£
+ *        ÊÕµ½ÃüÁîºó´òÓ¡½âÎö½á¹û²¢»ØÏÔ¸øÉÏÎ»»ú¡£
  */
 void StartHostCommTestTask(void *argument)
 {
@@ -468,20 +472,20 @@ void StartHostCommTestTask(void *argument)
 
     for (;;)
     {
-        /* 1. é©±åŠ¨å¤„ç†ï¼šå°† DMA æ•°æ®æ¬è¿åˆ°åº”ç”¨ç¼“å†²åŒº */
+        /* 1. Çı¶¯´¦Àí£º½« DMA Êı¾İ°áÔËµ½Ó¦ÓÃ»º³åÇø */
         UART_Driver_Process();
 
-        /* 2. æ£€æŸ¥ UART_CH1ï¼ˆä¸Šä½æœºï¼‰æ˜¯å¦æœ‰æ–°æ•°æ® */
+        /* 2. ¼ì²é UART_CH1£¨ÉÏÎ»»ú£©ÊÇ·ñÓĞĞÂÊı¾İ */
         const uint8_t *rx_data = NULL;
         uint16_t rx_len = 0;
         if (UART_PeekData(UART_CH1, &rx_data, &rx_len))
         {
-            /* 3. é€å­—èŠ‚å–‚å…¥è¡Œè§£æå™¨ */
+            /* 3. Öğ×Ö½ÚÎ¹ÈëĞĞ½âÎöÆ÷ */
             for (uint16_t i = 0; i < rx_len; i++)
             {
                 if (LineParser_Feed(&parser, rx_data[i], &parsed))
                 {
-                    /* æ”¶åˆ°å®Œæ•´ä¸€è¡Œï¼Œæ‰“å°è§£æç»“æœ */
+                    /* ÊÕµ½ÍêÕûÒ»ĞĞ£¬´òÓ¡½âÎö½á¹û */
                     switch (parsed.cmd)
                     {
                     case HCMD_MOVE_UP:
@@ -527,63 +531,71 @@ void StartHostCommTestTask(void *argument)
                     }
                 }
             }
-            /* 4. æ¸…é™¤å°±ç»ªæ ‡å¿—ï¼Œé‡Šæ”¾ç¼“å†²åŒº */
+            /* 4. Çå³ı¾ÍĞ÷±êÖ¾£¬ÊÍ·Å»º³åÇø */
             UART_ClearData(UART_CH1);
         }
 
-        /* 5. 10ms è½®è¯¢å‘¨æœŸ */
+        /* 5. 10ms ÂÖÑ¯ÖÜÆÚ */
         vTaskDelay(pdMS_TO_TICKS(10));
     }
 }
 
 /**
- * @brief å‘é€æ€¥åœæŒ‡ä»¤åˆ°æŒ‡å®šç”µæœºè½´
- * @param addr ç”µæœº CAN ID (0x01/0x02/0x03)
+ * @brief ·¢ËÍ¼±Í£Ö¸Áîµ½Ö¸¶¨µç»úÖá
+ * @param addr µç»ú CAN ID (0x01/0x02/0x03)
  */
 void axis_stop(int32_t addr)
 {
     uint8_t tx[8] = {0};
     tx[0] = 0xF5;
-    tx[3] = 255;  // æœ€å¤§å‡é€Ÿåº¦
+    tx[3] = 255;  // ×î´ó¼õËÙ¶È
     CAN_Transmit_Data(&hfdcan1, addr, tx, 7);
 }
 /**
- * @brief å¼ºåˆ¶æ€¥åœä¸‰è½´ï¼ˆåŒæ­¥æ¨¡å¼ä¸‹ç¼“å­˜æ€¥åœ + è§¦å‘æ‰§è¡Œï¼‰
- * @note  ä¸åˆ‡æ¢åŒæ­¥æ¨¡å¼ï¼Œç›´æ¥ç”¨ 0xF5 é€Ÿåº¦=0 + 0x4B è§¦å‘ã€‚
- *        ç”µæœºè¿è¡ŒæœŸé—´ç¼“å­˜å¯è¢«æ–° 0xF5 è¦†ç›–ï¼Œ0x4B è§¦å‘åä¸­æ­¢å½“å‰è¿åŠ¨ã€‚
+ * @brief Ç¿ÖÆ¼±Í£ÈıÖá£¨Í¬²½Ä£Ê½ÏÂ»º´æ¼±Í£ + ´¥·¢Ö´ĞĞ£©
+ * @note  ²»ÇĞ»»Í¬²½Ä£Ê½£¬Ö±½ÓÓÃ 0xF5 ËÙ¶È=0 + 0x4B ´¥·¢¡£
+ *        µç»úÔËĞĞÆÚ¼ä»º´æ¿É±»ĞÂ 0xF5 ¸²¸Ç£¬0x4B ´¥·¢ºóÖĞÖ¹µ±Ç°ÔË¶¯¡£
  */
 void disable_sync_stop(void)
 {
-    // é‡å¼€åŒæ­¥ï¼Œä½¿åç»­ 0xF5 è¿›å…¥ç¼“å­˜ï¼ˆè¦†ç›–ç”µæœºå½“å‰æ‰§è¡Œçš„å‘½ä»¤ï¼‰
-    motorSyncEnable(1);
-    osDelay(5);
+    // ÖØ¿ªÍ¬²½£¬Ê¹ºóĞø 0xF5 ½øÈë»º´æ£¨¸²¸Çµç»úµ±Ç°Ö´ĞĞµÄÃüÁî£©
+    // ÈıÖá¼±Í££¨Ö±½Ó·¢ËÍ£¬ÎŞÍ¬²½Ä£Ê½£©
 
-    // ä¸‰è½´æ€¥åœï¼ˆç¼“å­˜åˆ°åŒæ­¥ç¼“å†²åŒºï¼Œacc=255 æœ€å¤§å‡é€Ÿåº¦ï¼‰
+
+    // ÈıÖá¼±Í££¨»º´æµ½Í¬²½»º³åÇø£¬acc=255 ×î´ó¼õËÙ¶È£©
     axis_stop(X1_ADDR);
     axis_stop(X2_ADDR);
     axis_stop(Y_ADDR);
     osDelay(5);
 
-    // è§¦å‘åŒæ­¥æ‰§è¡Œ â†’ ä¸‰è½´åŒæ—¶æœ€å¤§å‡é€Ÿåº¦åœæ­¢
-    motorSyncTrigger(0);
-    osDelay(10);
+    // ´¥·¢Í¬²½Ö´ĞĞ ¡ú ÈıÖáÍ¬Ê±×î´ó¼õËÙ¶ÈÍ£Ö¹
 
-    // é‡å¼€åŒæ­¥ï¼ˆtrigger æ¶ˆè€—åéœ€æ¢å¤ï¼‰
-    motorSyncEnable(1);
-    osDelay(10);
+
+
+
+
 }
 
+
 /**
- * @brief XY ç›¸å¯¹ç§»åŠ¨ï¼ˆé˜»å¡å¼ï¼Œç­‰å¾…åˆ°ä½äº‹ä»¶ï¼‰
- * @param dx     X è½´ç›¸å¯¹ä½ç§» (æ­¥æ•°)
- * @param dy     Y è½´ç›¸å¯¹ä½ç§» (æ­¥æ•°)
- * @param speed  é€Ÿåº¦
- * @param acc    åŠ é€Ÿåº¦
- * @param cur_x  å½“å‰ X ç»å¯¹åæ ‡ (è¾“å…¥è¾“å‡º)
- * @param cur_y  å½“å‰ Y ç»å¯¹åæ ‡ (è¾“å…¥è¾“å‡º)
- * @return 0 æˆåŠŸ, -1 è¶…æ—¶, -2 å¼‚å¸¸
+/**
+ * @brief  XY Ïà¶ÔÒÆ¶¯£¨×èÈûÊ½£©
+ *
+ * ÏòÖ¸¶¨Öá·¢ËÍ¾ø¶ÔÎ»ÖÃÖ¸Áîºó£¬ÂÖÑ¯ evtAxesDone ÊÂ¼ş×éµÈ´ıµ½Î»¡£
+ * CAN_Process_Task ¸ºÔğ´Ó motor_event_queue Ïû·Ñ CAN µ½Î»Ö¡²¢ÉèÖÃÊÂ¼ş±êÖ¾£¬
+ * ±¾º¯Êı²»ÔÙÖ±½Ó·ÃÎÊ¶ÓÁĞ£¬±ÜÃâ¾ºÕù¡£
+ *
+ * @param  dx     X ÖáÏà¶ÔÎ»ÒÆ (²½Êı£¬X1+X2 Ë«µç»úÍ¬²½)
+ * @param  dy     Y ÖáÏà¶ÔÎ»ÒÆ (²½Êı£¬µ¥µç»ú)
+ * @param  speed  ËÙ¶È (RPM)
+ * @param  acc    ¼ÓËÙ¶È
+ * @param  cur_x  µ±Ç° X ¾ø¶Ô×ø±ê (ÊäÈëÊä³ö£¬½ö³É¹¦Ê±¸üĞÂ)
+ * @param  cur_y  µ±Ç° Y ¾ø¶Ô×ø±ê (ÊäÈëÊä³ö£¬½ö³É¹¦Ê±¸üĞÂ)
+ * @retval  0  È«²¿Öáµ½Î»
+ * @retval -1  ³¬Ê± (10s)
+ * @retval -2  µç»úÒì³£ (¶Â×ª/ÏŞÎ»)
+ * @retval -3  UART ÖĞ¶ÏÃüÁî (ÉÏÎ»»ú MOVE_STOP)
  */
-/* è¿åŠ¨ä¸­æ–­æ ‡å¿— */
 volatile bool s_cmd_interrupted = false;
 
 int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
@@ -601,11 +613,9 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
         return 0;
     }
 
-    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
 
-    /* ç¡®ä¿åŒæ­¥æ¨¡å¼å¼€å¯ï¼Œå†ç¼“å­˜è¿åŠ¨æŒ‡ä»¤ */
-    motorSyncEnable(1);
-    osDelay(5);
+    /* Í¨¹ıÊÂ¼ş×éµÈ´ıµ½Î»£¬CAN_Process_Task ¸ºÔğÏû·Ñ¶ÓÁĞ²¢ÉèÖÃ±êÖ¾ */
+    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
 
     if (dx != 0) {
         positionMode3Run(X1_ADDR, speed, acc, target_x);
@@ -618,54 +628,67 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
         osDelay(2);
     }
 
-    motorSyncTrigger(0);
-    osDelay(5);
-    /* è§¦å‘åç«‹å³æ¢å¤åŒæ­¥æ ‡å¿—ï¼Œä¾›ä¸‹æ¬¡è¿åŠ¨ä½¿ç”¨ */
-    motorSyncEnable(1);
-    osDelay(5);
-
     uint32_t done_mask = 0;
     if (dx != 0) done_mask |= (EVENT_X1_DONE | EVENT_X2_DONE);
     if (dy != 0) done_mask |= EVENT_Y_DONE;
-    uint32_t wait_mask = done_mask | EVENT_ANY_ERROR;
 
-    uint32_t elapsed = 0;
-    const uint32_t poll_ms = 10;
+    UART_ClearData(UART_CH1);
+
+    const uint32_t poll_ms = 100;
     const uint32_t total_timeout = 10000;
+    uint32_t start_tick = osKernelGetTickCount();
 
-    UART_ClearData(UART_CH1);  /* æ¸…é™¤å¤–å±‚å¾ªç¯æ®‹ç•™çš„ data_readyï¼Œé˜²æ­¢è¯¯åˆ¤ä¸ºä¸­æ–­å‘½ä»¤ */
-    while (elapsed < total_timeout) {
-        uint32_t flags = osEventFlagsWait(evtAxesDone,
-                                           wait_mask,
-                                           osFlagsWaitAny, poll_ms);
+    while ((osKernelGetTickCount() - start_tick) < pdMS_TO_TICKS(total_timeout)) {
+        /* Ö±½Ó¶ÁÊÂ¼ş×éµ±Ç°Öµ£¬²»×èÈû²»ĞŞ¸Ä */
+        uint32_t flags = osEventFlagsGet(evtAxesDone);
 
-        if ((int32_t)flags < 0) {
-        } else if (flags & EVENT_ANY_ERROR) {
-            disable_sync_stop();
+        if (flags & EVENT_ANY_ERROR) {
+#ifdef DEBUG_MOVE
+            PrintDebug("[MOVE] ERROR flag set (0x%lX)\r\n", flags);
+#endif
+            axis_stop(X1_ADDR);
+            axis_stop(X2_ADDR);
+            axis_stop(Y_ADDR);
+            osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
             return -2;
-        } else if ((flags & done_mask) == done_mask) {
+        }
+
+        if ((flags & done_mask) == done_mask) {
+#ifdef DEBUG_MOVE
+            PrintDebug("[MOVE] all done: flags=0x%lX\r\n", flags);
+#endif
             *cur_x = target_x;
             *cur_y = target_y;
+            osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
             return 0;
         }
 
+        /* ¼ì²é UART ÖĞ¶ÏÃüÁî */
         UART_Driver_Process();
-        const uint8_t *rx = NULL;
-        uint16_t rx_len = 0;
-        if (UART_PeekData(UART_CH1, &rx, &rx_len)) {
-            disable_sync_stop();
-            s_cmd_interrupted = true;
-            return -3;
+        {
+            const uint8_t *rx = NULL; uint16_t rx_len = 0;
+            if (UART_PeekData(UART_CH1, &rx, &rx_len)) {
+                axis_stop(X1_ADDR);
+                axis_stop(X2_ADDR);
+                axis_stop(Y_ADDR);
+                osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
+                s_cmd_interrupted = true;
+                return -3;
+            }
         }
 
-        elapsed += poll_ms;
+        osDelay(poll_ms);
     }
 
-    disable_sync_stop();
+    axis_stop(X1_ADDR);
+    axis_stop(X2_ADDR);
+    axis_stop(Y_ADDR);
+    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
     return -1;
+
 }
 
-/* ä¸Šä½æœºé€šè®¯ + XY è¿åŠ¨æ§åˆ¶æµ‹è¯•ä»»åŠ¡ å±æ€§ */
+/* ÉÏÎ»»úÍ¨Ñ¶ + XY ÔË¶¯¿ØÖÆ²âÊÔÈÎÎñ ÊôĞÔ */
 //const osThreadAttr_t hostMotionTestTask_attributes = {
 //    .name = "HostMotion",
 //    .stack_size = 1024,
@@ -673,9 +696,9 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
 //};
 
 /**
- * @brief ä¸Šä½æœºé€šè®¯ + XY è¿åŠ¨æ§åˆ¶æµ‹è¯•ä»»åŠ¡
- * @note  å¯åŠ¨æ—¶å‘é€ DEBUG_MODE\n è§¦å‘ä¸Šä½æœºè¿›å…¥ debug æ¨¡å¼ã€‚
- *        æ¥æ”¶ä¸Šä½æœºæŒ‡ä»¤ï¼Œè§£æåæ‰§è¡Œå¯¹åº”ç”µæœºåŠ¨ä½œå¹¶å›æ˜¾ã€‚
+ * @brief ÉÏÎ»»úÍ¨Ñ¶ + XY ÔË¶¯¿ØÖÆ²âÊÔÈÎÎñ
+ * @note  Æô¶¯Ê±·¢ËÍ DEBUG_MODE\n ´¥·¢ÉÏÎ»»ú½øÈë debug Ä£Ê½¡£
+ *        ½ÓÊÕÉÏÎ»»úÖ¸Áî£¬½âÎöºóÖ´ĞĞ¶ÔÓ¦µç»ú¶¯×÷²¢»ØÏÔ¡£
  */
 void StartHostMotionTestTask(void *argument)
 {
@@ -690,12 +713,12 @@ void StartHostMotionTestTask(void *argument)
     const uint16_t speed = 300;
     const uint8_t  acc   = 25;
 
-    /* ç”µæœºåˆå§‹åŒ–: é…ç½®å·¥ä½œæ¨¡å¼+ä½¿èƒ½+å½’é›¶ */
+    /* µç»ú³õÊ¼»¯: ÅäÖÃ¹¤×÷Ä£Ê½+Ê¹ÄÜ+¹éÁã */
 		CAN_Init(&hfdcan1, NULL);
     Motor_Init();
     osDelay(200);
 
-    /* å¯åŠ¨æ¡æ‰‹ */
+    /* Æô¶¯ÎÕÊÖ */
     UART_SendString(UART_CH1, "DEBUG_MODE\n");
     PrintDebug("[HostMotion] Task started, DEBUG_MODE sent.\r\n");
 
@@ -842,76 +865,76 @@ void StartHostMotionTestTask(void *argument)
 /* ================================================================
 
 /* ================================================================
- * Zè½´èˆµæœº + å¸å˜´æ°”æ³µ + Rè½´æ—‹è½¬ è”åˆæµ‹è¯•ä»»åŠ¡
+ * ZÖá¶æ»ú + Îü×ìÆø±Ã + RÖáĞı×ª ÁªºÏ²âÊÔÈÎÎñ
  *
- * æµ‹è¯•æµç¨‹ï¼ˆå¾ªç¯æ‰§è¡Œï¼‰ï¼š
- *   [Zè½´èˆµæœº]  è½¬åˆ°æ‹¾å–è§’ â†’ å¼€æ°”æ³µ â†’ è½¬åˆ°è´´è£…è§’ â†’ å…³æ°”æ³µ
- *   [Rè½´æ—‹è½¬]  æ–œå¡å¯åŠ¨æ­£è½¬ â†’ åœ â†’ æ–œå¡å¯åŠ¨åè½¬ â†’ åœ
+ * ²âÊÔÁ÷³Ì£¨Ñ­»·Ö´ĞĞ£©£º
+ *   [ZÖá¶æ»ú]  ×ªµ½Ê°È¡½Ç ¡ú ¿ªÆø±Ã ¡ú ×ªµ½Ìù×°½Ç ¡ú ¹ØÆø±Ã
+ *   [RÖáĞı×ª]  Ğ±ÆÂÆô¶¯Õı×ª ¡ú Í£ ¡ú Ğ±ÆÂÆô¶¯·´×ª ¡ú Í£
  *
- * è°ƒè¯•ï¼šå®šä¹‰ PICKPLACE_VERBOSE å¼€å¯ VACTUAL/DRV_STATUS è¯»å›æ ¡éªŒã€‚
+ * µ÷ÊÔ£º¶¨Òå PICKPLACE_VERBOSE ¿ªÆô VACTUAL/DRV_STATUS ¶Á»ØĞ£Ñé¡£
  * ================================================================ */
 
-/* #define PICKPLACE_VERBOSE */   /* å–æ¶ˆæ³¨é‡Šä»¥å¼€å¯è¯¦ç»†è¯Šæ–­ */
+/* #define PICKPLACE_VERBOSE */   /* È¡Ïû×¢ÊÍÒÔ¿ªÆôÏêÏ¸Õï¶Ï */
 
-/* ---- æµ‹è¯•å‚æ•°å® ---- */
-#define PICKPLACE_SERVO_CH       2            /* PE8 â†’ TIM5_CH3 â†’ é€šé“ç´¢å¼• 2 */
-#define PICKPLACE_PICK_ANGLE     30.0f        /* æ‹¾å–è§’åº¦ï¼ˆå¸å˜´ä¸‹é™ï¼‰ */
-#define PICKPLACE_PLACE_ANGLE    120.0f       /* è´´è£…è§’åº¦ï¼ˆå¸å˜´ä¸Šå‡ï¼‰ */
-#define PICKPLACE_PUMP_PORT      (&Port_12VO1)  /* å¸å˜´æ°”æ³µ (12VO1/PE11) */
-#define PICKPLACE_SERVO_PORT     (&Port_12VO4)  /* Zè½´èˆµæœºä¾›ç”µ (12VO4/PE14) */
+/* ---- ²âÊÔ²ÎÊıºê ---- */
+#define PICKPLACE_SERVO_CH       2            /* PE8 ¡ú TIM5_CH3 ¡ú Í¨µÀË÷Òı 2 */
+#define PICKPLACE_PICK_ANGLE     30.0f        /* Ê°È¡½Ç¶È£¨Îü×ìÏÂ½µ£© */
+#define PICKPLACE_PLACE_ANGLE    120.0f       /* Ìù×°½Ç¶È£¨Îü×ìÉÏÉı£© */
+#define PICKPLACE_PUMP_PORT      (&Port_12VO1)  /* Îü×ìÆø±Ã (12VO1/PE11) */
+#define PICKPLACE_SERVO_PORT     (&Port_12VO4)  /* ZÖá¶æ»ú¹©µç (12VO4/PE14) */
 
-#define PICKPLACE_R_SPEED        80000        /* Rè½´ç›®æ ‡è½¬é€Ÿï¼ˆå¾®æ­¥/ç§’ï¼‰ */
-#define PICKPLACE_R_RAMP_STEP    8000         /* æ–œå¡æ¯çº§å¢é‡ï¼ˆå¾®æ­¥/ç§’ï¼‰ */
-#define PICKPLACE_R_RAMP_MS      40           /* æ–œå¡æ¯çº§å»¶æ—¶ (ms) */
-#define PICKPLACE_R_RUN_MS       1500         /* Rè½´å…¨é€Ÿè¿è¡Œæ—¶é—´ (ms) */
-#define PICKPLACE_STEP_DELAY_MS  500          /* åŠ¨ä½œé—´åœé¡¿ (ms) */
+#define PICKPLACE_R_SPEED        80000        /* RÖáÄ¿±ê×ªËÙ£¨Î¢²½/Ãë£© */
+#define PICKPLACE_R_RAMP_STEP    8000         /* Ğ±ÆÂÃ¿¼¶ÔöÁ¿£¨Î¢²½/Ãë£© */
+#define PICKPLACE_R_RAMP_MS      40           /* Ğ±ÆÂÃ¿¼¶ÑÓÊ± (ms) */
+#define PICKPLACE_R_RUN_MS       1500         /* RÖáÈ«ËÙÔËĞĞÊ±¼ä (ms) */
+#define PICKPLACE_STEP_DELAY_MS  500          /* ¶¯×÷¼äÍ£¶Ù (ms) */
 
 /* ================================================================
- * å†…éƒ¨è¾…åŠ©å‡½æ•°
+ * ÄÚ²¿¸¨Öúº¯Êı
  * ================================================================ */
 
 /**
- * @brief Zè½´èˆµæœºæ‹¾å–ï¼šè½¬åˆ°æ‹¾å–è§’ â†’ å¼€æ°”æ³µ â†’ å¼€ç”µç£é˜€
+ * @brief ZÖá¶æ»úÊ°È¡£º×ªµ½Ê°È¡½Ç ¡ú ¿ªÆø±Ã ¡ú ¿ªµç´Å·§
  */
 static void pickplace_pick(void)
 {
-    PrintDebug("[PickPlace] æ‹¾å–: èˆµæœºâ†’%.0fÂ° + æ³µON + é˜€ON\r\n",
+    PrintDebug("[PickPlace] Ê°È¡: ¶æ»ú¡ú%.0f¡ã + ±ÃON + ·§ON\r\n",
                PICKPLACE_PICK_ANGLE);
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PICK_ANGLE);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
     Pump_On();
-    /* é˜€æ˜¯ä½ç«¯å¼€å…³ï¼šOUT5æ‹‰GNDæ‰å¯¼é€šã€‚å…ˆHIGHå†LOWç¡®ä¿é”å­˜ */
-    Valve_Off();                            /* é˜€å…³æ–­ PA6 LOW */
+    /* ·§ÊÇµÍ¶Ë¿ª¹Ø£ºOUT5À­GND²Åµ¼Í¨¡£ÏÈHIGHÔÙLOWÈ·±£Ëø´æ */
+    Valve_Off();                            /* ·§¹Ø¶Ï PA6 LOW */
     vTaskDelay(pdMS_TO_TICKS(2));
-    Valve_On();                             /* é˜€å¯¼é€š */
+    Valve_On();                             /* ·§µ¼Í¨ */
 }
 /**
- * @brief Zè½´èˆµæœºè´´è£…ï¼šå…³é˜€ â†’ å…³æ³µ â†’ è½¬åˆ°è´´è£…è§’
+ * @brief ZÖá¶æ»úÌù×°£º¹Ø·§ ¡ú ¹Ø±Ã ¡ú ×ªµ½Ìù×°½Ç
  */
 static void pickplace_place(void)
 {
-    PrintDebug("[PickPlace] è´´è£…: é˜€OFF + æ³µOFF + èˆµæœºâ†’%.0fÂ°\r\n",
+    PrintDebug("[PickPlace] Ìù×°: ·§OFF + ±ÃOFF + ¶æ»ú¡ú%.0f¡ã\r\n",
                PICKPLACE_PLACE_ANGLE);
-    Valve_Off();                            /* é˜€å…³æ–­ */
+    Valve_Off();                            /* ·§¹Ø¶Ï */
     Pump_Off();
     vTaskDelay(pdMS_TO_TICKS(100));
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
-    PrintDebug("[PickPlace] è´´è£…å®Œæˆ\r\n");
+    PrintDebug("[PickPlace] Ìù×°Íê³É\r\n");
 }
 
 /**
- * @brief Rè½´æ–œå¡å¯åŠ¨ï¼ˆæ­£è½¬ï¼‰
+ * @brief RÖáĞ±ÆÂÆô¶¯£¨Õı×ª£©
  *
- * VACTUAL æ¨¡å¼æ— æå˜é€Ÿ/åŠ é€Ÿæ–œå¡ï¼Œç›´æ¥è·³å…¨é€Ÿæ—¶é™æ‘©æ“¦åŠ›ä¼šå¡ä½ç”µæœºã€‚
- * ä» 5000 å¾®æ­¥/ç§’èµ·æ­¥ï¼Œæ¯çº§ +8000ï¼Œé€çº§æå‡è‡³ç›®æ ‡è½¬é€Ÿã€‚
+ * VACTUAL Ä£Ê½ÎŞ¼«±äËÙ/¼ÓËÙĞ±ÆÂ£¬Ö±½ÓÌøÈ«ËÙÊ±¾²Ä¦²ÁÁ¦»á¿¨×¡µç»ú¡£
+ * ´Ó 5000 Î¢²½/ÃëÆğ²½£¬Ã¿¼¶ +8000£¬Öğ¼¶ÌáÉıÖÁÄ¿±ê×ªËÙ¡£
  */
 static void pickplace_r_forward(void)
 {
-    PrintDebug("[PickPlace] Rè½´æ­£è½¬ æ–œå¡â†’%ld Âµstep/s, æŒç»­ %dms\r\n",
+    PrintDebug("[PickPlace] RÖáÕı×ª Ğ±ÆÂ¡ú%ld ¦Ìstep/s, ³ÖĞø %dms\r\n",
                PICKPLACE_R_SPEED, PICKPLACE_R_RUN_MS);
 
-    /* é€Ÿåº¦æ–œå¡ */
+    /* ËÙ¶ÈĞ±ÆÂ */
     for (int32_t s = 5000; s < PICKPLACE_R_SPEED; s += PICKPLACE_R_RAMP_STEP) {
         TMC_SetSpeed(s);
         vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RAMP_MS));
@@ -923,7 +946,7 @@ static void pickplace_r_forward(void)
         uint32_t val;
         if (TMC_ReadReg(TMC_REG_VACTUAL, &val) == TMC_ERR_NONE)
             PrintDebug("[PickPlace] VACTUAL=0x%08lX (%ld)\r\n", val, (int32_t)val);
-        /* DRV_STATUS: stst è¡¨ç¤ºæ˜¯å¦åœè½¬ï¼Œfsact æ˜¯å®é™…ç”µæµç­‰çº§ */
+        /* DRV_STATUS: stst ±íÊ¾ÊÇ·ñÍ£×ª£¬fsact ÊÇÊµ¼ÊµçÁ÷µÈ¼¶ */
         if (TMC_ReadReg(TMC_REG_DRV_STATUS, &val) == TMC_ERR_NONE)
             PrintDebug("[PickPlace] DRV_STATUS stst=%ld fsact=%ld\r\n",
                        (val >> 31) & 1, (val >> 16) & 0x1F);
@@ -933,15 +956,15 @@ static void pickplace_r_forward(void)
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RUN_MS));
     TMC_SetSpeed(0);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
-    PrintDebug("[PickPlace] Rè½´åœæ­¢\r\n");
+    PrintDebug("[PickPlace] RÖáÍ£Ö¹\r\n");
 }
 
 /**
- * @brief Rè½´æ–œå¡å¯åŠ¨ï¼ˆåè½¬ï¼‰
+ * @brief RÖáĞ±ÆÂÆô¶¯£¨·´×ª£©
  */
 static void pickplace_r_reverse(void)
 {
-    PrintDebug("[PickPlace] Rè½´åè½¬ æ–œå¡â†’%ld Âµstep/s, æŒç»­ %dms\r\n",
+    PrintDebug("[PickPlace] RÖá·´×ª Ğ±ÆÂ¡ú%ld ¦Ìstep/s, ³ÖĞø %dms\r\n",
                -PICKPLACE_R_SPEED, PICKPLACE_R_RUN_MS);
 
     for (int32_t s = -5000; s > -PICKPLACE_R_SPEED; s -= PICKPLACE_R_RAMP_STEP) {
@@ -961,50 +984,50 @@ static void pickplace_r_reverse(void)
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_R_RUN_MS));
     TMC_SetSpeed(0);
     vTaskDelay(pdMS_TO_TICKS(PICKPLACE_STEP_DELAY_MS));
-    PrintDebug("[PickPlace] Rè½´åœæ­¢\r\n");
+    PrintDebug("[PickPlace] RÖáÍ£Ö¹\r\n");
 }
 
 /**
- * @brief Zè½´èˆµæœº + å¸å˜´æ°”æ³µ + Rè½´æ—‹è½¬ è”åˆæµ‹è¯•ä»»åŠ¡
- * @note  å¯åŠ¨æ—¶ä¾æ¬¡åˆå§‹åŒ–èˆµæœºã€DRV8803ã€TMC2209ã€‚
- *        ä¸»å¾ªç¯ï¼šæ‹¾å–â†’è´´è£…â†’Ræ­£è½¬â†’Råè½¬ï¼Œå‘¨è€Œå¤å§‹ã€‚
+ * @brief ZÖá¶æ»ú + Îü×ìÆø±Ã + RÖáĞı×ª ÁªºÏ²âÊÔÈÎÎñ
+ * @note  Æô¶¯Ê±ÒÀ´Î³õÊ¼»¯¶æ»ú¡¢DRV8803¡¢TMC2209¡£
+ *        Ö÷Ñ­»·£ºÊ°È¡¡úÌù×°¡úRÕı×ª¡úR·´×ª£¬ÖÜ¶ø¸´Ê¼¡£
  */
 void StartPickPlaceTestTask(void *argument)
 {
     vTaskDelay(pdMS_TO_TICKS(500));
     PrintDebug("========================================\r\n");
-    PrintDebug("  PickPlace è”åˆæµ‹è¯•ä»»åŠ¡å¯åŠ¨\r\n");
-    PrintDebug("  Zè½´èˆµæœº(CH%d) + æ°”æ³µ(12VO1) + ç”µç£é˜€(24VO1) + Rè½´(TMC2209)\r\n",
+    PrintDebug("  PickPlace ÁªºÏ²âÊÔÈÎÎñÆô¶¯\r\n");
+    PrintDebug("  ZÖá¶æ»ú(CH%d) + Æø±Ã(12VO1) + µç´Å·§(24VO1) + RÖá(TMC2209)\r\n",
                PICKPLACE_SERVO_CH);
     PrintDebug("========================================\r\n");
 
-    /* ---- 1. åˆå§‹åŒ– DRV8803ï¼ˆæ°”æ³µï¼‰ ---- */
+    /* ---- 1. ³õÊ¼»¯ DRV8803£¨Æø±Ã£© ---- */
     DRV8803_Init();
     DRV8803_EnableChip(1, true);
-    DRV8803_EnableChip(2, true);   /* U13 24V èŠ¯ç‰‡ä½¿èƒ½ï¼ˆç”µç£é˜€ï¼‰ */
-    PrintDebug("[PickPlace] DRV8803 åˆå§‹åŒ–å®Œæˆ\r\n");
+    DRV8803_EnableChip(2, true);   /* U13 24V Ğ¾Æ¬Ê¹ÄÜ£¨µç´Å·§£© */
+    PrintDebug("[PickPlace] DRV8803 ³õÊ¼»¯Íê³É\r\n");
 
-    /* ---- 2. åˆå§‹åŒ–èˆµæœº ---- */
+    /* ---- 2. ³õÊ¼»¯¶æ»ú ---- */
     Servo_Init(&htim2);
-    DRV8803_SetOutput(PICKPLACE_SERVO_PORT, true);  /* èˆµæœºä¸Šç”µ */
+    DRV8803_SetOutput(PICKPLACE_SERVO_PORT, true);  /* ¶æ»úÉÏµç */
     vTaskDelay(pdMS_TO_TICKS(100));
     Servo_SetAngle(PICKPLACE_SERVO_CH, PICKPLACE_PLACE_ANGLE);
     vTaskDelay(pdMS_TO_TICKS(300));
     if (Servo_IsInitialized(PICKPLACE_SERVO_CH)) {
-        PrintDebug("[PickPlace] èˆµæœºåˆå§‹åŒ–å®Œæˆï¼Œå½“å‰è§’åº¦=%.0fÂ°\r\n",
+        PrintDebug("[PickPlace] ¶æ»ú³õÊ¼»¯Íê³É£¬µ±Ç°½Ç¶È=%.0f¡ã\r\n",
                    Servo_GetAngle(PICKPLACE_SERVO_CH));
     } else {
-        PrintDebug("[PickPlace] èˆµæœºåˆå§‹åŒ–å¤±è´¥ï¼\r\n");
+        PrintDebug("[PickPlace] ¶æ»ú³õÊ¼»¯Ê§°Ü£¡\r\n");
     }
 
-    /* ---- 3. åˆå§‹åŒ– Rè½´ TMC2209 ---- */
+    /* ---- 3. ³õÊ¼»¯ RÖá TMC2209 ---- */
     if (!TMC_Init()) {
-        PrintDebug("[PickPlace] FATAL: TMC2209 åˆå§‹åŒ–å¤±è´¥ï¼ä»»åŠ¡æŒ‚èµ·ã€‚\r\n");
+        PrintDebug("[PickPlace] FATAL: TMC2209 ³õÊ¼»¯Ê§°Ü£¡ÈÎÎñ¹ÒÆğ¡£\r\n");
         vTaskSuspend(NULL);
     }
-    PrintDebug("[PickPlace] TMC2209 (Rè½´) åˆå§‹åŒ–å®Œæˆ\r\n");
+    PrintDebug("[PickPlace] TMC2209 (RÖá) ³õÊ¼»¯Íê³É\r\n");
 
-    /* å›è¯»å…³é”®å¯„å­˜å™¨ï¼ˆå§‹ç»ˆæ‰§è¡Œï¼Œç”¨äºç¡®è®¤é…ç½®ï¼‰ */
+    /* »Ø¶Á¹Ø¼ü¼Ä´æÆ÷£¨Ê¼ÖÕÖ´ĞĞ£¬ÓÃÓÚÈ·ÈÏÅäÖÃ£© */
     {
         uint32_t reg_val;
         if (TMC_ReadReg(TMC_REG_GCONF, &reg_val) == TMC_ERR_NONE)
@@ -1014,61 +1037,61 @@ void StartPickPlaceTestTask(void *argument)
             PrintDebug("[PickPlace] CHOPCONF=0x%08lX (TOFF=%ld, MRES=%ld, INTPOL=%ld)\r\n",
                        reg_val, reg_val&0xF, (reg_val>>24)&0xF, (reg_val>>28)&1);
         if (TMC_ReadReg(TMC_REG_VACTUAL, &reg_val) == TMC_ERR_NONE)
-            PrintDebug("[PickPlace] VACTUAL =%ld (åˆå§‹å€¼)\r\n", (int32_t)reg_val);
+            PrintDebug("[PickPlace] VACTUAL =%ld (³õÊ¼Öµ)\r\n", (int32_t)reg_val);
     }
 
-    /* ---- 4. ä¸»æµ‹è¯•å¾ªç¯ ---- */
+    /* ---- 4. Ö÷²âÊÔÑ­»· ---- */
     uint32_t cycle = 0;
     for (;;)
     {
         cycle++;
-        PrintDebug("\r\n--- PickPlace æµ‹è¯•å‘¨æœŸ %lu ---\r\n", cycle);
+        PrintDebug("\r\n--- PickPlace ²âÊÔÖÜÆÚ %lu ---\r\n", cycle);
 
-        pickplace_pick();                       /* Zè½´æ‹¾å– */
+        pickplace_pick();                       /* ZÖáÊ°È¡ */
         vTaskDelay(pdMS_TO_TICKS(300));
-        pickplace_place();                      /* Zè½´è´´è£… */
+        pickplace_place();                      /* ZÖáÌù×° */
         vTaskDelay(pdMS_TO_TICKS(300));
-        pickplace_r_forward();                  /* Rè½´æ­£è½¬ */
+        pickplace_r_forward();                  /* RÖáÕı×ª */
 
-        pickplace_r_reverse();                  /* Rè½´åè½¬ */
+        pickplace_r_reverse();                  /* RÖá·´×ª */
 
-        PrintDebug("--- å‘¨æœŸ %lu å®Œæˆ ---\r\n\r\n", cycle);
+        PrintDebug("--- ÖÜÆÚ %lu Íê³É ---\r\n\r\n", cycle);
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
 }
 
 /* ================================================================
- * æ‘„åƒå¤´ + ç”µæœºè”åŠ¨æµ‹è¯•
+ * ÉãÏñÍ· + µç»úÁª¶¯²âÊÔ
  *
- * ä¾æ¬¡æµ‹è¯• P1(æ•£æ–™åŒºæ‰¾å…ƒä»¶) â†’ P3(ä¸‹ç›¸æœºåç§») â†’ P2(Markç‚¹å»ºç³»)ã€‚
- * æ¯ä¸ª Process æœ‰ç‹¬ç«‹è¶…æ—¶ï¼Œè¶…æ—¶æˆ–å‡ºé”™åè·³åˆ°ä¸‹ä¸€ä¸ªã€‚
+ * ÒÀ´Î²âÊÔ P1(É¢ÁÏÇøÕÒÔª¼ş) ¡ú P3(ÏÂÏà»úÆ«ÒÆ) ¡ú P2(Markµã½¨Ïµ)¡£
+ * Ã¿¸ö Process ÓĞ¶ÀÁ¢³¬Ê±£¬³¬Ê±»ò³ö´íºóÌøµ½ÏÂÒ»¸ö¡£
  *
- * â˜… æ”¶åˆ° GOT_POS åä¼šå®é™…é©±åŠ¨ XY ç”µæœºç§»åŠ¨ï¼Œå†å‘ "go" ç»™æ‘„åƒå¤´ï¼Œ
- *   å½¢æˆå®Œæ•´çš„ä½ç½®åé¦ˆé—­ç¯ã€‚
+ * ¡ï ÊÕµ½ GOT_POS ºó»áÊµ¼ÊÇı¶¯ XY µç»úÒÆ¶¯£¬ÔÙ·¢ "go" ¸øÉãÏñÍ·£¬
+ *   ĞÎ³ÉÍêÕûµÄÎ»ÖÃ·´À¡±Õ»·¡£
  * ================================================================ */
-#define CAM_TEST_TIMEOUT_P1   30000   /* P1 è¶…æ—¶ ms */
-#define CAM_TEST_TIMEOUT_P2   60000   /* P2 è¶…æ—¶ ms (3ä¸ªMark) */
-#define CAM_TEST_TIMEOUT_P3   30000   /* P3 è¶…æ—¶ ms */
+#define CAM_TEST_TIMEOUT_P1   60000   /* P1 ³¬Ê± ms */
+#define CAM_TEST_TIMEOUT_P2   60000   /* P2 ³¬Ê± ms (3¸öMark) */
+#define CAM_TEST_TIMEOUT_P3   60000   /* P3 ³¬Ê± ms */
 
-/* åç§»â†’æ­¥æ•°æ¢ç®—ç³»æ•° (éœ€æ ¹æ®ç›¸æœº FOV å®æµ‹æ ‡å®šï¼) */
-#define CAM_PX_TO_STEPS       (STEPS_PER_MM / 1000.0f)   /* åƒç´  â†’ æ­¥æ•° */
-#define CAM_MM10000_TO_STEPS  (STEPS_PER_MM / 10000.0f)  /* mm*10000 â†’ æ­¥æ•° */
+/* Æ«ÒÆ¡ú²½Êı»»ËãÏµÊı (Ğè¸ù¾İÏà»ú FOV Êµ²â±ê¶¨£¡) */
+#define CAM_PX_TO_STEPS       (STEPS_PER_MM / 1000.0f)   /* ÏñËØ ¡ú ²½Êı */
+#define CAM_MM10000_TO_STEPS  (STEPS_PER_MM / 10000.0f)  /* mm*10000 ¡ú ²½Êı */
 #define CAM_MOVE_SPEED        100
 #define CAM_MOVE_ACC          25
 
 /**
- * @brief è¿è¡Œä¸€ä¸ªè§†è§‰ Process åˆ°å®Œæˆæˆ–è¶…æ—¶
+ * @brief ÔËĞĞÒ»¸öÊÓ¾õ Process µ½Íê³É»ò³¬Ê±
  * @param cmd        VCMD_P1 / VCMD_P2 / VCMD_P3
- * @param timeout_ms è¶…æ—¶ (ms)
- * @param cur_x      å½“å‰ X åæ ‡ (æ­¥æ•°, è¾“å…¥è¾“å‡º)
- * @param cur_y      å½“å‰ Y åæ ‡ (æ­¥æ•°, è¾“å…¥è¾“å‡º)
- * @return true=å®Œæˆ, false=è¶…æ—¶æˆ–å‡ºé”™
+ * @param timeout_ms ³¬Ê± (ms)
+ * @param cur_x      µ±Ç° X ×ø±ê (²½Êı, ÊäÈëÊä³ö)
+ * @param cur_y      µ±Ç° Y ×ø±ê (²½Êı, ÊäÈëÊä³ö)
+ * @return true=Íê³É, false=³¬Ê±»ò³ö´í
  */
 static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
                          int32_t *cur_x, int32_t *cur_y) {
     Vision_Start(cmd);
 
-    /* P2 å¯åŠ¨åçŠ¶æ€æ˜¯ IDLEï¼Œéœ€è¦ä¸»åŠ¨å‘ "go" */
+    /* P2 Æô¶¯ºó×´Ì¬ÊÇ IDLE£¬ĞèÒªÖ÷¶¯·¢ "go" */
     if (cmd == VCMD_P2) {
         osDelay(200);
         if (Vision_GetState() == VISION_IDLE) {
@@ -1098,14 +1121,14 @@ static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
                 int32_t dx_s = 0, dy_s = 0;
 
                 if (cmd == VCMD_P2) {
-                    dx_s = (int32_t)(r->dy * CAM_MM10000_TO_STEPS);
-                    dy_s = (int32_t)(r->dx * CAM_MM10000_TO_STEPS);
+                    dx_s = -(int32_t)(r->dy * CAM_MM10000_TO_STEPS);  // cam Y ¡ú X1+X2£¨ÎïÀí Y£©
+                    dy_s = -(int32_t)(r->dx * CAM_MM10000_TO_STEPS);  // cam X ¡ú Y µç»ú£¨ÎïÀí X£©
                     PrintDebug("[CAM_TEST]   Mark%d/%d: dx=%ld dy=%ld mm10000 -> move(%ld,%ld)\r\n",
                                (int)r->mark_index, (int)r->mark_count,
                                (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
                 } else {
-                    dx_s = (int32_t)(r->dy * CAM_PX_TO_STEPS);
-                    dy_s = (int32_t)(r->dx * CAM_PX_TO_STEPS);
+                    dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);  // cam Y ¡ú X1+X2£¨ÎïÀí Y£©
+                    dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  // cam X ¡ú Y µç»ú£¨ÎïÀí X£©
                     if (r->angle_x100 != 0 || r->class_name[0] != '\0') {
                         PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px ang=%ld.%02ld cls=%s -> move(%ld,%ld)\r\n",
                                    (long)r->dx, (long)r->dy,
@@ -1140,6 +1163,16 @@ static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
             prev = state;
         }
 
+        /* ÖÜÆÚĞÔ´òÓ¡ CAN IRQ ¼ÆÊı£¬È·ÈÏÖĞ¶ÏÊÇ·ñ´¥·¢ */
+        {
+            static uint32_t last_print = 0;
+            uint32_t now = osKernelGetTickCount();
+            if (now - last_print > pdMS_TO_TICKS(2000)) {
+                extern volatile uint32_t g_rx_irq_count;
+                PrintDebug("[CAM_TEST] CAN IRQ count=%lu\r\n", (unsigned long)g_rx_irq_count);
+                last_print = now;
+            }
+        }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
@@ -1148,23 +1181,23 @@ static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
 }
 
 /**
- * @brief æ‘„åƒå¤´ + ç”µæœºè”åŠ¨æµ‹è¯•ä»»åŠ¡
- * @note  åˆå§‹åŒ– CAN/MKS ç”µæœº + Visionï¼Œä¾æ¬¡æ‰§è¡Œ P1/P3/P2ã€‚
- *        æ ¹æ®æ‘„åƒå¤´è¿”å›çš„åç§»å®é™…é©±åŠ¨ XY å¹³å°ç§»åŠ¨ã€‚
+ * @brief ÉãÏñÍ· + µç»úÁª¶¯²âÊÔÈÎÎñ
+ * @note  ³õÊ¼»¯ CAN/MKS µç»ú + Vision£¬ÒÀ´ÎÖ´ĞĞ P1/P3/P2¡£
+ *        ¸ù¾İÉãÏñÍ··µ»ØµÄÆ«ÒÆÊµ¼ÊÇı¶¯ XY Æ½Ì¨ÒÆ¶¯¡£
  */
 void StartCamTestTask(void *argument) {
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    /* å…³é—­ R è½´ï¼ˆæœ¬ä»»åŠ¡ä¸ä½¿ç”¨ TMC2209ï¼‰ */
+    /* ¹Ø±Õ R Öá£¨±¾ÈÎÎñ²»Ê¹ÓÃ TMC2209£© */
     TMC_SetEnable(false);
 
-    /* ---- 1. CAN + ç”µæœºåˆå§‹åŒ– ---- */
+    /* ---- 1. CAN + µç»ú³õÊ¼»¯ ---- */
     CAN_Init(&hfdcan1, NULL);
     osDelay(200);
     Motor_Init();
     osDelay(200);
 
-    /* ---- 2. è§†è§‰æ¨¡å—åˆå§‹åŒ– ---- */
+    /* ---- 2. ÊÓ¾õÄ£¿é³õÊ¼»¯ ---- */
     Vision_Init();
 
     PrintDebug("========================================\r\n");
@@ -1176,7 +1209,7 @@ void StartCamTestTask(void *argument) {
 
     int32_t cur_x = 0, cur_y = 0;
 
-    /* ---- P1: æ•£æ–™åŒºå…ƒä»¶æ£€æµ‹ ---- */
+    /* ---- P1: É¢ÁÏÇøÔª¼ş¼ì²â ---- */
     PrintDebug("\r\n--- Test 1/3: P1 (component detect) ---\r\n");
     if (!cam_test_run(VCMD_P1, CAM_TEST_TIMEOUT_P1, &cur_x, &cur_y)) {
         PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
@@ -1184,7 +1217,7 @@ void StartCamTestTask(void *argument) {
         PrintDebug("[CAM_TEST] P1 PASSED\r\n");
     }
 
-    /* ---- P3: ä¸‹ç›¸æœºåç§»æ£€æµ‹ (éœ€è¦æ—¶å–æ¶ˆæ³¨é‡Š) ---- */
+    /* ---- P3: ÏÂÏà»úÆ«ÒÆ¼ì²â (ĞèÒªÊ±È¡Ïû×¢ÊÍ) ---- */
     // PrintDebug("\r\n--- Test 2/3: P3 (bottom cam offset) ---\r\n");
     // if (!cam_test_run(VCMD_P3, CAM_TEST_TIMEOUT_P3, &cur_x, &cur_y)) {
     //     PrintDebug("[CAM_TEST] P3 FAILED, continuing...\r\n");
@@ -1192,7 +1225,7 @@ void StartCamTestTask(void *argument) {
     //     PrintDebug("[CAM_TEST] P3 PASSED\r\n");
     // }
 
-    /* ---- P2: Mark ç‚¹å»ºç³» (éœ€è¦æ—¶å–æ¶ˆæ³¨é‡Š) ---- */
+    /* ---- P2: Mark µã½¨Ïµ (ĞèÒªÊ±È¡Ïû×¢ÊÍ) ---- */
     // PrintDebug("\r\n--- Test 3/3: P2 (mark alignment) ---\r\n");
     // if (!cam_test_run(VCMD_P2, CAM_TEST_TIMEOUT_P2, &cur_x, &cur_y)) {
     //     PrintDebug("[CAM_TEST] P2 FAILED\r\n");

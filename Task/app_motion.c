@@ -1,4 +1,4 @@
-ï»¿#include "app_motion.h"
+#include "app_motion.h"
 #include "driver_motor.h"
 #include "driver_can.h"
 #include "cmsis_os2.h"
@@ -6,61 +6,61 @@
 #include <stdbool.h>
 #include "driver_servo.h"
 #include "driver_tmc2209.h"   
-#include <math.h>   // è§£å†³ fabsf æœªå£°æ˜
+#include <math.h>   // ½â¾ö fabsf Î´ÉùÃ÷
 #include "app_test.h"
 #include "driver_drv8803.h"
 
 extern TIM_HandleTypeDef htim5;
 
 
-//ä¿¡å·é‡
+//ĞÅºÅÁ¿
 
-//äº‹ä»¶ç»„
-osEventFlagsId_t evtAxesDone = NULL;   // ç”¨äºä¸‰è½´åˆ°ä½åŒæ­¥
+//ÊÂ¼ş×é
+osEventFlagsId_t evtAxesDone = NULL;   // ÓÃÓÚÈıÖáµ½Î»Í¬²½
 
-/* ---------- ç”µæœºåœ°å€å®šä¹‰ ---------- */
+/* ---------- µç»úµØÖ·¶¨Òå ---------- */
 #define X1_ADDR   0x01
 #define X2_ADDR   0x02
 #define Y_ADDR    0x03
 
-/* ---------- èˆµæœºé…ç½®å®šä¹‰ ---------- */
-#define SERVO_CH_Z   2        // å¯¹åº”ä½ åœ¨ Servo_Init ä¸­é…ç½®çš„ channel ç´¢å¼•
+/* ---------- ¶æ»úÅäÖÃ¶¨Òå ---------- */
+#define SERVO_CH_Z   2        // ¶ÔÓ¦ÄãÔÚ Servo_Init ÖĞÅäÖÃµÄ channel Ë÷Òı
 
-#define ANGLE_UP     120.0f   // å¸å˜´å‡èµ·è§’åº¦ (è¯·æ ¹æ®å®é™…æœºæ¢°è°ƒ)
-#define ANGLE_DOWN   60.0f    // å¸å˜´ä¸‹é™è§’åº¦
+#define ANGLE_UP     120.0f   // Îü×ìÉıÆğ½Ç¶È (Çë¸ù¾İÊµ¼Ê»úĞµµ÷)
+#define ANGLE_DOWN   60.0f    // Îü×ìÏÂ½µ½Ç¶È
 
-// å¸å˜´æ°”æ³µç”± DRV8803 12VO1 (PE11) æ§åˆ¶ï¼Œè§ driver_drv8803.h Pump_On/Off
+// Îü×ìÆø±ÃÓÉ DRV8803 12VO1 (PE11) ¿ØÖÆ£¬¼û driver_drv8803.h Pump_On/Off
 
-// R è½´å‚æ•°ï¼ˆéœ€æ ¹æ®å®æµ‹è°ƒæ•´ï¼‰
+// R Öá²ÎÊı£¨Ğè¸ù¾İÊµ²âµ÷Õû£©
 #define R_MICROSTEPS    256
-#define R_STEPS_PER_REV (200 * R_MICROSTEPS)  // 51200 å¾®æ­¥/åœˆ
-#define R_ACCEL_DELAY   50                    // åŠ å‡é€Ÿå¹³æ»‘å»¶æ—¶ï¼ˆmsï¼‰
+#define R_STEPS_PER_REV (200 * R_MICROSTEPS)  // 51200 Î¢²½/È¦
+#define R_ACCEL_DELAY   50                    // ¼Ó¼õËÙÆ½»¬ÑÓÊ±£¨ms£©
 
-/* åè®®å¸¸é‡ */
-#define FUNC_ABS_POS   0xF5       // åæ ‡ç»å¯¹è¿åŠ¨åŠŸèƒ½ç 
-#define STATUS_SYNC_RECV  0x05    // åŒæ­¥æ¨¡å¼ï¼šå·²æ¥æ”¶æŒ‡ä»¤ï¼Œç­‰å¾…åŒæ­¥æ‰§è¡Œ
-#define STATUS_RUN_COMPLETE 0x02  // è¿è¡Œå®Œæˆ
-#define STATUS_START      0x01    // æ™®é€šæ¨¡å¼ï¼šè¿è¡Œå¼€å§‹ (æœªä½¿ç”¨åŒæ­¥æ—¶å¯èƒ½æ”¶åˆ°)
+/* Ğ­Òé³£Á¿ */
+#define FUNC_ABS_POS   0xF5       // ×ø±ê¾ø¶ÔÔË¶¯¹¦ÄÜÂë
+#define STATUS_SYNC_RECV  0x05    // Í¬²½Ä£Ê½£ºÒÑ½ÓÊÕÖ¸Áî£¬µÈ´ıÍ¬²½Ö´ĞĞ
+#define STATUS_RUN_COMPLETE 0x02  // ÔËĞĞÍê³É
+#define STATUS_START      0x01    // ÆÕÍ¨Ä£Ê½£ºÔËĞĞ¿ªÊ¼ (Î´Ê¹ÓÃÍ¬²½Ê±¿ÉÄÜÊÕµ½)
 
-#define ACK_TIMEOUT_MS   2000      // å•è½´åˆ°ä½è¶…æ—¶ (ms)
+#define ACK_TIMEOUT_MS   2000      // µ¥Öáµ½Î»³¬Ê± (ms)
 
-/* ---------- å†…éƒ¨è¾…åŠ©å‡½æ•° ---------- */
+/* ---------- ÄÚ²¿¸¨Öúº¯Êı ---------- */
 
 /**
- * @brief å‘é€å•è½´åæ ‡ç»å¯¹è¿åŠ¨æŒ‡ä»¤ (ä¸ç­‰å¾…)
+ * @brief ·¢ËÍµ¥Öá×ø±ê¾ø¶ÔÔË¶¯Ö¸Áî (²»µÈ´ı)
  */
 static void send_axis_abs(int32_t addr, int32_t abs_coord, uint16_t speed, uint8_t acc)
 {
-    // åæ ‡èŒƒå›´é™åˆ¶åœ¨ int24_t (-8388607 ~ 8388607)
+    // ×ø±ê·¶Î§ÏŞÖÆÔÚ int24_t (-8388607 ~ 8388607)
     if (abs_coord >  8388607) abs_coord =  8388607;
     if (abs_coord < -8388607) abs_coord = -8388607;
 
-    positionMode3Run(addr, speed, acc, abs_coord);  // ç›´æ¥è°ƒç”¨ä½ çš„åº•å±‚é©±åŠ¨
+    positionMode3Run(addr, speed, acc, abs_coord);  // Ö±½Óµ÷ÓÃÄãµÄµ×²ãÇı¶¯
 }
 
 /**
- * @brief å‘æŒ‡å®šç”µæœºå‘é€æ€¥åœï¼ˆç«‹å³å‡é€Ÿåœæ­¢ï¼‰
- *        acc=0 æ—¶ç«‹å³åœæ­¢ï¼Œå¦åˆ™å‡é€Ÿåœæ­¢
+ * @brief ÏòÖ¸¶¨µç»ú·¢ËÍ¼±Í££¨Á¢¼´¼õËÙÍ£Ö¹£©
+ *        acc=0 Ê±Á¢¼´Í£Ö¹£¬·ñÔò¼õËÙÍ£Ö¹
  */
 static void send_axis_stop(int32_t addr, uint8_t acc)
 {
@@ -70,19 +70,19 @@ static void send_axis_stop(int32_t addr, uint8_t acc)
     tx[2] = 0x00;
     tx[3] = acc;
     
-    // åæ ‡ä»»æ„ï¼ˆ0ï¼‰
+    // ×ø±êÈÎÒâ£¨0£©
     tx[4] = 0x00;
     tx[5] = 0x00;
     tx[6] = 0x00;
-    // ä½ çš„åº“å‡½æ•°ä¼šè‡ªåŠ¨åŠ  CRC
+    // ÄãµÄ¿âº¯Êı»á×Ô¶¯¼Ó CRC
     CAN_Transmit_Data(&hfdcan1, addr, tx, 7);
 }
 
 /**
- * @brief é˜»å¡ç­‰å¾…æŒ‡å®šç”µæœºè¿›å…¥â€œè¿è¡Œå®Œæˆâ€çŠ¶æ€ (0x02)      å·²è¢«äº‹ä»¶ç»„ä»£æ›¿ï¼Œæš‚æ— ç”¨
- * @param addr ç”µæœº CAN ID
- * @param timeout_ms è¶…æ—¶ (ms)
- * @retval 0 æˆåŠŸ, -1 è¶…æ—¶
+ * @brief ×èÈûµÈ´ıÖ¸¶¨µç»ú½øÈë¡°ÔËĞĞÍê³É¡±×´Ì¬ (0x02)      ÒÑ±»ÊÂ¼ş×é´úÌæ£¬ÔİÎŞÓÃ
+ * @param addr µç»ú CAN ID
+ * @param timeout_ms ³¬Ê± (ms)
+ * @retval 0 ³É¹¦, -1 ³¬Ê±
  */
 //static int wait_axis_ready(int32_t addr, uint32_t timeout_ms)
 //{
@@ -91,25 +91,25 @@ static void send_axis_stop(int32_t addr, uint8_t acc)
 
 //    while ((osKernelGetTickCount() - start) < timeout_ms) {
 //        if (osMessageQueueGet(motor_event_queue, &pkt, NULL, 10) == osOK) {
-//            // åªå…³å¿ƒå½“å‰ç”µæœºçš„åæ ‡ç»å¯¹è¿åŠ¨å“åº”
+//            // Ö»¹ØĞÄµ±Ç°µç»úµÄ×ø±ê¾ø¶ÔÔË¶¯ÏìÓ¦
 //            if (pkt.ID == addr && pkt.FuncCode == FUNC_ABS_POS) {
 //                if (pkt.Status == STATUS_RUN_COMPLETE) {
-//                    return 0;   // åˆ°ä½
+//                    return 0;   // µ½Î»
 //                }
-//                // å…¶ä»–çŠ¶æ€ (0x05 åŒæ­¥æ¥æ”¶, 0x01 å¼€å§‹) å¿½ç•¥ï¼Œç»§ç»­ç­‰å¾…
+//                // ÆäËû×´Ì¬ (0x05 Í¬²½½ÓÊÕ, 0x01 ¿ªÊ¼) ºöÂÔ£¬¼ÌĞøµÈ´ı
 //            }
 //        }
 //    }
-//    return -1;  // è¶…æ—¶
+//    return -1;  // ³¬Ê±
 //}
 
 /**
- * @brief æ‰§è¡Œä¸€æ¬¡å®Œæ•´çš„ X/Y åŒæ­¥ç§»åŠ¨
- * @param x_abs  X è½´ç»å¯¹åæ ‡ (ä¸¤ä¸ª X ç”µæœºç›®æ ‡ç›¸åŒ)
- * @param y_abs  Y è½´ç»å¯¹åæ ‡
- * @param speed  é€Ÿåº¦ (RPM)
- * @param acc    åŠ é€Ÿåº¦
- * @retval 0 æˆåŠŸ, -1 å¤±è´¥
+ * @brief Ö´ĞĞÒ»´ÎÍêÕûµÄ X/Y Í¬²½ÒÆ¶¯
+ * @param x_abs  X Öá¾ø¶Ô×ø±ê (Á½¸ö X µç»úÄ¿±êÏàÍ¬)
+ * @param y_abs  Y Öá¾ø¶Ô×ø±ê
+ * @param speed  ËÙ¶È (RPM)
+ * @param acc    ¼ÓËÙ¶È
+ * @retval 0 ³É¹¦, -1 Ê§°Ü
  */
 static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
 {
@@ -123,12 +123,12 @@ static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
                                        EVENT_ALL_AXES | EVENT_ANY_ERROR,
                                        osFlagsWaitAny, ACK_TIMEOUT_MS);
     if (flags & EVENT_ANY_ERROR) {
-        return -2;   // è¡¨ç¤ºå‘ç”Ÿé”™è¯¯
+        return -2;   // ±íÊ¾·¢Éú´íÎó
     }
     if ((flags & EVENT_ALL_AXES) == EVENT_ALL_AXES) {
         return 0;
     }
-    return -1;   // è¶…æ—¶
+    return -1;   // ³¬Ê±
 }
 
 void nozzle_on(void) {
@@ -138,16 +138,16 @@ void nozzle_off(void) {
     DRV8803_SetOutput(&Port_12VO1, false);
 }
 
-/* ---------- å°è£… Z è½´åŸºæœ¬åŠ¨ä½œ ---------- */
+/* ---------- ·â×° Z Öá»ù±¾¶¯×÷ ---------- */
 
-// é˜»å¡å¼ç­‰å¾…èˆµæœºç¨³å®š (ç®€å•å»¶æ—¶ï¼ŒMG995 å¤§çº¦ 0.2s/60Â°)
+// ×èÈûÊ½µÈ´ı¶æ»úÎÈ¶¨ (¼òµ¥ÑÓÊ±£¬MG995 ´óÔ¼ 0.2s/60¡ã)
 static void servo_delay_ms(uint32_t ms) {
-    osDelay(ms);   // FreeRTOS ä¸‹çš„æ¯«ç§’å»¶æ—¶
+    osDelay(ms);   // FreeRTOS ÏÂµÄºÁÃëÑÓÊ±
 }
 
 void z_down(void) {
     Servo_SetAngle(SERVO_CH_Z, ANGLE_DOWN);
-    servo_delay_ms(300);   // ç­‰å¾…åˆ°ä½
+    servo_delay_ms(300);   // µÈ´ıµ½Î»
 }
 
 void z_up(void) {
@@ -155,113 +155,113 @@ void z_up(void) {
     servo_delay_ms(300);
 }
 
-/* ---------- ç»„åˆçš„å¸å– / æ”¾ç½®æµç¨‹ ---------- */
+/* ---------- ×éºÏµÄÎüÈ¡ / ·ÅÖÃÁ÷³Ì ---------- */
 
 void pick_component(void) {
     z_down();
     nozzle_on();
-    servo_delay_ms(100);   // å¸ç¨³
+    servo_delay_ms(100);   // ÎüÎÈ
     z_up();
 }
 
 void place_component(void) {
     z_down();
     nozzle_off();
-    servo_delay_ms(100);   // é‡Šæ”¾
+    servo_delay_ms(100);   // ÊÍ·Å
     z_up();
 }
 
 /**
- * @brief å°†è§’åº¦è½¬æ¢ä¸ºå¾®æ­¥æ•°
- * @param angle è§’åº¦ (0.0 ~ 360.0)
- * @return å¾®æ­¥æ•°
+ * @brief ½«½Ç¶È×ª»»ÎªÎ¢²½Êı
+ * @param angle ½Ç¶È (0.0 ~ 360.0)
+ * @return Î¢²½Êı
  */
 static int32_t angle_to_usteps(float angle) {
     return (int32_t)(angle / 360.0f * R_STEPS_PER_REV);
 }
 
 /**
- * @brief å°†å¾®æ­¥æ•°è½¬æ¢ä¸º VACTUAL é€Ÿåº¦å€¼
- * @param speed_rpm è½¬é€Ÿ (RPM)
- * @return VACTUAL å€¼ (å¸¦ç¬¦å·)
+ * @brief ½«Î¢²½Êı×ª»»Îª VACTUAL ËÙ¶ÈÖµ
+ * @param speed_rpm ×ªËÙ (RPM)
+ * @return VACTUAL Öµ (´ø·ûºÅ)
  */
 static int32_t speed_to_vactual(float speed_rpm, uint8_t dir) {
-    // 1 RPM = 1/60 è½¬/ç§’ = R_STEPS_PER_REV / 60 å¾®æ­¥/ç§’
+    // 1 RPM = 1/60 ×ª/Ãë = R_STEPS_PER_REV / 60 Î¢²½/Ãë
     float usteps_per_sec = speed_rpm * R_STEPS_PER_REV / 60.0f;
-    // vactual = usteps_per_sec / 0.715 (12MHz å†…éƒ¨æ—¶é’Ÿ)
-    int32_t vactual = (int32_t)(usteps_per_sec / 0.715f);//æ­¤å¤„è‹¥ TMC_SetSpeed ç›´æ¥æ¥å—å¾®æ­¥/ç§’ï¼Œåˆ™ä¸åº”é™¤ä»¥ 0.715ï¼Œç›´æ¥ return (int32_t)(usteps_per_sec)ã€‚
-    // è‹¥å…¶éœ€è¦ TMC2209 çš„ VACTUAL åŸå§‹å€¼ï¼Œæ­£ç¡®å…¬å¼ä¸º VACTUAL = (usteps_per_sec * 16777216) / 12000000ï¼Œçº¦ä¸º 1.3981 * usteps_per_secã€‚
+    // vactual = usteps_per_sec / 0.715 (12MHz ÄÚ²¿Ê±ÖÓ)
+    int32_t vactual = (int32_t)(usteps_per_sec / 0.715f);//´Ë´¦Èô TMC_SetSpeed Ö±½Ó½ÓÊÜÎ¢²½/Ãë£¬Ôò²»Ó¦³ıÒÔ 0.715£¬Ö±½Ó return (int32_t)(usteps_per_sec)¡£
+    // ÈôÆäĞèÒª TMC2209 µÄ VACTUAL Ô­Ê¼Öµ£¬ÕıÈ·¹«Ê½Îª VACTUAL = (usteps_per_sec * 16777216) / 12000000£¬Ô¼Îª 1.3981 * usteps_per_sec¡£
     return (dir == 0) ? vactual : -vactual;
 }
 
 /**
- * @brief R è½´æ—‹è½¬åˆ°æŒ‡å®šè§’åº¦ (å¼€ç¯ï¼ŒåŸºäºæ—¶é—´)
- * @param angle  ç›®æ ‡è§’åº¦ (ç»å¯¹è§’åº¦ï¼Œ0~360)
- * @param speed_rpm è½¬é€Ÿ
- * @note  å½“å‰è§’åº¦æœªè®°å½•ï¼Œéœ€å…ˆåœ¨ç³»ç»Ÿä»»åŠ¡ä¸­ç»´æŠ¤
+ * @brief R ÖáĞı×ªµ½Ö¸¶¨½Ç¶È (¿ª»·£¬»ùÓÚÊ±¼ä)
+ * @param angle  Ä¿±ê½Ç¶È (¾ø¶Ô½Ç¶È£¬0~360)
+ * @param speed_rpm ×ªËÙ
+ * @note  µ±Ç°½Ç¶ÈÎ´¼ÇÂ¼£¬ĞèÏÈÔÚÏµÍ³ÈÎÎñÖĞÎ¬»¤
  */
-/* ---- R è½´å½“å‰è§’åº¦ (ä¾›å¤–éƒ¨è¯»å†™) ---- */
+/* ---- R Öáµ±Ç°½Ç¶È (¹©Íâ²¿¶ÁĞ´) ---- */
 static float g_cur_r_angle = 0.0f;
 
 void r_axis_rotate(float angle, float speed_rpm) {
     float delta = angle - g_cur_r_angle;
     if (delta < -180.0f) delta += 360.0f;
-    else if (delta > 180.0f) delta -= 360.0f;   // é€‰æ‹©æœ€çŸ­è·¯å¾„
+    else if (delta > 180.0f) delta -= 360.0f;   // Ñ¡Ôñ×î¶ÌÂ·¾¶
 
-    if (fabsf(delta) < 0.5f) return;            // è§’åº¦å¤ªè¿‘ï¼Œå¿½ç•¥
+    if (fabsf(delta) < 0.5f) return;            // ½Ç¶ÈÌ«½ü£¬ºöÂÔ
 
-    uint8_t dir = (delta >= 0) ? 0 : 1;         // 0=æ­£å‘, 1=åå‘
+    uint8_t dir = (delta >= 0) ? 0 : 1;         // 0=ÕıÏò, 1=·´Ïò
     int32_t usteps = angle_to_usteps(fabsf(delta));
     float usteps_per_sec = speed_rpm * R_STEPS_PER_REV / 60.0f;
     uint32_t run_time_ms = (uint32_t)(usteps * 1000.0f / usteps_per_sec);
 
-    /* ä½¿èƒ½ TMC2209 é©±åŠ¨ */
+    /* Ê¹ÄÜ TMC2209 Çı¶¯ */
     TMC_SetEnable(true);
-    vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));   /* ä¸Šç”µç¨³å®š */
+    vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));   /* ÉÏµçÎÈ¶¨ */
 
-    // è®¾ç½®é€Ÿåº¦å¹¶è¿è¡ŒæŒ‡å®šæ—¶é—´
+    // ÉèÖÃËÙ¶È²¢ÔËĞĞÖ¸¶¨Ê±¼ä
     TMC_SetSpeed(speed_to_vactual(speed_rpm, dir));
     vTaskDelay(pdMS_TO_TICKS(run_time_ms));
 
-    // åœæ­¢ï¼ˆé€Ÿåº¦è®¾ä¸º 0ï¼‰
+    // Í£Ö¹£¨ËÙ¶ÈÉèÎª 0£©
     TMC_SetSpeed(0);
-    vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY));   // ç­‰å¾…ç”µæœºåœç¨³
+    vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY));   // µÈ´ıµç»úÍ£ÎÈ
 
-    /* å…³é—­ TMC2209 é©±åŠ¨ */
+    /* ¹Ø±Õ TMC2209 Çı¶¯ */
     TMC_SetEnable(false);
 
     g_cur_r_angle = angle;
 }
 
-/* ---------- ä»»åŠ¡å…¥å£ ---------- */
+/* ---------- ÈÎÎñÈë¿Ú ---------- */
 void MotionTask_Func(void *argument)
 {
-    /* ----- 1. åˆå§‹åŒ–èµ„æºå’Œç”µæœº ----- */
+    /* ----- 1. ³õÊ¼»¯×ÊÔ´ºÍµç»ú ----- */
     //if (motor_event_queue == NULL) {
     //    motor_event_queue = osMessageQueueNew(32, sizeof(CAN_Rx_Packet_t), NULL);
     //}
 
-    // ç”µæœºç¡¬ä»¶åˆå§‹åŒ– (åŒ…æ‹¬è®¾ç½®æ¨¡å¼ã€ä½¿èƒ½ã€åŒæ­¥æ ‡å¿—ã€é›¶ç‚¹ç­‰)
-    Motor_Init();   // ä½ çš„ Motor_Init å·²ç»åŒ…å«äº†åŒæ­¥ä½¿èƒ½(0x4A)
-    Servo_Init(&htim5);       // èˆµæœºåˆå§‹åŒ–ï¼Œå‚æ•°æŒ‰ä½ çš„å®é™…å®šæ—¶å™¨å¡«å†™
-    TMC_Init();               // TMC2209 åˆå§‹åŒ–
-    // å¯é€‰ï¼šå°†å¼€æœºå½“å‰ä½ç½®è®¾ä¸ºå·¥ä½œé›¶ç‚¹
+    // µç»úÓ²¼ş³õÊ¼»¯ (°üÀ¨ÉèÖÃÄ£Ê½¡¢Ê¹ÄÜ¡¢Í¬²½±êÖ¾¡¢ÁãµãµÈ)
+    Motor_Init();   // ÄãµÄ Motor_Init ÒÑ¾­°üº¬ÁËÍ¬²½Ê¹ÄÜ(0x4A)
+    Servo_Init(&htim5);       // ¶æ»ú³õÊ¼»¯£¬²ÎÊı°´ÄãµÄÊµ¼Ê¶¨Ê±Æ÷ÌîĞ´
+    TMC_Init();               // TMC2209 ³õÊ¼»¯
+    // ¿ÉÑ¡£º½«¿ª»úµ±Ç°Î»ÖÃÉèÎª¹¤×÷Áãµã
     // motorSetZero(0x01); ...
 
-    // è·Ÿè¸ªå½“å‰ç»å¯¹åæ ‡ (ç¼–ç å™¨å€¼)
+    // ¸ú×Ùµ±Ç°¾ø¶Ô×ø±ê (±àÂëÆ÷Öµ)
     int32_t cur_x = 0;
     int32_t cur_y = 0;
 
     MotionCmd_t cmd;
 
-    /* ----- 2. ä¸»å¾ªç¯ ----- */
+    /* ----- 2. Ö÷Ñ­»· ----- */
     while (1) {
         if (osMessageQueueGet(motion_cmd_queue, &cmd, NULL, osWaitForever) == osOK) {
             switch (cmd.cmd_type) {
 
             case MOTION_CMD_MOVE_TO:
 
-                osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES);  // æ¸…ç©ºäº‹ä»¶ç»„
+                osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES);  // Çå¿ÕÊÂ¼ş×é
                 positionMode3Run(X1_ADDR, cmd.speed, cmd.acc, cmd.target_x);
                 positionMode3Run(X2_ADDR, cmd.speed, cmd.acc, cmd.target_x);
                 positionMode3Run(Y_ADDR, cmd.speed, cmd.acc, cmd.target_y);
@@ -271,7 +271,7 @@ void MotionTask_Func(void *argument)
                                    osFlagsWaitAny, 10000);
 
                 if (flags & EVENT_ANY_ERROR) {
-                    // æ€¥åœå¤„ç†
+                    // ¼±Í£´¦Àí
                     send_axis_stop(X1_ADDR, 0);
                     send_axis_stop(X2_ADDR, 0);
                     send_axis_stop(Y_ADDR, 0);
@@ -280,9 +280,9 @@ void MotionTask_Func(void *argument)
                     PrintDebug("Move to (%ld, %ld) done.\r\n", cmd.target_x, cmd.target_y);
                     cur_x = cmd.target_x;
                     cur_y = cmd.target_y;                    
-                    // æ­£å¸¸åˆ°ä½
+                    // Õı³£µ½Î»
                 }else {
-                    // è¶…æ—¶å¤„ç†
+                    // ³¬Ê±´¦Àí
                     send_axis_stop(X1_ADDR, 0);
                     send_axis_stop(X2_ADDR, 0);
                     send_axis_stop(Y_ADDR, 0);
@@ -291,14 +291,14 @@ void MotionTask_Func(void *argument)
                 break;
 
             case MOTION_CMD_HOME:
-                // å›é›¶ï¼šå‘åæ ‡ 0 ç§»åŠ¨ï¼Œé€Ÿåº¦ç¨æ…¢
+                // »ØÁã£ºÏò×ø±ê 0 ÒÆ¶¯£¬ËÙ¶ÈÉÔÂı
                 move_to(0, 0, 100, 50);
                 cur_x = 0;
                 cur_y = 0;
                 break;
 
             case MOTION_CMD_STOP:
-                // æ‰€æœ‰è½´æ€¥åœ (ç«‹å³åœæ­¢)
+                // ËùÓĞÖá¼±Í£ (Á¢¼´Í£Ö¹)
                 send_axis_stop(X1_ADDR, 0);
                 send_axis_stop(X2_ADDR, 0);
                 send_axis_stop(Y_ADDR, 0);
@@ -323,7 +323,7 @@ void MotionTask_Func(void *argument)
 
             case MOTION_CMD_R_ROTATE:
             r_axis_rotate((float)cmd.target_r / 100.0f, (float)cmd.speed);
-            break;   // cmd.target_r å¯çº¦å®šä¸º 0.01Â° å•ä½
+            break;   // cmd.target_r ¿ÉÔ¼¶¨Îª 0.01¡ã µ¥Î»
 						
             default:
                 break;
@@ -331,31 +331,40 @@ void MotionTask_Func(void *argument)
         }
     }
 }
-//ä¿¡å·é‡åˆå§‹åŒ–
-//äº‹ä»¶ç»„åˆå§‹åŒ–
+//ĞÅºÅÁ¿³õÊ¼»¯
+//ÊÂ¼ş×é³õÊ¼»¯
 void Event_Init(void) {
     evtAxesDone = osEventFlagsNew(NULL);
 }
 
 /**
- * @brief canå¤„ç†ä»»åŠ¡å‡½æ•°
- * @note ä»motor_event_queue å–æ•°æ®å¹¶é‡Šæ”¾ä¿¡å·é‡ã€‚
+ * @brief can´¦ÀíÈÎÎñº¯Êı
+ * @note ´Ómotor_event_queue È¡Êı¾İ²¢ÊÍ·ÅĞÅºÅÁ¿¡£
  */
 
 void CAN_Process_Task(void *argument) {
     CAN_Rx_Packet_t pkt;
     while (1) {
-        // é˜»å¡ç­‰å¾…é˜Ÿåˆ—æ•°æ®
+        // ×èÈûµÈ´ı¶ÓÁĞÊı¾İ
         if (osMessageQueueGet(motor_event_queue, &pkt, NULL, osWaitForever) == osOK) {
-            // æ£€æŸ¥æ˜¯å¦æ˜¯ä½ç½®è¿åŠ¨å®Œæˆ
+            // ¼ì²éÊÇ·ñÊÇÎ»ÖÃÔË¶¯Íê³É
             if (pkt.FuncCode == 0xF5 && pkt.Status == 0x02) {
+                static uint32_t s_done_cnt = 0;
+                s_done_cnt++;
+#ifdef DEBUG_CAN_PROC
+                PrintDebug("[CAN_PROC] done #%lu: ID=%d FC=0x%02X ST=0x%02X\r\n",
+                           s_done_cnt, pkt.ID, pkt.FuncCode, pkt.Status);
+#endif
                 if (pkt.ID == 1) osEventFlagsSet(evtAxesDone, EVENT_X1_DONE);
                 else if (pkt.ID == 2) osEventFlagsSet(evtAxesDone, EVENT_X2_DONE);
                 else if (pkt.ID == 3) osEventFlagsSet(evtAxesDone, EVENT_Y_DONE);
             }
-            // å¦‚æœçŠ¶æ€ä¸º 0x03ï¼ˆé™ä½åœæ­¢ï¼‰ï¼Œè®¾ç½®é”™è¯¯ä½
+            // Èç¹û×´Ì¬Îª 0x03£¨ÏŞÎ»Í£Ö¹£©£¬ÉèÖÃ´íÎóÎ»
             else if (pkt.FuncCode == 0xF5 && pkt.Status == 0x03) {
-                osEventFlagsSet(evtAxesDone, EVENT_ANY_ERROR);  // ç«‹å³é€šçŸ¥
+#ifdef DEBUG_CAN_PROC
+                PrintDebug("[CAN_PROC] ERROR: ID=%d FC=0x%02X ST=0x03\r\n", pkt.ID, pkt.FuncCode);
+#endif
+                osEventFlagsSet(evtAxesDone, EVENT_ANY_ERROR);  // Á¢¼´Í¨Öª
             }
         }
     }
