@@ -200,7 +200,7 @@ pnp_1/
 
 ## 八、编码规范与约束
 
-1. **文件编码：** 所有 `.c/.h` 文件使用 **GBK** 编码。读写时必须指定 `[Text.Encoding]::GetEncoding(''GBK'')`
+1. **文件编码：** 所有 `.c/.h` 文件使用 **UTF-8** 编码。读写时必须指定 `[Text.Encoding]::GetEncoding(''UTF-8'')`
 2. **CubeMX 用户代码区：** 自定义代码只能写在 `USER CODE BEGIN/END` 标记之间，否则重新生成时会被覆盖
 3. **禁止批量删除：** 禁止 `del /s`, `rd /s`, `Remove-Item -Recurse` 等批量删除命令
 4. **中文注释：** 项目标准使用中文注释
