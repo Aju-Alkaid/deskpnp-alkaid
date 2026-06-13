@@ -3,7 +3,7 @@
 #include <stdio.h>
 
 #define PULSES_PER_MM 512.0f 
-#define MOTOR_X1_ID     0x01 // È·±£ÕâĞ© ID ¶¨ÒåÓë CAN ID Ò»ÖÂ
+#define MOTOR_X1_ID     0x01 // ç¡®ä¿è¿™äº› ID å®šä¹‰ä¸ CAN ID ä¸€è‡´
 #define MOTOR_X2_ID     0x02
 #define MOTOR_Y_ID      0x03
 
@@ -19,33 +19,33 @@ static int32_t g_motor_x_position = 0;
 static int32_t g_motor_y_position = 0;
 static uint32_t g_motion_start_time = 0;
 
-// µ×²ã·¢ËÍº¯Êı·â×° (ĞŞÕı·µ»ØÖµÎÊÌâ)
-// ¼ÙÉè positionMode3Run ÔÚÄãµÄ driver_motor.c ÖĞÊÇ void£¬ÎÒÃÇÕâÀï°üÒ»²ã
+// åº•å±‚å‘é€å‡½æ•°å°è£… (ä¿®æ­£è¿”å›å€¼é—®é¢˜)
+// å‡è®¾ positionMode3Run åœ¨ä½ çš„ driver_motor.c ä¸­æ˜¯ voidï¼Œæˆ‘ä»¬è¿™é‡ŒåŒ…ä¸€å±‚
 static uint8_t Send_Move_Command(uint8_t id, int32_t pulses)
 {
-    // µ÷ÓÃÄãÔ­±¾µÄ void º¯Êı
+    // è°ƒç”¨ä½ åŸæœ¬çš„ void å‡½æ•°
     positionMode3Run(id, 300, 100, pulses); 
-    return 0; // ¼ÙÉè·¢ËÍ×ÜÊÇ³É¹¦£¬»òÕßÄã¿ÉÒÔ¼ì²é CAN ·¢ËÍ¼Ä´æÆ÷µÄ×´Ì¬
+    return 0; // å‡è®¾å‘é€æ€»æ˜¯æˆåŠŸï¼Œæˆ–è€…ä½ å¯ä»¥æ£€æŸ¥ CAN å‘é€å¯„å­˜å™¨çš„çŠ¶æ€
 }
 
 
 /**
- * @brief ×¨ÃÅÓÃÓÚ´¦Àí CAN »Øµ÷µÄº¯Êı (ĞèÔÚ main »ò CAN Çı¶¯ÖĞ×¢²áµ÷ÓÃ)
- * µ±ÊÕµ½µç»ú·´À¡Ê±µ÷ÓÃ´Ëº¯Êı
+ * @brief ä¸“é—¨ç”¨äºå¤„ç† CAN å›è°ƒçš„å‡½æ•° (éœ€åœ¨ main æˆ– CAN é©±åŠ¨ä¸­æ³¨å†Œè°ƒç”¨)
+ * å½“æ”¶åˆ°ç”µæœºåé¦ˆæ—¶è°ƒç”¨æ­¤å‡½æ•°
  */
 void PnP_Motor_RX_Handler(CAN_Rx_Packet_t *pkt) {
-    // Ö±½Ó·ÅÈë¶ÓÁĞ£¨ÔÚÖĞ¶ÏÖĞ°²È«£¬³¬Ê±=0£©
+    // ç›´æ¥æ”¾å…¥é˜Ÿåˆ—ï¼ˆåœ¨ä¸­æ–­ä¸­å®‰å…¨ï¼Œè¶…æ—¶=0ï¼‰
     osMessageQueuePut(motor_event_queue, pkt, 0, 0);
 }
 
 
 
 /**
-  * @brief  ÔË¶¯¿ØÖÆÖ÷ÈÎÎñ (ĞèÒªÔÚ FreeRTOS ÖĞ´´½¨)
+  * @brief  è¿åŠ¨æ§åˆ¶ä¸»ä»»åŠ¡ (éœ€è¦åœ¨ FreeRTOS ä¸­åˆ›å»º)
   */
 void PnP_Motion_Task(void *argument)
 {
-    CAN_Rx_Packet_t rx_frame; // ¸´ÓÃ CAN Êı¾İ°ü½á¹¹
+    CAN_Rx_Packet_t rx_frame; // å¤ç”¨ CAN æ•°æ®åŒ…ç»“æ„
     int32_t target_x_pulse = 0;
     int32_t target_y_pulse = 0;    
     for(;;)
@@ -61,28 +61,28 @@ void PnP_Motion_Task(void *argument)
                 g_axis_x2_done = false;
                 g_axis_y_done = false;
                 g_motion_start_time = HAL_GetTick();
-                // Ìí¼ÓxyÖáµÄÔË¶¯Ö¸Áî
-                // positionMode3Run ¶¨ÒåÔÚ driver_motor.c£¬·¢ËÍ 0xF5 Ö¸Áî
+                // æ·»åŠ xyè½´çš„è¿åŠ¨æŒ‡ä»¤
+                // positionMode3Run å®šä¹‰åœ¨ driver_motor.cï¼Œå‘é€ 0xF5 æŒ‡ä»¤
                 positionMode3Run(MOTOR_X1_ID, 300, 100, target_x_pulse);
                 positionMode3Run(MOTOR_X2_ID, 300, 100, target_x_pulse);
                 positionMode3Run(MOTOR_Y_ID, 300, 100, target_y_pulse);						
-                // 2. ¼ÇÂ¼Ä¿±êÖµ (ÓÃÓÚºóĞø±È½Ï)
-                // target_x_pulse ºÍ target_y_pulse ĞèÒª´ÓÉÏÒ»¼¶´«Èë»ò×÷ÎªÈ«¾Ö±äÁ¿
-                motorSyncTrigger(0); // ¹ã²¥0x48 Í¬²½Æô¶¯
-                // 3. Á¢¼´½øÈë WAITING ×´Ì¬
+                // 2. è®°å½•ç›®æ ‡å€¼ (ç”¨äºåç»­æ¯”è¾ƒ)
+                // target_x_pulse å’Œ target_y_pulse éœ€è¦ä»ä¸Šä¸€çº§ä¼ å…¥æˆ–ä½œä¸ºå…¨å±€å˜é‡
+                motorSyncTrigger(0); // å¹¿æ’­0x48 åŒæ­¥å¯åŠ¨
+                // 3. ç«‹å³è¿›å…¥ WAITING çŠ¶æ€
                 g_motion_state = MOTION_STATE_WAITING;
                 break;					
 
             case MOTION_STATE_WAITING:
 
-                // ³¢ÊÔ´Ó¶ÓÁĞ»ñÈ¡ÏûÏ¢
-                // ÀàĞÍÊÇ CAN_Rx_Packet_t
+                // å°è¯•ä»é˜Ÿåˆ—è·å–æ¶ˆæ¯
+                // ç±»å‹æ˜¯ CAN_Rx_Packet_t
                  
                 if (osMessageQueueGet(motor_event_queue, &rx_frame, NULL, 0) == osOK)
                 {
 
                     if (rx_frame.Data[0] == 0xF5 && rx_frame.Data[1] == 0x02) {
-                    // ÅĞ¶Ïµç»ú ID
+                    // åˆ¤æ–­ç”µæœº ID
                     if (rx_frame.ID == MOTOR_X1_ID)      g_axis_x1_done = true;
                     else if (rx_frame.ID == MOTOR_X2_ID) g_axis_x2_done = true;
                     else if (rx_frame.ID == MOTOR_Y_ID)  g_axis_y_done  = true;
@@ -95,13 +95,13 @@ void PnP_Motion_Task(void *argument)
                     g_motion_state = MOTION_STATE_COMPLETED;
                 }
 
-                // ³¬Ê±±£»¤
+                // è¶…æ—¶ä¿æŠ¤
                 if (HAL_GetTick() - g_motion_start_time > 10000)
                 {
                     printf("Motion Timeout!\r\n");
                     g_motion_state = MOTION_STATE_IDLE;
                 }
-								osDelay(10); // ±ÜÃâ CPU Õ¼ÓÃ¹ı¸ß
+								osDelay(10); // é¿å… CPU å ç”¨è¿‡é«˜
                 break;
 
             case MOTION_STATE_COMPLETED:
@@ -121,7 +121,7 @@ uint8_t PnP_MoveTo(float x_mm, float y_mm)
 
     int32_t target_x = (int32_t)(x_mm * PULSES_PER_MM);
     int32_t target_y = (int32_t)(y_mm * PULSES_PER_MM);
-	//·¢ËÍ±êÖ¾Î»
+	//å‘é€æ ‡å¿—ä½
 	g_axis_x1_done = false;
     g_axis_x2_done = false;
 	g_axis_y_done = false;
@@ -131,7 +131,7 @@ uint8_t PnP_MoveTo(float x_mm, float y_mm)
     positionMode3Run(MOTOR_X2_ID, 300, 100, target_x);
     positionMode3Run(MOTOR_Y_ID, 300, 100, target_y);
 
-    // ¹ã²¥Í¬²½Ö´ĞĞ
+    // å¹¿æ’­åŒæ­¥æ‰§è¡Œ
     motorSyncTrigger();	
 
     g_motion_state = MOTION_STATE_MOVING;

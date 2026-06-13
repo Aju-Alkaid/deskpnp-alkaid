@@ -6,28 +6,28 @@
 #include "queue.h"
 #include "driver_can.h" 
 
-// 1. ¶¨Òåµç»úÖá ID (¸ù¾ÝÄãµÄÓ²¼þÁ¬½ÓÐÞ¸Ä)
+// 1. å®šä¹‰ç”µæœºè½´ ID (æ ¹æ®ä½ çš„ç¡¬ä»¶è¿žæŽ¥ä¿®æ”¹)
 #define MOTOR_X1_ID     0x01
 #define MOTOR_X2_ID     0x02
 #define MOTOR_Y_ID      0x03
 
-// 2. ¶¨ÒåÔË¶¯×´Ì¬»ú×´Ì¬
+// 2. å®šä¹‰è¿åŠ¨çŠ¶æ€æœºçŠ¶æ€
 typedef enum {
-    MOTION_STATE_IDLE = 0,      // ¿ÕÏÐ
-    MOTION_STATE_MOVING,     // Ö¸ÁîÒÑ´¥·¢£¨·¢ËÍÖÐ£©
-    MOTION_STATE_ERROR,       // µç»úÓÐÎó
-    MOTION_STATE_COMPLETED,      // ÔË¶¯Íê³É
+    MOTION_STATE_IDLE = 0,      // ç©ºé—²
+    MOTION_STATE_MOVING,     // æŒ‡ä»¤å·²è§¦å‘ï¼ˆå‘é€ä¸­ï¼‰
+    MOTION_STATE_ERROR,       // ç”µæœºæœ‰è¯¯
+    MOTION_STATE_COMPLETED,      // è¿åŠ¨å®Œæˆ
 		MOTION_STATE_WAITING
 } MotionState_t;
 
 
 
-// 4. È«¾Ö¾ä±úÉùÃ÷ (ÔÚ app_freertos.c ÖÐ´´½¨)
+// 4. å…¨å±€å¥æŸ„å£°æ˜Ž (åœ¨ app_freertos.c ä¸­åˆ›å»º)
 extern osMessageQueueId_t motor_event_queue;
 
-// 5. ºËÐÄ½Ó¿ÚÉùÃ÷
-void PnP_Motor_RX_Handler(CAN_Rx_Packet_t *pkt); // ÐèÒªÔÚ main »ò CAN Çý¶¯ÖÐ×¢²áµ÷ÓÃ
+// 5. æ ¸å¿ƒæŽ¥å£å£°æ˜Ž
+void PnP_Motor_RX_Handler(CAN_Rx_Packet_t *pkt); // éœ€è¦åœ¨ main æˆ– CAN é©±åŠ¨ä¸­æ³¨å†Œè°ƒç”¨
 uint8_t PnP_MoveTo(float x_mm, float y_mm);
-void PnP_Motion_Task(void *argument); // ÐèÒªÔÚ FreeRTOS ÖÐÆô¶¯µÄÈÎÎñ
+void PnP_Motion_Task(void *argument); // éœ€è¦åœ¨ FreeRTOS ä¸­å¯åŠ¨çš„ä»»åŠ¡
 
 #endif
