@@ -1,4 +1,4 @@
-#include "driver_uart.h"  
+﻿#include "driver_uart.h"  
 #include "FreeRTOS.h"     
 #include "task.h"         
 #include <string.h>       // 用于 strlen
@@ -1126,6 +1126,19 @@ static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
                     PrintDebug("[CAM_TEST]   Mark%d/%d: dx=%ld dy=%ld mm10000 -> move(%ld,%ld)\r\n",
                                (int)r->mark_index, (int)r->mark_count,
                                (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
+                } else if (cmd == VCMD_P3) {
+									  /* P3 下相机：r->dx 取反，r->dy 不取反 */
+									  dx_s = (int32_t)(r->dy * CAM_PX_TO_STEPS);  // cam Y → X1+X2（物理 Y）   不取反
+                    dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  //cam X → Y 电机（物理 X），取反
+                    if (r->angle_x100 != 0 || r->class_name[0] != '\0') {
+                        PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px ang=%ld.%02ld cls=%s -> move(%ld,%ld)\r\n",
+                                   (long)r->dx, (long)r->dy,
+                                   (long)(r->angle_x100/100), (long)(r->angle_x100%100),
+                                   r->class_name, (long)dx_s, (long)dy_s);
+                    } else {
+                        PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px -> move(%ld,%ld)\r\n",
+                                   (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
+                    }
                 } else {
                     dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);  // cam Y → X1+X2（物理 Y）
                     dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  // cam X → Y 电机（物理 X）
@@ -1138,9 +1151,7 @@ static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
                         PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px -> move(%ld,%ld)\r\n",
                                    (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
                     }
-                }
-
-                if (dx_s != 0 || dy_s != 0) {
+                }if (dx_s != 0 || dy_s != 0) {
                     int ret = move_xy_relative(dx_s, dy_s, CAM_MOVE_SPEED,
                                                CAM_MOVE_ACC, cur_x, cur_y);
                     PrintDebug("[CAM_TEST]   move done, cur=(%ld,%ld) ret=%d\r\n",
@@ -1188,6 +1199,11 @@ static bool cam_test_run(VisionCmd_t cmd, uint32_t timeout_ms,
 void StartCamTestTask(void *argument) {
     vTaskDelay(pdMS_TO_TICKS(500));
 
+    /* ---- 0. 气泵初始化（常开，方便 P3 测试） ---- */
+    DRV8803_Init();
+    DRV8803_EnableChip(1, true);
+    Pump_On();
+    PrintDebug("[CamTest] 气泵已开启（常开）\r\n");
     /* 关闭 R 轴（本任务不使用 TMC2209） */
     TMC_SetEnable(false);
 
@@ -1199,7 +1215,6 @@ void StartCamTestTask(void *argument) {
 
     /* ---- 2. 视觉模块初始化 ---- */
     Vision_Init();
-
     PrintDebug("========================================\r\n");
     PrintDebug("  Camera + Motor Interactive Test\r\n");
     PrintDebug("  USART2 -> MaixCam  |  CAN -> X1/X2/Y\r\n");
@@ -1210,20 +1225,20 @@ void StartCamTestTask(void *argument) {
     int32_t cur_x = 0, cur_y = 0;
 
     /* ---- P1: 散料区元件检测 ---- */
-    PrintDebug("\r\n--- Test 1/3: P1 (component detect) ---\r\n");
-    if (!cam_test_run(VCMD_P1, CAM_TEST_TIMEOUT_P1, &cur_x, &cur_y)) {
-        PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
-    } else {
-        PrintDebug("[CAM_TEST] P1 PASSED\r\n");
-    }
+//    PrintDebug("\r\n--- Test 1/3: P1 (component detect) ---\r\n");
+//    if (!cam_test_run(VCMD_P1, CAM_TEST_TIMEOUT_P1, &cur_x, &cur_y)) {
+//        PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
+//    } else {
+//        PrintDebug("[CAM_TEST] P1 PASSED\r\n");
+//    }
 
     /* ---- P3: 下相机偏移检测 (需要时取消注释) ---- */
-    // PrintDebug("\r\n--- Test 2/3: P3 (bottom cam offset) ---\r\n");
-    // if (!cam_test_run(VCMD_P3, CAM_TEST_TIMEOUT_P3, &cur_x, &cur_y)) {
-    //     PrintDebug("[CAM_TEST] P3 FAILED, continuing...\r\n");
-    // } else {
-    //     PrintDebug("[CAM_TEST] P3 PASSED\r\n");
-    // }
+     PrintDebug("\r\n--- Test 2/3: P3 (bottom cam offset) ---\r\n");
+     if (!cam_test_run(VCMD_P3, CAM_TEST_TIMEOUT_P3, &cur_x, &cur_y)) {
+         PrintDebug("[CAM_TEST] P3 FAILED, continuing...\r\n");
+     } else {
+         PrintDebug("[CAM_TEST] P3 PASSED\r\n");
+     }
 
     /* ---- P2: Mark 点建系 (需要时取消注释) ---- */
     // PrintDebug("\r\n--- Test 3/3: P2 (mark alignment) ---\r\n");

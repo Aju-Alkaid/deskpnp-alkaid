@@ -567,8 +567,12 @@ void Host_Task(void *argument) {
     Valve_Off();                        /* 电磁阀初始关断 (PA6=LOW) */
     osDelay(300);
 
-    /* TMC2209 (R轴) 未初始化，拉高 ENN 禁用驱动（ENN 低有效，HIGH=关闭） */
-    TMC_SetEnable(false);   /* 确保 TMC2209 驱动关闭，用到时再开 */
+    /* TMC2209 (R轴) 初始化 */
+    if (!TMC_Init()) {
+        PrintDebug("[HOST] TMC_Init failed!\r\n");
+    }
+    /* ENN 低有效：LOW=开启，HIGH=关闭。初始化完成后关闭，用到时再开 */
+    TMC_SetEnable(false);
 
 
     PrintDebug("[HOST] Task started.\r\n");

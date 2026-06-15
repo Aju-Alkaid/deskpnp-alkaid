@@ -1,4 +1,4 @@
-# PnP 贴片机嵌入式固件 — 项目说明书
+﻿# PnP 贴片机嵌入式固件 — 项目说明书
 
 ## 一、项目概览
 
@@ -418,12 +418,16 @@ main.c:131 在 RTOS 调度器启动前和 CAN 启动前调用 Motor_Init(). 此�
 | X | dy / cur_y | Y 轴 | 单电机 (ID=0x03) |
 | Y | dx / cur_x | X1+X2 双轴 | 双电机同步 (ID=0x01, 0x02) |
 
-此映射关系在 cam_test_run 的 P1/P3 偏移计算中已体现：
+此映射关系在 cam_test_run 的 P1/P3 偏移计算中已体现（轴映射相同，符号因上下相机而异，详见 §9.14）：
 
 ```c
-dx_s = r->dy * CAM_PX_TO_STEPS;   // 摄像头 Y 偏移 → X1+X2（物理 Y）
-dy_s = r->dx * CAM_PX_TO_STEPS;   // 摄像头 X 偏移 → Y 电机（物理 X）
+// P1（上相机，镜头朝下）：两轴均取反
+dx_s = -(r->dy * CAM_PX_TO_STEPS);  // 摄像头 Y → X1+X2（物理 Y）
+dy_s = -(r->dx * CAM_PX_TO_STEPS);  // 摄像头 X → Y 电机（物理 X）
 
+// P3（下相机，镜头朝上）：r->dx 取反（dy_s 为负），r->dy 不取反（dx_s 为正）
+dx_s =  (r->dy * CAM_PX_TO_STEPS);  // 摄像头 Y → X1+X2（物理 Y）
+dy_s = -(r->dx * CAM_PX_TO_STEPS);  // 摄像头 X → Y 电机（物理 X）
 ```
 
 #### 视觉闭环精准速度
@@ -460,19 +464,29 @@ CAM_MOVE_SPEED 从 300 RPM（25 mm/s）降至 **100 RPM（≈8.3 mm/s）**，配
 
 摄像头偏移方向与电机运动方向相反（摄像头 dx=35，电机 +dx 移动后 dx=36，偏移反而变大），且程序轴（X1+X2=物理Y、Y电机=物理X）未做交换。
 
-**最终映射公式（P1/P3 路径，app_test.c cam_test_run）：**
+**最终映射公式（app_test.c cam_test_run）：**
+
+P1（上相机，镜头朝下）和 P3（下相机，镜头朝上）使用**相同的轴映射**，但 **dx_s 符号不同**：
+
 ```c
-dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);  // 摄像头 Y → X1+X2（物理 Y），取反
-dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  // 摄像头 X → Y 电机（物理 X），取反
+// P1（上相机）：两轴均取反
+dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);
+dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);
+
+// P3（下相机）：r->dx 取反（dy_s 为负），r->dy 不取反（dx_s 为正）（2026-06-13 经多次实测验证）
+dx_s =  (int32_t)(r->dy * CAM_PX_TO_STEPS);
+dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);
 ```
+
+**物理原因：** 上相机随龙门移动、镜头朝下；下相机固定、镜头朝上。上下视角的 Y 轴镜像关系相反，导致 P3 的 Y 轴补偿方向与 P1 相反（不取反）。
 
 **P2（Mark 建系）路径同步修正：**
 ```c
-dx_s = -(int32_t)(r->dy * CAM_MM10000_TO_STEPS);  // 同上，单位不同
+dx_s = -(int32_t)(r->dy * CAM_MM10000_TO_STEPS);
 dy_s = -(int32_t)(r->dx * CAM_MM10000_TO_STEPS);
 ```
 
-**要点：** （1）符号取反 — 摄像头偏移方向与电机补偿方向相反；（2）轴交换 — cam.dx→Y电机，cam.dy→X1+X2。两者缺一不可。
+**要点：** （1）轴映射 — cam.dx→Y电机(dy_s)，cam.dy→X1+X2(dx_s)，P1/P2/P3 三者一致；（2）P1/P2 两轴取反（dx_s/dy_s 均为负），P3 仅 r->dx 取反（dy_s 为负）、r->dy 不取反（dx_s 为正）。
 
 #### move_xy_relative 当前架构
 
@@ -495,7 +509,7 @@ osEventFlagsClear → 发 CAN 命令 → while(真实时钟未超时) {
 | 文件 | 改动 |
 |------|------|
 | app_test.c | move_xy_relative：队列轮询→事件组 osEventFlagsGet + 真实时钟 + 文档注释 |
-| app_test.c | cam_test_run P1/P3/P2：偏移取反 + 轴交换 |
+| app_test.c | cam_test_run P1/P2：两轴取反；P3：r->dx 取反（dy_s 为负），r->dy 不取反（dx_s 为正），因下相机镜头朝上 |
 | app_test.c | 新增 `#define DEBUG_MOVE` / `#define DEBUG_CAN_PROC` 诊断开关 |
 | app_motion.c | CAN_Process_Task：到位帧日志加 `#ifdef DEBUG_CAN_PROC` 保护 |
 

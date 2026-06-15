@@ -242,7 +242,7 @@ void TMC_SetChopperMode(bool use_spreadcycle) {
 
 void TMC_SetSpeed(int32_t velocity) {
     float v_freq = (float)velocity;
-    int32_t vactual = (int32_t)(v_freq * 16777216.0f / (TMC2209_F_CLK / 2.0f));
+    int32_t vactual = (int32_t)(v_freq * 16777216.0f / (float)TMC2209_F_CLK);
     if (vactual > 8388607) vactual = 8388607;
     if (vactual < -8388607) vactual = -8388607;
     TMC_Error_t err = TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)vactual);

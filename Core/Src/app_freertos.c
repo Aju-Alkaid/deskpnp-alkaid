@@ -247,8 +247,8 @@ void MX_FREERTOS_Init(void) {
 	osThreadNew(CAN_Process_Task, NULL, &canProcTask_attr);
 	osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
-	osThreadNew(Host_Task, NULL, &hostTask_attributes);
-//	osThreadNew(StartCamTestTask, NULL, &camTestTask_attributes); //cam
+//	osThreadNew(Host_Task, NULL, &hostTask_attributes);
+	osThreadNew(StartCamTestTask, NULL, &camTestTask_attributes); //cam
 
 //    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
 

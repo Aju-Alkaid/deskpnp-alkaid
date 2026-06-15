@@ -1,4 +1,4 @@
-#include "app_motion.h"
+﻿#include "app_motion.h"
 #include "driver_motor.h"
 #include "driver_can.h"
 #include "cmsis_os2.h"
@@ -181,17 +181,16 @@ static int32_t angle_to_usteps(float angle) {
 }
 
 /**
- * @brief 将微步数转换为 VACTUAL 速度值
+ * @brief 将 RPM 转换为微步/秒（TMC_SetSpeed 内部转为 VACTUAL）
  * @param speed_rpm 转速 (RPM)
- * @return VACTUAL 值 (带符号)
+ * @param dir       方向 (0=正向, 1=反向)
  */
 static int32_t speed_to_vactual(float speed_rpm, uint8_t dir) {
     // 1 RPM = 1/60 转/秒 = R_STEPS_PER_REV / 60 微步/秒
     float usteps_per_sec = speed_rpm * R_STEPS_PER_REV / 60.0f;
-    // vactual = usteps_per_sec / 0.715 (12MHz 内部时钟)
-    int32_t vactual = (int32_t)(usteps_per_sec / 0.715f);//此处若 TMC_SetSpeed 直接接受微步/秒，则不应除以 0.715，直接 return (int32_t)(usteps_per_sec)。
-    // 若其需要 TMC2209 的 VACTUAL 原始值，正确公式为 VACTUAL = (usteps_per_sec * 16777216) / 12000000，约为 1.3981 * usteps_per_sec。
-    return (dir == 0) ? vactual : -vactual;
+    // TMC_SetSpeed 接受微步/秒，内部自行转换为 VACTUAL，此处直传
+    int32_t result = (int32_t)(usteps_per_sec);
+    return (dir == 0) ? result : -result;
 }
 
 /**
