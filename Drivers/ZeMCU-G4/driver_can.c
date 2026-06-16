@@ -8,6 +8,7 @@
 #include "app_motion.h"
 #include "queue.h"
 #include "app_test.h"
+#include "driver_heater.h"
 
 // 定义队列缓冲区（假设最大深度为 10）
 uint8_t rx_queue_buffer[10]; 
@@ -201,6 +202,7 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
             // 1. 解析数据包 (假设 data[1] 是状态字，0x02 代表到位)
             CAN_Rx_Packet_t pkt;
 			pkt.ID = header.Identifier; // 记录 ID，否则不知道是谁发的
+            pkt.DataLength = header.DataLength;
             pkt.Timestamp = HAL_GetTick();
             // pkt.Data[0] 将对应功能码 (FuncCode)
             // pkt.Data[1] 将对应状态码 (Status)
@@ -220,7 +222,12 @@ void HAL_FDCAN_RxFifo0Callback(FDCAN_HandleTypeDef *hfdcan, uint32_t RxFifo0ITs)
             PrintDebug("\r\n");
 #endif
 						
-            osMessageQueuePut(motor_event_queue, &pkt, 0, 0);            
+            osMessageQueuePut(motor_event_queue, &pkt, 0, 0);
+
+            /* 加热台状态帧（ID=0x05）同时路由到 heater_rx_queue */
+            if (pkt.ID == HEATER_STATUS_ID && heater_rx_queue != NULL) {
+                osMessageQueuePut(heater_rx_queue, &pkt, 0, 0);
+            }            
         }    
              // 重新激活中断           
             HAL_FDCAN_ActivateNotification(hfdcan, FDCAN_IT_RX_FIFO0_NEW_MESSAGE, 0);

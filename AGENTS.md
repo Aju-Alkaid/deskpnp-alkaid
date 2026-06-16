@@ -30,7 +30,7 @@
 | DRV8803×2 | U12(12V 驱动): PE9(EN)/PE10(RST)/PE15(FAULT) ; 输出端口见 §10.4 |
 |  | U13(24V 驱动): PA4(EN)/PB0(RST)/PA6(IN5)/PA7(IN6)/PC4(IN7)/PC5(IN8)/PA5(FAULT) |
 | TMC2209 | UART3 通信, PD15(TMC1_EN) / PD14(TMC2_EN 预留) |
-| 加热台 | CAN ID 0x10(命令) / 0x11(状态), 独立控制 |
+| 加热台 | CAN ID 0x04(命令) / 0x05(状态), FDCAN1 1Mbps, 共享电机 CAN 总线 |
 | 温度传感器 | PF9 / PA3, DS18B20 |
 | 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM) |
 | 吸嘴气泵 | PE11 (12VO1, DRV8803 U12 OUT1 开关) |
@@ -54,7 +54,7 @@ pnp_1/
 │       ├── driver_tmc2209.c/h   # TMC2209 UART 寄存器读写 (R轴)
 │       ├── driver_servo.c/h     # MG995 舵机 PWM 控制（TIM5_CH3 / PE8）
 │       ├── driver_drv8803.c/h   # DRV8803 双芯片 8通道驱动（12V+24V）
-│       ├── driver_heater.c/h    # 加热台 CAN 通信 (CAN ID 0x10/0x11)
+│       ├── driver_heater.c/h    # 加热台 CAN 通信 (CAN ID 0x04/0x05, 自有 CRC 协议, 见 §4.4)
 │       ├── driver_timer.c/h     # 定时器工具
 │       ├── driver_spiflash_w25q64.c/h  # SPI Flash (W25Q64)
 │       ├── tmc_protocol.c/h     # TMC2209 协议层
@@ -137,6 +137,80 @@ pnp_1/
   - `0x02` 运行完成（到位）
   - `0x03` 限位停止/堵转
 
+
+### 4.4 G4 ↔ 加热台从机 (CAN, FDCAN1)
+
+- **物理层：** CAN 2.0A, 1Mbps, 标准帧(11位ID)，与电机共享 FDCAN1 总线
+- **CAN ID：** 命令帧 `0x04`（主控→加热台），状态帧 `0x05`（加热台→主控）
+- **命令帧格式（主控→加热台）：**
+
+| 字节 | 含义 |
+|------|------|
+| 0 | 命令码 |
+| 1..N | 参数（如有） |
+| N+1 | CRC = (字节0..N 累加和) & 0xFF（仅 SET_TEMP/SET_PID 附带；START/STOP/QUERY 无 CRC） |
+
+- **状态帧格式（加热台→主控，6 字节）：**
+
+| 字节 | 含义 | 类型 | 说明 |
+|------|------|------|------|
+| 0 | state | uint8 | 状态码 |
+| 1 | cur_temp_H | uint8 | 当前温度高字节 |
+| 2 | cur_temp_L | uint8 | 当前温度低字节 |
+| 3 | tar_temp_H | uint8 | 目标温度高字节 |
+| 4 | tar_temp_L | uint8 | 目标温度低字节 |
+| 5 | error | uint8 | 错误码（0=正常） |
+
+温度值为 **有符号 16 位大端**，单位 **0.1°C**。例：`0x08 0x98` = 220.0°C。
+
+- **命令列表：**
+
+| 命令码 | 名称 | 帧格式 | 说明 |
+|--------|------|--------|------|
+| `0x01` | START | `[0x01]` | 启动回流焊温度曲线，从机开始周期性（1500ms）上报温度 |
+| `0x02` | STOP | `[0x02]` | 立即关闭加热，继续上报直至温度 < 60°C |
+| `0x03` | SET_TEMP | `[0x03][temp_H][temp_L][crc]` | 手动 PID 控温模式，temp 为 int16 大端，0.1°C |
+| `0x04` | SET_PID | `[0x04][Kp_H][Kp_L][Ki_H][Ki_L][Kd_H][Kd_L][crc]` | 设定 PID 参数，Kp/Ki/Kd 均为 int16 大端，单位 0.001 |
+| `0x05` | QUERY | `[0x05]` | 查询状态，从机立即回复一次状态帧 |
+
+- **状态码：**
+
+| 值 | 名称 | 说明 |
+|----|------|------|
+| 0x00 | IDLE | 空闲，加热关闭 |
+| 0x01 | HEATING | 加热中（曲线/手动） |
+| 0x02 | HOLDING | 恒温保持 |
+| 0x03 | COOLING | 降温中，仍在回报 |
+| 0x04 | COMPLETE | 曲线完成，加热关闭 |
+| 0x05 | ERROR | 故障（查看 error 字节） |
+
+- **错误码：**
+
+| 值 | 说明 |
+|----|------|
+| 0x00 | 无错误 |
+| 0x01 | 热电偶断开 |
+| 0x02 | 超温 |
+| 0x03 | 通信超时 |
+
+- **回流焊温度曲线：**
+
+| 阶段 | 目标温度 | 时长 | 说明 |
+|------|----------|------|------|
+| 预热 | 150°C | 100s | ~1.5°C/s 升温 |
+| 浸泡 | 150°C | 40s | 恒温 |
+| 浸泡 | 180°C | 60s | 缓慢升温，激活助焊剂 |
+| 升温 | 230°C | 55s | ~1.0°C/s 升至峰值 |
+| 回流 | 230°C | 35s | 峰值保持，焊料熔化 |
+| 冷却 | 60°C | 80s | ~2.1°C/s 降温 |
+
+总周期约 370s，峰值 230°C。
+
+- **实现要点：**
+  - 加热台 CRC 不含 CAN ID，与电机协议（SUM8 含 CAN ID）不同，因此加热台使用独立的 `Heater_Transmit()` 直接调用 `HAL_FDCAN_AddMessageToTxFifoQ`，不经过 `CAN_Transmit_Data`
+  - CAN RX 中断回调（`driver_can.c`）按 CAN ID 路由：ID=0x05 → `heater_rx_queue`，其余 → `motor_event_queue`
+  - 详见 `driver_heater.c/h`
+
 ## 五、任务架构
 
 | 任务 | 栈大小 | 优先级 | 功能 |
@@ -162,6 +236,7 @@ pnp_1/
 - `vsync_queue` (1深) — TIM7 ISR → TouchGFX 渲染循环
 - `frame_buffer_sem` — TouchGFX 帧缓冲互斥锁
 - `semX1Done/semX2Done/semYDone` 信号量 — 已废弃，统一使用 evtAxesDone 事件组（见 §9.6-5）
+- `heater_rx_queue` (10深度) — CAN ISR → Heater_ProcessStatus()，加热台状态帧专用队列
 
 ## 六、关键数据流
 
@@ -197,6 +272,7 @@ pnp_1/
 | `LineParser_t` | app_uart_parser.h | 行解析器状态机 | buf[512], idx, complete |
 | `UART_Channel_t` | driver_uart.c(内部) | UART 通道控制块 | huart/hdmarx, 双缓冲, data_ready/is_rx_active/overflow_count |
 | `MotorState_t` | driver_motor.h | 电机状态枚举 | IDLE/SENDING/WAITING/COMPLETE/ERROR |
+| `HeaterStatus_t` | driver_heater.h | 加热台状态快照 | state, cur_temp(0.1°C), tar_temp, error, timestamp |
 
 ## 八、编码规范与约束
 
@@ -245,6 +321,45 @@ pnp_1/
 3. TIM5 HAL State 绕过 → §18.2
 2. CubeMX PE8 AF Bug 修复 → §18.1
 1. TIM2 频率调整 → §18.3
+
+
+### 9.15 加热台协议重构（2026-06-17）
+
+**背景：** 加热台从机通信协议规范化（参考 `AGENTS_HEATER.md`），原 `driver_heater.c/h` 使用临时 CAN ID（0x10/0x11）和错误的状态/错误码定义，且未按协议规范处理 CRC。
+
+**改动内容：**
+
+| 改动项 | 旧值 | 新值 |
+|--------|------|------|
+| CAN ID 命令/状态 | 0x10 / 0x11 | 0x04 / 0x05 |
+| 状态码 | 7 个（STANDBY~ERROR） | 6 个（IDLE/HEATING/HOLDING/COOLING/COMPLETE/ERROR） |
+| 错误码 | SENSOR/OVERTEMP/TIMEOUT | THERMOCOUPLE/OVERTEMP/COMM_TIMEOUT |
+| 命令 CRC | 无（依赖 CAN_Transmit_Data 自动 CRC） | START/STOP/QUERY 无 CRC；SET_TEMP/SET_PID 附加 CRC（纯数据累加，不含 CAN ID） |
+| 发送函数 | 通过 CAN_Transmit_Data（电机 CRC 规则） | 独立 Heater_Transmit() 直接调用 HAL_FDCAN_AddMessageToTxFifoQ |
+| 接收过滤 | `pkt.FuncCode == HEATER_STATUS_ID`（逻辑错误） | `pkt.ID == HEATER_STATUS_ID`（纯 CAN ID 过滤） |
+| 新增命令 | — | `Heater_SendQuery()` (0x05) |
+
+**CAN RX 路由（driver_can.c）：** `HAL_FDCAN_RxFifo0Callback` 中新增加热台帧分发：
+```c
+if (pkt.ID == HEATER_STATUS_ID && heater_rx_queue != NULL) {
+    osMessageQueuePut(heater_rx_queue, &pkt, 0, 0);
+}
+```
+同时补充了此前遗漏的 `pkt.DataLength = header.DataLength` 赋值。
+
+**温度打印修复：** `Heater_ProcessStatus` 中新增 `print_temp()` 辅助函数，先取绝对值再格式化，避免 C 语言负数除/取模歧义（`-5/10=0` 导致 `-0.5°C` 错误显示为 `0.5`）。
+
+**波特率确认：** 加热台与电机共享 FDCAN1（1 Mbps），加热台从机侧已同步调整为 1 Mbps。
+
+**涉及文件：**
+
+| 文件 | 改动 |
+|------|------|
+| `driver_heater.h` | CAN ID/状态码/错误码/命令码宏全面重写，新增 Heater_SendQuery 声明 |
+| `driver_heater.c` | 新增 Heater_Transmit 原生发送 + 全部命令函数重写 + ProcessStatus 修复 + print_temp 辅助函数 + 死代码移除 |
+| `driver_can.c` | 加热台 ID=0x05 路由 + DataLength 赋值 |
+| `AGENTS.md` | §4.4 新增加热台协议文档 + 硬件表/目录结构/任务通信/数据结构表更新 |
+
 
 ### 9.9 TMC2209 使能/关闭设计（2026-06-11~12）
 
