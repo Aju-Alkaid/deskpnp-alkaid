@@ -2,6 +2,8 @@
 //#include "driver_lcd.h"
 #include "driver_timer.h"
 #include "stm32g4xx_hal.h"
+#include <string.h>
+#include "app_config.h"
 //#include "tim.h"
 //#include "adc.h"
 
@@ -404,3 +406,105 @@ int W25Q64_Erase(uint32_t offset, uint32_t len)
 //}
 
 
+/* ================================================================
+ *  标定数据 Flash 持久化 (Calib_Save / Calib_Load)
+ *  写入 W25Q64 最后一个 4KB 扇区 (CALIB_FLASH_ADDR)。
+ * ================================================================ */
+
+/* 前向声明 */
+static void calib_set_defaults(CalibrationData_t *calib);
+
+/*
+ * 软件 CRC32 (Ethernet polynomial 0x04C11DB7, 与 STM32 硬件 CRC 一致)
+ */
+static uint32_t calib_crc32(const uint8_t *data, uint32_t len)
+{
+    uint32_t crc = 0xFFFFFFFF;
+    for (uint32_t i = 0; i < len; i++) {
+        crc ^= data[i];
+        for (int j = 0; j < 8; j++) {
+            if (crc & 1)
+                crc = (crc >> 1) ^ 0xEDB88320;
+            else
+                crc >>= 1;
+        }
+    }
+    return ~crc;
+}
+
+/*
+ * 将标定数据写入 Flash。
+ * 流程: 计算 CRC → 擦除扇区 → 写入
+ * 返回: 0 成功, -1 失败
+ */
+int Calib_Save(const CalibrationData_t *calib)
+{
+    CalibrationData_t buf;
+    int ret;
+
+    /* 复制并填入 CRC */
+    memcpy(&buf, calib, sizeof(CalibrationData_t));
+    buf.magic = CALIB_MAGIC;
+    buf.crc32 = calib_crc32((const uint8_t *)&buf,
+                            offsetof(CalibrationData_t, crc32));
+
+    /* 擦除扇区 (4KB 对齐) */
+    ret = W25Q64_Erase(CALIB_FLASH_ADDR, CALIB_FLASH_SIZE);
+    if (ret < 0) return -1;
+
+    /* 写入 */
+    ret = W25Q64_Write(CALIB_FLASH_ADDR, (uint8_t *)&buf, sizeof(buf));
+    if (ret < 0) return -1;
+
+    return 0;
+}
+
+/*
+ * 从 Flash 加载标定数据。
+ * 若 magic 不匹配或 CRC 校验失败，填充默认值。
+ * 返回: 0 加载成功 (含默认值), -1 Flash 读失败
+ */
+int Calib_Load(CalibrationData_t *calib)
+{
+    int ret;
+
+    ret = W25Q64_Read(CALIB_FLASH_ADDR, (uint8_t *)calib,
+                      sizeof(CalibrationData_t));
+    if (ret < 0) {
+        calib_set_defaults(calib);
+        return -1;
+    }
+
+    /* 校验 magic */
+    if (calib->magic != CALIB_MAGIC) {
+        calib_set_defaults(calib);
+        return 0;
+    }
+
+    /* 校验 CRC32 */
+    uint32_t expected = calib->crc32;
+    uint32_t computed = calib_crc32((const uint8_t *)calib,
+                                    offsetof(CalibrationData_t, crc32));
+    if (expected != computed) {
+        calib_set_defaults(calib);
+        return 0;
+    }
+
+    return 0;
+}
+
+/*
+ * 将标定数据填充为安全默认值:
+ *   坐标全部为 0 (需手动标定)
+ *   Z 角度使用代码中的硬编码默认值
+ *   摄像头比例使用预估值
+ */
+static void calib_set_defaults(CalibrationData_t *calib)
+{
+    memset(calib, 0, sizeof(CalibrationData_t));
+    calib->z_safe_angle  = CALIB_DEFAULT_Z_SAFE;
+    calib->z_pick_angle  = CALIB_DEFAULT_Z_PICK;
+    calib->z_place_angle = CALIB_DEFAULT_Z_PLACE;
+    calib->cam_p1_val_to_steps = CALIB_DEFAULT_CAM_P1;
+    calib->cam_p3_val_to_steps = CALIB_DEFAULT_CAM_P3;
+}
