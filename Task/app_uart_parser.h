@@ -23,11 +23,26 @@ typedef enum {
     HCMD_SET_R_AXIS,    // R轴旋转角度
     HCMD_PUMP_ON,       // 开启气泵
     HCMD_PUMP_OFF,      // 关闭气泵
+    HCMD_HEAT_ON,       // 开启加热台
+    HCMD_HEAT_OFF,      // 关闭加热台
     HCMD_MOVE_TO,       // 运动至指定坐标
     /* 退出调试 */
     HCMD_EXIT_DEBUG,
     /* 文件下载 - 原始行 */
     HCMD_RAW_LINE,
+
+    /* 标定命令 */
+    HCMD_SET_SCATTER_AREA,    // 记录散料区原点
+    HCMD_SET_SCATTER_SIZE,    // 散料区边长 <mm>
+    HCMD_SET_PCB_AREA_MIN,    // 记录 PCB 左下角
+    HCMD_SET_PCB_AREA_MAX,    // 记录 PCB 右上角
+    HCMD_SET_BOTTOM_CAM,      // 记录下相机位置
+    HCMD_SET_Z_SAFE,          // 记录安全高度
+    HCMD_SET_Z_PICK,          // 记录吸取高度
+    HCMD_SET_Z_PLACE,         // 记录贴装高度
+    HCMD_SET_R_ZERO,          // R 轴当前位置 = 0deg
+    HCMD_SAVE_CALIB,          // 保存标定值到 Flash
+
     /* 未知命令 */
     HCMD_UNKNOWN
 } HostCmd_t;

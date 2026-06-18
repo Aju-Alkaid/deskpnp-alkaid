@@ -1,4 +1,4 @@
-﻿#include "app_host.h"
+#include "app_host.h"
 #include "app_test.h"
 #include "driver_uart.h"
 #include "driver_can.h"
@@ -6,6 +6,8 @@
 #include "driver_servo.h"
 #include "driver_drv8803.h"
 #include "driver_tmc2209.h"
+#include "driver_heater.h"
+#include "driver_spiflash_w25q64.h"
 
 extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 #include <string.h>
@@ -39,16 +41,16 @@ static uint16_t     g_comp_index = 0;
 static uint32_t     g_last_line_tick = 0;
 static bool         g_header_parsed = false;
 
-/* CSV列索引 */
-static int8_t g_col_x    = -1;
-static int8_t g_col_y    = -1;
-static int8_t g_col_rot  = -1;
-static int8_t g_col_smd  = -1;
-static int8_t g_max_col  = 0;
+/* Mark 点 (SMD="MARK") 独立存储 */
+static Component_t  g_marks[MAX_MARKS];
+static uint16_t     g_mark_count = 0;
 
 /* 当前坐标 (步数) */
 static int32_t g_cur_x = 0;
 static int32_t g_cur_y = 0;
+
+/* 标定数据 (Flash 持久化) */
+CalibrationData_t g_calib;
 
 /* JOG 状态 */
 static bool g_during_cmd = false;  /* 正在执行命令时置位，用于屏蔽回显 */
@@ -70,6 +72,7 @@ static int32_t g_mark_count_done = 0;
 /* Mark 对齐平均偏移 (mm*10000)，PLACE 时应用到贴装坐标 */
 static int32_t g_mark_avg_dx = 0;
 static int32_t g_mark_avg_dy = 0;
+static int     g_p1_retry_count = 0;  /* P1重试计数 */
 /* ================================================================
  *  内部辅助
  * ================================================================ */
@@ -82,125 +85,165 @@ static void host_send(const char *msg) {
     }
 }
 
-/* ---- CSV 解析  ---- */
+/* ---- CSV 解析（v2：制表符分隔、15 固定列、引号包裹、mm 后缀）---- */
 
-static void parse_header(const char *line, uint16_t len) {
-    g_col_x = -1; g_col_y = -1; g_col_rot = -1; g_col_smd = -1;
-    g_max_col = 0;
 
-    int8_t col = 0;
-    const char *p = line;
-    const char *end = line + len;
-
-    while (p < end) {
-        const char *next = memchr(p, ',', (uint16_t)(end - p));
-        uint16_t flen = next ? (uint16_t)(next - p) : (uint16_t)(end - p);
-
-        if (flen >= 2 && *p == '"' && p[flen-1] == '"') {
-            p++; flen -= 2;
-        }
-
-        if ((flen >= 1 && (p[0] == 'X' || p[0] == 'x')) ||
-            (flen >= 4 && (memcmp(p, "Mid X", 5) == 0 || memcmp(p, "PosX", 4) == 0 ||
-                           memcmp(p, "Center X", 8) == 0))) {
-            g_col_x = col;
-        } else if ((flen >= 1 && (p[0] == 'Y' || p[0] == 'y')) ||
-                   (flen >= 4 && (memcmp(p, "Mid Y", 5) == 0 || memcmp(p, "PosY", 4) == 0 ||
-                                  memcmp(p, "Center Y", 8) == 0))) {
-            g_col_y = col;
-        } else if (flen >= 3 && (memcmp(p, "Rot", 3) == 0 || memcmp(p, "Rotation", 8) == 0 ||
-                                 memcmp(p, "Angle", 5) == 0)) {
-            g_col_rot = col;
-        } else if (flen >= 3 && (memcmp(p, "SMD", 3) == 0 || memcmp(p, "smd", 3) == 0 ||
-                                 memcmp(p, "Type", 4) == 0)) {
-            g_col_smd = col;
-        }
-
-        col++;
-        if (next == NULL) break;
-        p = next + 1;
-    }
-    g_max_col = col;
-
-    PrintDebug("[HOST] Header: X=%d Y=%d R=%d S=%d\r\n",
-               g_col_x, g_col_y, g_col_rot, g_col_smd);
+/* 封装名->P1类别ID映射 (0=ccapt 1=cledy 2=cledo 3=crest) */
+static int footprint_to_class_id(const char *fp) {
+    if (!fp) return 0;
+    if (strncmp(fp, "LED", 3) == 0) return 2;   /* LED-SMD -> cledo */
+    if (strncmp(fp, "C0", 2) == 0 || strncmp(fp, "R0", 2) == 0) return 0;
+    return 0;
 }
 
-static bool get_csv_field(const char *line, uint16_t len, int8_t n,
+/*
+ * 提取第 n 个制表符分隔字段，去除首尾引号，写入 out
+ */
+static bool csv_get_field(const char *line, uint16_t len, int n,
                           char *out, uint16_t out_max) {
     if (n < 0) return false;
     const char *p = line;
     const char *end = line + len;
-    int8_t col = 0;
-
+    int col = 0;
     while (col < n && p < end) {
-        p = memchr(p, ',', (uint16_t)(end - p));
+        p = memchr(p, '\t', (uint16_t)(end - p));
         if (p == NULL) return false;
         p++;
         col++;
     }
     if (p >= end) return false;
-
-    const char *next = memchr(p, ',', (uint16_t)(end - p));
+    const char *next = memchr(p, '\t', (uint16_t)(end - p));
     uint16_t flen = next ? (uint16_t)(next - p) : (uint16_t)(end - p);
+    if (flen >= 2 && p[0] == '"' && p[flen - 1] == '"') {
+        p++;
+        flen -= 2;
+    }
     if (flen >= out_max) flen = out_max - 1;
     memcpy(out, p, flen);
     out[flen] = '\0';
     return true;
 }
 
+/*
+ * 解析 "8mm" -> 8.0f
+ */
+static float parse_mm(const char *str) {
+    char buf[32];
+    uint16_t len = (uint16_t)strlen(str);
+    if (len >= sizeof(buf)) len = sizeof(buf) - 1;
+    memcpy(buf, str, len);
+    buf[len] = '\0';
+    if (len >= 2 && buf[len - 2] == 'm' && buf[len - 1] == 'm') {
+        buf[len - 2] = '\0';
+    }
+    return strtof(buf, NULL);
+}
+
+/*
+ * 解析一行 CSV（15 列，制表符分隔）
+ * 列: [0]Designator [1]Device [2]Footprint [3]Mid X [4]Mid Y
+ *     [5]Ref X [6]Ref Y [7]Pad X [8]Pad Y [9]Pins
+ *     [10]Layer [11]Rotation [12]SMD [13]Comment [14]Name
+ */
 static bool parse_csv_line(const char *line, uint16_t len) {
-    if (g_comp_count >= MAX_COMPONENTS) return false;
-
-    if (g_col_smd >= 0) {
-        char smd_str[8];
-        if (get_csv_field(line, len, g_col_smd, smd_str, sizeof(smd_str))) {
-            if (smd_str[0] == '0' || smd_str[0] == 'N' || smd_str[0] == 'n' ||
-                smd_str[0] == 'F' || smd_str[0] == 'f') {
-                return false;
-            }
+    if (!g_header_parsed) {
+        if (len >= 12 && memcmp(line, "\"Designator\"", 12) == 0) {
+            g_header_parsed = true;
+            PrintDebug("[HOST] Header detected, skipping.\r\n");
+            return false;
         }
+        g_header_parsed = true;
     }
 
-    if (g_col_x < 0 && g_col_y < 0) {
-        g_col_x = 3; g_col_y = 4; g_col_rot = 5;
-        PrintDebug("[HOST] Using default column mapping.\r\n");
+    char smd[8] = {0};
+    if (!csv_get_field(line, len, 12, smd, sizeof(smd))) {
+        return false;
     }
 
-    Component_t *c = &g_components[g_comp_count];
+    bool is_mark = (strcmp(smd, "MARK") == 0);
+    if (!is_mark && strcmp(smd, "Yes") != 0) {
+        return false;
+    }
+
+    Component_t *c;
+    if (is_mark) {
+        if (g_mark_count >= MAX_MARKS) {
+            PrintDebug("[HOST] WARN: too many marks (>%d)\r\n", MAX_MARKS);
+            return false;
+        }
+        c = &g_marks[g_mark_count];
+    } else {
+        if (g_comp_count >= MAX_COMPONENTS) {
+            PrintDebug("[HOST] WARN: too many components (>%d)\r\n", MAX_COMPONENTS);
+            return false;
+        }
+        c = &g_components[g_comp_count];
+    }
+
     memset(c, 0, sizeof(*c));
-    c->id = g_comp_count + 1;
     c->feeder_id = 1;
 
     char tmp[32];
-    if (get_csv_field(line, len, g_col_x, tmp, sizeof(tmp))) {
-        c->target_x = (float)strtof(tmp, NULL);
-    }
-    if (get_csv_field(line, len, g_col_y, tmp, sizeof(tmp))) {
-        c->target_y = (float)strtof(tmp, NULL);
-    }
-    if (g_col_rot >= 0) {
-        if (get_csv_field(line, len, g_col_rot, tmp, sizeof(tmp))) {
-            c->target_angle = (float)strtof(tmp, NULL);
-        }
+
+    if (csv_get_field(line, len, 2, tmp, sizeof(tmp))) {
+        uint16_t n = (uint16_t)strlen(tmp);
+        if (n >= sizeof(c->footprint)) n = sizeof(c->footprint) - 1;
+        memcpy(c->footprint, tmp, n);
+        c->footprint[n] = '\0';
     }
 
-    g_comp_count++;
+    if (csv_get_field(line, len, 3, tmp, sizeof(tmp))) {
+        c->target_x = parse_mm(tmp);
+    }
+
+    if (csv_get_field(line, len, 4, tmp, sizeof(tmp))) {
+        c->target_y = parse_mm(tmp);
+    }
+
+    if (csv_get_field(line, len, 10, tmp, sizeof(tmp))) {
+        c->layer = (tmp[0] == 'T' || tmp[0] == 'B') ? tmp[0] : 'T';
+    } else {
+        c->layer = 'T';
+    }
+
+    if (csv_get_field(line, len, 11, tmp, sizeof(tmp))) {
+        c->target_angle = strtof(tmp, NULL);
+    }
+
+    c->is_mark = is_mark;
+
+    if (is_mark) {
+        c->id = g_mark_count + 1;
+        g_mark_count++;
+    } else {
+        c->id = g_comp_count + 1;
+        g_comp_count++;
+    }
+
     return true;
 }
 
 static void download_done(void) {
-    PrintDebug("[HOST] Download done. %u components.\r\n", g_comp_count);
+    PrintDebug("[HOST] Download done. %u marks, %u components.\r\n",
+               g_mark_count, g_comp_count);
     g_header_parsed = false;
 
-    if (g_comp_count > 0) {
+    if (g_mark_count > 0) {
         g_comp_index = 0;
         g_mark_count_done = 0;
         memset(g_mark_offsets, 0, sizeof(g_mark_offsets));
         g_state = HOST_MARK_ALIGN;
-        Vision_Start(VCMD_P2);
+        Vision_Start(VCMD_P2, 0);
         Vision_Go();
-        PrintDebug("[HOST] Starting Mark alignment (P2)...\r\n");
+        PrintDebug("[HOST] Starting Mark alignment (P2, %u marks)...\r\n", g_mark_count);
+    } else if (g_comp_count > 0) {
+        g_comp_index = 0;
+        move_xy_relative(g_calib.scatter_x_steps - g_cur_x,
+                         g_calib.scatter_y_steps - g_cur_y,
+                         PNP_SPEED, PNP_ACC, &g_cur_x, &g_cur_y);
+        Vision_Start(VCMD_P1, footprint_to_class_id(g_components[0].footprint));
+        g_state = HOST_FIND_COMP;
+        PrintDebug("[HOST] No marks, starting find component (P1)...\r\n");
     } else {
         host_send("DOWNLOAD_READY");
         g_state = HOST_DEBUG;
@@ -211,7 +254,6 @@ static void download_done(void) {
  *  调试模式命令处理
  * ================================================================ */
 static void handle_debug_cmd(HostParsed_t *cmd) {
-    int32_t steps;
     /* 状态去重：连续两次完全相同的命令直接丢弃
      * 相比时间窗口防抖，此方案不依赖 tick 精度，中间有别的命令自动复位 */
     if (cmd->cmd == g_last_cmd && cmd->param == g_last_param) {
@@ -348,6 +390,16 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         PrintDebug("[HOST] PUMP_OFF done\r\n");
         break;
 
+    case HCMD_HEAT_ON:
+        Heater_SendStart();
+        PrintDebug("[HOST] HEAT_ON\r\n");
+        break;
+
+    case HCMD_HEAT_OFF:
+        Heater_SendStop();
+        PrintDebug("[HOST] HEAT_OFF\r\n");
+        break;
+
     case HCMD_EXIT_DEBUG:
         g_state = HOST_INIT;
         g_jog_active = false;
@@ -355,6 +407,75 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         host_send("EXIT_DEBUG_MODE");
         osDelay(50);
         host_send("DOWNLOAD_READY");
+        break;
+
+    /* ---- 标定命令 ---- */
+    case HCMD_SET_SCATTER_AREA:
+        g_calib.scatter_x_steps = g_cur_x;
+        g_calib.scatter_y_steps = g_cur_y;
+        PrintDebug("[HOST] SET_SCATTER_AREA: (%ld,%ld)\r\n", (long)g_cur_x, (long)g_cur_y);
+        break;
+
+    case HCMD_SET_SCATTER_SIZE:
+        g_calib.scatter_size_steps = (int32_t)(cmd->param * STEPS_PER_MM);
+        PrintDebug("[HOST] SET_SCATTER_SIZE: %.1fmm -> %ld steps\r\n", cmd->param, (long)g_calib.scatter_size_steps);
+        break;
+
+    case HCMD_SET_PCB_AREA_MIN:
+        g_calib.pcb_area_x_min = g_cur_x;
+        g_calib.pcb_area_y_min = g_cur_y;
+        PrintDebug("[HOST] SET_PCB_AREA_MIN: (%ld,%ld)\r\n", (long)g_cur_x, (long)g_cur_y);
+        break;
+
+    case HCMD_SET_PCB_AREA_MAX:
+        g_calib.pcb_area_x_max = g_cur_x;
+        g_calib.pcb_area_y_max = g_cur_y;
+        PrintDebug("[HOST] SET_PCB_AREA_MAX: (%ld,%ld)\r\n", (long)g_cur_x, (long)g_cur_y);
+        break;
+
+    case HCMD_SET_BOTTOM_CAM:
+        g_calib.bottom_cam_x_steps = g_cur_x;
+        g_calib.bottom_cam_y_steps = g_cur_y;
+        PrintDebug("[HOST] SET_BOTTOM_CAM: (%ld,%ld)\r\n", (long)g_cur_x, (long)g_cur_y);
+        break;
+
+    case HCMD_SET_Z_SAFE:
+        {
+            float ang = Servo_GetAngle(Z_SERVO_CH);
+            if (ang >= 0.0f) g_calib.z_safe_angle = ang;
+            PrintDebug("[HOST] SET_Z_SAFE: %.1f deg\r\n", g_calib.z_safe_angle);
+        }
+        break;
+
+    case HCMD_SET_Z_PICK:
+        {
+            float ang = Servo_GetAngle(Z_SERVO_CH);
+            if (ang >= 0.0f) g_calib.z_pick_angle = ang;
+            PrintDebug("[HOST] SET_Z_PICK: %.1f deg\r\n", g_calib.z_pick_angle);
+        }
+        break;
+
+    case HCMD_SET_Z_PLACE:
+        {
+            float ang = Servo_GetAngle(Z_SERVO_CH);
+            if (ang >= 0.0f) g_calib.z_place_angle = ang;
+            PrintDebug("[HOST] SET_Z_PLACE: %.1f deg\r\n", g_calib.z_place_angle);
+        }
+        break;
+
+    case HCMD_SET_R_ZERO:
+        r_axis_set_zero();
+        PrintDebug("[HOST] SET_R_ZERO: R axis zeroed\r\n");
+        break;
+
+    case HCMD_SAVE_CALIB:
+        if (Calib_Save(&g_calib) == 0) {
+            PrintDebug("[HOST] SAVE_CALIB: saved to Flash.\r\n");
+            host_send("CALIB_SAVED");
+        } else {
+            PrintDebug("[HOST] SAVE_CALIB: Flash write FAILED!\r\n");
+            host_send("CALIB_SAVE_FAILED");
+        }
         break;
 
     default:
@@ -406,13 +527,20 @@ static void mark_align_step(void) {
             g_mark_avg_dy = (g_mark_offsets[0][1] + g_mark_offsets[1][1] + g_mark_offsets[2][1]) / 3;
         }
         g_comp_index = 0;
-        PrintDebug("[HOST] Mark alignment complete. %d marks. Avg offset: (%ld,%ld)mm10000\\r\\n",
+        PrintDebug("[HOST] Mark alignment complete. %d marks. Avg offset: (%ld,%ld)mm10000\r\n",
                    g_mark_count_done, (long)g_mark_avg_dx, (long)g_mark_avg_dy);
-        /* 移动到散料区起始位置，准备找元件 */
-        move_xy_relative(FEEDER_AREA_X_STEPS - g_cur_x, FEEDER_AREA_Y_STEPS - g_cur_y,
-                         PNP_SPEED, PNP_ACC, &g_cur_x, &g_cur_y);
-        Vision_Start(VCMD_P1);
-        g_state = HOST_FIND_COMP;
+
+        /* Mark 完成后：如果有贴装元件，开始 P1 找元件流程 */
+        if (g_comp_count > 0) {
+            move_xy_relative(g_calib.scatter_x_steps - g_cur_x, g_calib.scatter_y_steps - g_cur_y,
+                             PNP_SPEED, PNP_ACC, &g_cur_x, &g_cur_y);
+            Vision_Start(VCMD_P1, footprint_to_class_id(g_components[0].footprint));
+            g_state = HOST_FIND_COMP;
+        } else {
+            /* 仅有 Mark 点、无贴装元件 */
+            host_send("DOWNLOAD_READY");
+            g_state = HOST_DEBUG;
+        }
         break;
     }
 
@@ -432,6 +560,10 @@ static void find_comp_step(void) {
     const VisionResult_t *r = Vision_GetResult();
 
     switch (vs) {
+    case VISION_GOT_CATEGORY_QUERY:
+        /* P1 类别询问：Cam 需要知道元件类别，回复 cls */
+        Vision_ClsReply();
+        break;
     case VISION_GOT_STOP:
         /* P1 Phase0: 目标锁定 → 停电机 → go */
         if (g_jog_active) { disable_sync_stop(); g_jog_active = false; }
@@ -466,22 +598,38 @@ static void find_comp_step(void) {
 
     case VISION_DONE:
         /* P1 完成：元件已对齐 → 吸取 */
+        g_p1_retry_count = 0;
         PrintDebug("[HOST] Comp %u aligned. Picking...\r\n",
                    g_components[g_comp_index].id);
         g_state = HOST_PICK;
         break;
 
-    case VISION_ERROR:
-        PrintDebug("[HOST] Find comp %u ERROR: %s\r\n",
-                   g_components[g_comp_index].id, Vision_GetError());
-        g_comp_index++;
-        if (g_comp_index >= g_comp_count) {
-            g_state = HOST_DONE;
+    case VISION_ERROR: {
+        const char *err = Vision_GetError();
+        Component_t *c = &g_components[g_comp_index];
+        bool recoverable = (strcmp(err, "err1_5") == 0 ||
+                            strcmp(err, "err1_8") == 0 ||
+                            strcmp(err, "err1_9") == 0);
+        bool cam_fault   = (strcmp(err, "err1_1") == 0 ||
+                            strcmp(err, "err1_4") == 0);
+        if ((recoverable || cam_fault) && g_p1_retry_count < 3) {
+            g_p1_retry_count++;
+            PrintDebug("[HOST] Comp %u %s, retry P1 (%d/3)...\r\n",
+                       c->id, err, g_p1_retry_count);
+            Vision_Start(VCMD_P1, footprint_to_class_id(c->footprint));
         } else {
-            Vision_Start(VCMD_P1);
+            PrintDebug("[HOST] Find comp %u ERROR: %s (retries=%d), skipping\r\n",
+                       c->id, err, g_p1_retry_count);
+            g_p1_retry_count = 0;
+            g_comp_index++;
+            if (g_comp_index >= g_comp_count) {
+                g_state = HOST_DONE;
+            } else {
+                Vision_Start(VCMD_P1, footprint_to_class_id(g_components[g_comp_index].footprint));
+            }
         }
         break;
-
+    }
     default:
         break;
     }
@@ -546,11 +694,13 @@ void Host_Task(void *argument) {
     g_state = HOST_INIT;
     g_comp_count = 0;
     g_comp_index = 0;
+    g_mark_count = 0;
     g_header_parsed = false;
     g_cur_x = 0;
     g_cur_y = 0;
     g_jog_active = false;
     memset(g_components, 0, sizeof(g_components));
+    memset(g_marks, 0, sizeof(g_marks));
     memset(g_mark_offsets, 0, sizeof(g_mark_offsets));
 
     /* 电机初始化 */
@@ -574,6 +724,18 @@ void Host_Task(void *argument) {
     /* ENN 低有效：LOW=开启，HIGH=关闭。初始化完成后关闭，用到时再开 */
     TMC_SetEnable(false);
 
+
+    
+    /* 加热台初始化 */
+    Heater_Init();
+
+    /* 从 Flash 加载标定值 */
+    if (Calib_Load(&g_calib) != 0) {
+        PrintDebug("[HOST] Flash read failed, using defaults.\r\n");
+    }
+    PrintDebug("[HOST] Calib: scatter=(%ld,%ld) botcam=(%ld,%ld)\r\n",
+               (long)g_calib.scatter_x_steps, (long)g_calib.scatter_y_steps,
+               (long)g_calib.bottom_cam_x_steps, (long)g_calib.bottom_cam_y_steps);
 
     PrintDebug("[HOST] Task started.\r\n");
 
@@ -619,6 +781,7 @@ void Host_Task(void *argument) {
                             && !(parsed.raw_len == 15 && memcmp(parsed.raw, "EXIT_DEBUG_MODE", 15) == 0)) {
                             g_state = HOST_DOWNLOADING;
                             g_comp_count = 0;
+                            g_mark_count = 0;
                             g_header_parsed = false;
                             PrintDebug("[HOST] Download started (from debug).\r\n");
                         }
@@ -627,12 +790,7 @@ void Host_Task(void *argument) {
                         if (g_state == HOST_DOWNLOADING) {
                             if (parsed.cmd == HCMD_RAW_LINE) {
                                 g_last_line_tick = osKernelGetTickCount();
-                                if (!g_header_parsed) {
-                                    parse_header(parsed.raw, parsed.raw_len);
-                                    g_header_parsed = true;
-                                } else {
-                                    parse_csv_line(parsed.raw, parsed.raw_len);
-                                }
+                                parse_csv_line(parsed.raw, parsed.raw_len);
                             } else {
                                 PrintDebug("[HOST] WARN: non-CSV cmd %d dropped in download\r\n",
                                            (int)parsed.cmd);
@@ -644,7 +802,11 @@ void Host_Task(void *argument) {
             }
             UART_ClearData(UART_CH1);
         }
-        /* ---- 3. 下载超时检测 ---- */
+
+        /* ---- 3. 加热台状态处理 ---- */
+        Heater_ProcessStatus();
+
+        /* ---- 4. 下载超时检测 ---- */
         if (g_state == HOST_DOWNLOADING) {
             uint32_t elapsed = osKernelGetTickCount() - g_last_line_tick;
             if (elapsed >= DOWNLOAD_TIMEOUT_MS) {
@@ -653,7 +815,7 @@ void Host_Task(void *argument) {
             }
         }
 
-        /* ---- 4. 状态机 ---- */
+        /* ---- 5. 状态机 ---- */
         switch (g_state) {
 
         case HOST_INIT:
@@ -682,9 +844,9 @@ void Host_Task(void *argument) {
             PrintDebug("[HOST] PICK comp %u (angle=%.1f)\r\n", c->id, c->target_angle);
             pick_component();
             /* 移动到下相机站检测偏移 */
-            move_xy_relative(BOTTOM_CAM_X_STEPS - g_cur_x, BOTTOM_CAM_Y_STEPS - g_cur_y,
+            move_xy_relative(g_calib.bottom_cam_x_steps - g_cur_x, g_calib.bottom_cam_y_steps - g_cur_y,
                              PNP_SPEED, PNP_ACC, &g_cur_x, &g_cur_y);
-            Vision_Start(VCMD_P3);
+            Vision_Start(VCMD_P3, 0);
             g_state = HOST_OFFSET_CHECK;
             break;
         }
@@ -694,38 +856,38 @@ void Host_Task(void *argument) {
             break;
 
         case HOST_PLACE: {
-            Component_t *c = &g_components[g_comp_index];
-            /* 应用 Mark 对齐偏移到 PCB 目标坐标 */
-            float adj_x = c->target_x + (float)g_mark_avg_dx / 10000.0f;
-            float adj_y = c->target_y + (float)g_mark_avg_dy / 10000.0f;
-            int32_t pcb_x = (int32_t)(adj_x * STEPS_PER_MM);
-            int32_t pcb_y = (int32_t)(adj_y * STEPS_PER_MM);
-            PrintDebug("[HOST] PLACE comp %u: target(%.1f,%.1f)+Mark->(%ld,%ld)steps, angle=%.1f\r\n",
-                       c->id, c->target_x, c->target_y, (long)pcb_x, (long)pcb_y, c->target_angle);
-            /* R 轴旋转到目标角度 */
-            r_axis_rotate(c->target_angle, R_SPEED_RPM);
-            /* XY 移动到 PCB 目标位置 */
-            move_xy_relative(pcb_x - g_cur_x, pcb_y - g_cur_y,
+        Component_t *c = &g_components[g_comp_index];
+        /* 应用 Mark 对齐偏移到 PCB 目标坐标 */
+        float adj_x = c->target_x + (float)g_mark_avg_dx / 10000.0f;
+        float adj_y = c->target_y + (float)g_mark_avg_dy / 10000.0f;
+        int32_t pcb_x = (int32_t)(adj_x * STEPS_PER_MM);
+        int32_t pcb_y = (int32_t)(adj_y * STEPS_PER_MM);
+        PrintDebug("[HOST] PLACE comp %u: target(%.1f,%.1f)+Mark->(%ld,%ld)steps, angle=%.1f\r\n",
+                   c->id, c->target_x, c->target_y, (long)pcb_x, (long)pcb_y, c->target_angle);
+        /* R 轴旋转到目标角度 */
+        r_axis_rotate(c->target_angle, R_SPEED_RPM);
+        /* XY 移动到 PCB 目标位置 */
+        move_xy_relative(pcb_x - g_cur_x, pcb_y - g_cur_y,
+                         PNP_SPEED, PNP_ACC, &g_cur_x, &g_cur_y);
+        /* 贴装 */
+        place_component();
+        c->placed = true;
+        g_comp_index++;
+        if (g_comp_index >= g_comp_count) {
+            g_state = HOST_DONE;
+        } else {
+            /* 回到散料区，准备找下一个元件 */
+            move_xy_relative(g_calib.scatter_x_steps - g_cur_x, g_calib.scatter_y_steps - g_cur_y,
                              PNP_SPEED, PNP_ACC, &g_cur_x, &g_cur_y);
-            /* 贴装 */
-            place_component();
-            c->placed = true;
-            g_comp_index++;
-            if (g_comp_index >= g_comp_count) {
-                g_state = HOST_DONE;
-            } else {
-                /* 回到散料区，准备找下一个元件 */
-                move_xy_relative(FEEDER_AREA_X_STEPS - g_cur_x, FEEDER_AREA_Y_STEPS - g_cur_y,
-                                 PNP_SPEED, PNP_ACC, &g_cur_x, &g_cur_y);
-                Vision_Start(VCMD_P1);
-                g_state = HOST_FIND_COMP;
-            }
-            break;
+            Vision_Start(VCMD_P1, footprint_to_class_id(g_components[g_comp_index].footprint));
+            g_state = HOST_FIND_COMP;
         }
-
+        break;
+        }
         case HOST_DONE:
             PrintDebug("[HOST] All %u components placed!\r\n", g_comp_count);
             g_comp_count = 0;
+            g_mark_count = 0;
             osDelay(200);
             /* 不再自动发 DOWNLOAD_READY，避免锁调试按钮 */
             g_state = HOST_DEBUG;
@@ -734,6 +896,7 @@ void Host_Task(void *argument) {
         case HOST_ERROR:
             PrintDebug("[HOST] ERROR state. Resetting to DEBUG.\r\n");
             g_comp_count = 0;
+            g_mark_count = 0;
             g_comp_index = 0;
             osDelay(500);
             /* 不再自动发 DOWNLOAD_READY，避免锁调试按钮 */

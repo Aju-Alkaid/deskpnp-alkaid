@@ -7,12 +7,17 @@
 #include "app_uart_parser.h"
 #include "app_vision.h"
 #include "app_motion.h"
+#include "app_config.h"     /* CalibrationData_t, STEPS_PER_MM */
 
 /* 单板最大元件数 */
 #define MAX_COMPONENTS  128
+#define MAX_MARKS       8     /* Mark 点最大数量（规范为 5） */
 
 /* 下载超时(ms) */
 #define DOWNLOAD_TIMEOUT_MS  500
+
+/* R 轴转速 */
+#define R_SPEED_RPM         60.0f
 
 /* 元件信息 */
 typedef struct {
@@ -20,13 +25,16 @@ typedef struct {
     float target_x;
     float target_y;
     float target_angle;
+    char     footprint[32];   /* 封装名称 (C0805, R0805, LED-SMD, Mark1~5) */
+    char     layer;           /* 层面 'T' 或 'B' */
+    bool     is_mark;         /* SMD=="MARK" 时为 true */
     uint8_t feeder_id;
     bool placed;
 } Component_t;
 
 /* ---- 统一 Host 任务状态 ---- */
 typedef enum {
-    HOST_INIT,           /* 启动，发送 DOWNLOAD_READY */
+    HOST_INIT,           /* 启动，发送 DEBUG_MODE */
     HOST_DEBUG,          /* 调试模式：手动电机控制 */
     HOST_DOWNLOADING,    /* 接收 CSV 文件 */
     HOST_MARK_ALIGN,     /* P2: Mark 点建系 */
@@ -56,13 +64,4 @@ extern osMessageQueueId_t host_pkt_queue;
 void Host_UartRecvCallback(uint8_t *data, int len);
 void Host_Task(void *argument);
 
-
-/* ---- 校准位置 (步数) — 需实测标定！---- */
-#define BOTTOM_CAM_X_STEPS   0      /* TODO: 下相机站 X 坐标 */
-#define BOTTOM_CAM_Y_STEPS   0      /* TODO: 下相机站 Y 坐标 */
-#define FEEDER_AREA_X_STEPS  0      /* TODO: 散料区起始 X 坐标 */
-#define FEEDER_AREA_Y_STEPS  0      /* TODO: 散料区起始 Y 坐标 */
-
-/* R 轴转速 */
-#define R_SPEED_RPM         60.0f
 #endif

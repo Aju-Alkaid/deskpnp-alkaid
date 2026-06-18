@@ -76,6 +76,12 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("PUMP_OFF")) {
         return HCMD_PUMP_OFF;
     }
+    if (MATCH("HEAT_ON")) {
+        return HCMD_HEAT_ON;
+    }
+    if (MATCH("HEAT_OFF")) {
+        return HCMD_HEAT_OFF;
+    }
     if (MATCH("SET_ORIGIN")) {
         return HCMD_SET_ORIGIN;
     }
@@ -83,6 +89,38 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
         return HCMD_EXIT_DEBUG;
     }
 
+
+    if (MATCH("SET_SCATTER_AREA")) {
+        return HCMD_SET_SCATTER_AREA;
+    }
+    if (MATCH("SET_SCATTER_SIZE")) {
+        if (space) *param = (float)strtof(space + 1, NULL);
+        return HCMD_SET_SCATTER_SIZE;
+    }
+    if (MATCH("SET_PCB_AREA_MIN")) {
+        return HCMD_SET_PCB_AREA_MIN;
+    }
+    if (MATCH("SET_PCB_AREA_MAX")) {
+        return HCMD_SET_PCB_AREA_MAX;
+    }
+    if (MATCH("SET_BOTTOM_CAM")) {
+        return HCMD_SET_BOTTOM_CAM;
+    }
+    if (MATCH("SET_Z_SAFE")) {
+        return HCMD_SET_Z_SAFE;
+    }
+    if (MATCH("SET_Z_PICK")) {
+        return HCMD_SET_Z_PICK;
+    }
+    if (MATCH("SET_Z_PLACE")) {
+        return HCMD_SET_Z_PLACE;
+    }
+    if (MATCH("SET_R_ZERO")) {
+        return HCMD_SET_R_ZERO;
+    }
+    if (MATCH("SAVE_CALIB")) {
+        return HCMD_SAVE_CALIB;
+    }
     #undef MATCH
     return HCMD_UNKNOWN;
 }

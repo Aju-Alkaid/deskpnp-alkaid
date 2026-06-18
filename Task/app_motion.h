@@ -56,5 +56,6 @@ void z_down(void);
 void z_up(void);
 void pick_component(void);
 void place_component(void);
+void r_axis_set_zero(void);
 void r_axis_rotate(float angle, float speed_rpm);
 #endif

@@ -1,4 +1,4 @@
-﻿#include "driver_spiflash_w25q64.h"
+#include "driver_spiflash_w25q64.h"
 //#include "driver_lcd.h"
 #include "driver_timer.h"
 #include "stm32g4xx_hal.h"
@@ -11,13 +11,13 @@ extern SPI_HandleTypeDef hspi3;
 static SPI_HandleTypeDef *g_HSPI_Flash = &hspi3;
 
 /* CS: PA15
- * SPI1_MISO: PC11
- * SPI1_MOSI: PC12
- * SPI1_SCK:  PC10
+ * SPI3_MISO: PC11
+ * SPI3_MOSI: PC12
+ * SPI3_SCK:  PC10
  */
  
-#define W25Q64_CS_GPIO_GROUP GPIOC
-#define W25Q64_CS_GPIO_PIN   GPIO_PIN_11
+#define W25Q64_CS_GPIO_GROUP GPIOA
+#define W25Q64_CS_GPIO_PIN   GPIO_PIN_15
 #define W25Q64_TIMEOUT       500
 
 
@@ -107,27 +107,23 @@ static int W25Q64_WaitReady(void)
 {
     unsigned char tx_buf[2];
     unsigned char rx_buf[2];
-    int timeout = W25Q64_TIMEOUT;
+    int i;
 
     tx_buf[0] = 0x05; /* 读状态 */
     tx_buf[1] = 0xff;
-	
-	while (timeout--)
-	{
-		rx_buf[0] = rx_buf[1] = 0;
-        W25Q64_Select();
-		W25Q64_TxRx(tx_buf, rx_buf, 2, W25Q64_TIMEOUT);
-        W25Q64_Deselect();
-		if ((rx_buf[1] & 1) == 0)
-			return 0;
-        mdelay(1);
-	}
-
-    if (!timeout)
+    
+    for (i = 0; i < W25Q64_TIMEOUT; i++)
     {
-    	return -1;
+        rx_buf[0] = rx_buf[1] = 0;
+        W25Q64_Select();
+        W25Q64_TxRx(tx_buf, rx_buf, 2, W25Q64_TIMEOUT);
+        W25Q64_Deselect();
+        if ((rx_buf[1] & 1) == 0)
+            return 0;
+        mdelay(1);
     }
-	return 0;
+
+    return -1;  /* timeout */
 }
 
 /**
@@ -295,7 +291,7 @@ int W25Q64_Erase(uint32_t offset, uint32_t len)
     uint32_t phy_pos = offset;
     int err;
 
-    if ((offset & (4096-1)) && (len & (4096-1)))
+    if ((offset & (4096-1)) || (len & (4096-1)))
         return -1;
 
     for (int sector = 0; sector < len/4096; sector++)

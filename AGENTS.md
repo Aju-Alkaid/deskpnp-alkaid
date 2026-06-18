@@ -1,4 +1,33 @@
-﻿# PnP 贴片机嵌入式固件 — 项目说明书
+# PnP 贴片机嵌入式固件 — 项目说明书
+
+> **文件编辑规则（AI Agent 必读）**
+> 
+> 工具链：Node.js 可用（`node -e`），无 Python。源文件 UTF-8 + CRLF。
+> 
+> **禁止用 PowerShell 字符串拼接、行号定位、ArrayList Insert/RemoveAt 做代码编辑。**
+> 
+> **唯一可靠方式：Base64 + Node.js**
+> 
+> ```
+> $old = "从目标文件原样复制的原文"
+> $new = "替换后的文本"
+> $f   = "E:/path/to/file.c"
+> $ob  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($old))
+> $nb  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($new))
+> node -e "const f=require('fs');let c=f.readFileSync('$f','utf8');" +
+>          "let o=Buffer.from('$ob','base64').toString('utf8');" +
+>          "let n=Buffer.from('$nb','base64').toString('utf8');" +
+>          "c=c.replaceAll(o,n);f.writeFileSync('$f',c,'utf8');"
+> ```
+> 
+> 关键：`$old` 必须从目标文件原样复制，换行符（CRLF/LF）要一致。
+> 多次替换在同一个 node -e 内串联 replaceAll。
+> 匹配失败 node 输出 NOT FOUND，不破坏文件。
+> 
+> **手动使用：** 编辑 `tools\_replace.ps1` 中的 `$TARGET_FILE` / `$OLD_TEXT` / `$NEW_TEXT`，
+> 然后 `powershell -ExecutionPolicy Bypass -File .\tools\_replace.ps1` 运行。
+> 多行文本直接粘贴在 `@'...'@` 之间，无需转义。
+
 
 ## 一、项目概览
 
@@ -68,7 +97,7 @@ pnp_1/
 ├── Task/                        # ★ FreeRTOS 应用层任务 ★
 │   ├── app_host.c/h             # 上位机通信任务 + CSV解析 + 视觉协调 + 调试模式
 │   ├── app_uart_parser.c/h      # 上位机行协议解析器（COMMAND arg\n 格式）
-│   ├── app_vision.c/h           # 摄像头 0x7E/0x7F 协议解析（process1/2/3）
+│   ├── app_vision.c/h           # MaixCAM v2 帧协议 (0x7E LEN PAYLOAD 0x7F) + P1/P2/P3 状态机
 │   ├── app_motion.c/h           # 运动控制函数 + CAN_Process_Task + MotionTask_Func
 │   ├── app_test.c/h             # 测试任务 (vMotorTestTask) + PrintDebug 函数
 │   └── Task_Init.c/h            # 任务创建框架（Tasks_Create，当前未激活）
@@ -105,20 +134,86 @@ pnp_1/
   5. CSV 格式：`ID,Name,X(mm),Y(mm),Rotation(deg),SMD`
 - **无校验：** 纯文本协议，依赖 UART 硬件可靠性
 
-### 4.2 G4 ? MaixCam 摄像头 (USART2, PD5/PD6)
-- **物理层：** 115200, 8N1, DMA+空闲中断
-- **协议格式：** `0x7E ... 0x7F` 帧定界，帧内为 UTF-8 字符串字段（按 0x7F 分隔）
-- **帧结构：** `7E begin 7F field1 7F field2 7F ... 7F end 7F`
-- **命令（G4→摄像头）：**
-  - `process1` — 散料区检测元件
-  - `process2` — Mark 点检测
-  - `process3` — 元件偏移检测
-- **返回格式（摄像头→G4）：**
-  - process1 成功：`begin, x_offset, y_offset, comp_info, end`
-  - process2 成功：`begin, mark1_x, mark1_y, mark2_x, mark2_y, end`
-  - process3 成功：`begin, x_offset, y_offset, end`
-  - 失败：包含 `err1`/`err2`/`err3` 字段
 
+### 4.2 G4 ↔ MaixCam 摄像头 (USART2, PD5/PD6)
+
+- **物理层：** 115200, 8N1, DMA+空闲中断
+- **帧协议（v2，2026-06-17 更新）：**
+  ```
+  ┌────────┬────────┬──────────────────┬────────┐
+  │  0x7E  │ length │  UTF-8 Payload   │  0x7F  │
+  │ 1 Byte │ 1 Byte │   0~255 Bytes    │ 1 Byte │
+  └────────┴────────┴──────────────────┴────────┘
+  ```
+  - 帧头 `0x7E`、帧尾 `0x7F` 各 1 字节
+  - `length`：payload 字节数（0~255）
+  - `payload`：UTF-8 字符串
+  - 接收状态机：`WAIT_HEAD(0x7E) → WAIT_LEN → WAIT_DATA(len字节) → WAIT_TAIL(0x7F)`
+
+- **通信模型：** 主控 → MaixCAM，请求-响应，单任务串行
+
+- **P0 启动握手：**
+  ```
+  Host → Cam: p0          // 握手请求
+  Cam  → Host: rdy         // 握手成功（120s 超时发 err0，主控须重发 p0）
+  ```
+
+- **P1 — 元件识别（上摄像头，YOLO 224×224，4 类：ccapt/cledy/cledo/crest）：**
+
+  | 步骤 | 方向 | 帧 | 说明 |
+  |------|------|-----|------|
+  | 1 | Host→Cam | `p1` | 启动 P1 |
+  | 2 | Cam→Host | `rdy` | **询问类别** |
+  | 3 | Host→Cam | `cls` | 类别指令 |
+  | 4 | Host→Cam | `N:{class_id}` | 0=ccapt, 1=cledy, 2=cledo, 3=crest |
+  | 5 | Host→Cam | `end` | 结束类别询问 |
+  | 6 | Cam 开始 Phase0 搜索 | | |
+
+  - **Phase0（搜索）：** Cam→Host: `stp`（目标锁定）→ Host→Cam: `go`（停机确认）
+  - **Phase1（精测）：** Cam→Host: `pos` `N:{dx}` `N:{dy}` `N:{id}` `end`（3 字段，**无角度**。dx/dy 已×6.0）
+  - **Phase2（迭代修正≤5轮）：**
+    - Host→Cam: `go` → Cam→Host: `pos` `N:{dx}` `N:{dy}` `end`（未对齐）
+    - 对齐完成：Cam→Host: `ok` → Cam→Host: `N:{ao}`（**角度×100，紧跟 ok**）
+  - **错误：** `err1_1`~`err1_9`（详见实现）
+
+- **P2 — Mark 点建系（上摄像头 224×224，中心 90% 裁剪）：**
+
+  | 步骤 | 方向 | 帧 | 说明 |
+  |------|------|-----|------|
+  | 1 | Host→Cam | `p2` | 启动 P2，IDLE 态 |
+  | 2 | Host→Cam | `go` | 开始搜索（多态命令） |
+  | 3 | Cam→Host | `stp` | Mark 锁定（10帧稳定，漂移<1.5px） |
+  | 4 | Host→Cam | `go` | 确认停机 → 精确测位 |
+  | 5 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 偏移 **mm×10000** |
+  | 6 | Host→Cam | `go` | 移动完成 → 迭代归零 |
+  | 7 | Cam→Host | `ok` | 连续30帧对齐（|offset|≤0.3px） |
+  | — | — | — | 非末 Mark 的 ok → 自动切 P2_WAIT_GO，等 Host 发 go 搜索下一个 |
+  | — | — | — | 末 Mark 的 ok → VISION_DONE |
+  | — | Host→Cam | `end` | 随时终止 |
+  - **错误：** `err2_1`~`err2_4`
+
+- **P3 — 下相机对准验证（下摄像头 640×480，Canny 边缘检测）：**
+
+  | 步骤 | 方向 | 帧 | 说明 |
+  |------|------|-----|------|
+  | 1 | Host→Cam | `p3` | 启动 P3 |
+  | 2 | Cam→Host | `pos` `N:{dx}` `N:{dy}` | Phase1 自动检测（**无 end**，dx/dy 已×1.5） |
+  | 3 | Host→Cam | `go` | 移动完成 → Phase2 |
+  | 4 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 未重合（|dx|>3 或 |dy|>3） |
+  | 5 | 对齐完成：Cam→Host: `ok` → Cam→Host: `N:{ao}`（**角度×100，紧跟 ok**） |
+  - **错误码：** `err3_1`/`err3_2`（致命），`err3_3`（**可重试**—Cam 收到非 go，Host 重发 go），`err3_5`/`err3_6`/`err3_7`（致命）
+
+- **pos 格式汇总：**
+
+  | 进程/阶段 | 帧序列 | 单位 |
+  |----------|--------|------|
+  | P1 Phase1 | `pos` N:dx N:dy N:{id} `end` | 像素×6.0 |
+  | P1 Phase2 | `pos` N:dx N:dy `end` | 像素×6.0 |
+  | P2 | `pos` N:dx N:dy `end` | mm×10000 |
+  | P3 Phase1 | `pos` N:dx N:dy（无 end） | 像素×1.5 |
+  | P3 Phase2 | `pos` N:dx N:dy `end` | 像素×1.5 |
+
+- **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
 ### 4.3 G4 ? MKS SERVO42D 电机 (CAN, FDCAN1)
 - **物理层：** CAN 2.0A, 1Mbps, 标准帧(11位ID)
 - **校验：** SUM8 CRC（ID+数据字节累加取低8位）
@@ -225,6 +320,7 @@ pnp_1/
 | `StartHostMotionTestTask` | 4096 | Normal | 调试用运动任务（已注释，功能合并到 Host_Task） |
 | `StartPickPlaceTestTask` | 2048 | Normal | Pick&Place 测试（已注释，功能合并到 Host_Task） |
 | `StartMotorTestTask` | 1024 | Normal | TMC2209 测试（已注释） |
+| `StartCamTestTask` | 2048 | Normal | 摄像头+电机联动测试（P0/P1/P2/P3 协议验证 + 角度追踪 + R轴旋转） |
 
 **任务间通信：**
 - `motor_event_queue` (32深度) — CAN 中断 → CAN_Process_Task / vMotorTestTask
@@ -249,23 +345,33 @@ pnp_1/
               LineParser_Feed()      → 行解析（任务上下文，FPU安全）
                 ├─ 运动/调试命令 → handle_debug_cmd()
                 ├─ RAW_LINE(DEBUG/INIT) → 切换 HOST_DOWNLOADING
-                └─ RAW_LINE(DOWNLOADING) → 解析CSV → g_components[]
-                                             │   Vision_SendCmd(process3) → 偏移修正
-                                             │   motion_cmd_queue → MotionTask_Func
-                                             │       │
-                                             │   CAN → 电机运动到位
-                                             │   Z轴舵机 拾取/放置
+                └─ RAW_LINE(DOWNLOADING) → csv_get_field() 按\t分割15列
+                                             │   剥离引号 + parse_mm() 去mm后缀
+                                             │   SMD白名单过滤 → g_marks[] (MARK)
+                                             │                  → g_components[] (Yes)
                                              │
-                                             └── 完成 → host_send("DOWNLOAD_COMPLETE")
-```
+                                             └── 500ms超时 → download_done()
+                                                   │
+                                                   ├─ g_mark_count>0 → P2建系
+                                                   │    mark_align_step() → Vision_Start(VCMD_P2)
+                                                   │    → g_mark_avg_dx/dy (Mark平均偏移)
+                                                   │
+                                                   └─ g_comp_count>0 → 逐个贴装循环
+                                                        HOST_FIND_COMP → P1找元件(含类别询问)
+                                                        → HOST_PICK     → 吸取+移往下相机
+                                                        → HOST_OFFSET_CHECK → P3偏移检测
+                                                        → HOST_PLACE    → Mark偏移修正+R轴旋转+贴装
+                                                        → 下一元件或 HOST_DONE
+
+              Heater_ProcessStatus()   → 每轮处理加热台CAN状态帧```
 
 ## 七、关键数据结构
 
 | 结构体 | 所在文件 | 用途 | 关键字段 |
 |--------|----------|------|----------|
-| `Component_t` | app_host.h | 贴装元件信息 | id, target_x/y/angle, feeder_id, placed |
+| `Component_t` | app_host.h | 贴装元件/Mark点信息 | id, target_x/y/angle, footprint[32], layer, is_mark, feeder_id, placed |
 | `HostParsed_t` | app_uart_parser.h | 上位机行解析结果 | cmd, param(float), raw[512] |
-| `CamData_t` | app_vision.h | 摄像头返回数据 | result, x/y_offset, mark1/2_x/y |
+| `VisionResult_t` | app_vision.h | 视觉结果数据（v2 协议） | dx, dy, angle_x100, angle_valid, class_id, class_name[8], mark_index, mark_count |
 | `MotionCmd_t` | app_motion.h | 运动指令 | cmd_type, target_x/y/r, speed, acc |
 | `CAN_Rx_Packet_t` | driver_can.h | CAN 数据包 | ID, FuncCode, Status, Data[8], Timestamp |
 | `RingBuf_t` | ringbuf.h | 环形缓冲区 | buffer, size, head(写)/tail(读) |
@@ -1681,3 +1787,112 @@ TIM2_CH1(PA0, 12V_C1) 受此频率变更影响从 ~1kHz 降到 50Hz，但由于 
 ## 十九、DRV8803 端口映射与使用注意事项
 
 > 此章节的内容已合并至 §10.4（DRV8803 端口对照与使用示例），故障排查表见 §10.4 末尾。
+
+---
+
+## 二十、2026-06-17 会话更新 — Host_Task 全面重构
+
+### 20.1 上位机命令扩充
+
+§4.1 命令列表新增：
+- `HEAT_ON` / `HEAT_OFF` — 加热台 回流焊启动/停止
+- `SET_SCATTER_AREA` / `SET_SCATTER_SIZE <mm>` — 标定散料区
+- `SET_PCB_AREA_MIN` / `SET_PCB_AREA_MAX` — 标定 PCB 区域
+- `SET_BOTTOM_CAM` — 标定下相机位置
+- `SET_Z_SAFE` / `SET_Z_PICK` / `SET_Z_PLACE` — 标定 Z 轴高度
+- `SET_R_ZERO` — R 轴当前位置设为 0°
+- `SAVE_CALIB` — 保存标定值到 Flash（写入 W25Q64）
+
+### 20.2 CSV 解析 v2
+
+CSV 格式从逗号分隔动态列升级为**制表符 `\t` 分隔 15 固定列**（对齐 `AGENTS_MCU_processing.md`）：
+- 分隔符：`,` → `\t`
+- 列结构：动态表头检测（`g_col_x/y/rot/smd`）→ 固定 15 列硬编码索引
+- 坐标格式：纯数字 → 含 `"mm"` 后缀，新增 `parse_mm()` 剥离
+- SMD 过滤：首字符匹配 → 全串白名单（`strcmp` 仅放行 `"Yes"`/`"MARK"`）
+- 字段提取：旧逗号版 `get_csv_field()` → 新制表符版 `csv_get_field()`，含引号剥离
+- 下载超时：300ms → **500ms**
+
+### 20.3 Mark/元件分离存储
+
+- Mark 点（SMD=`"MARK"`）独立存储于 `g_marks[MAX_MARKS]`，不再与贴装元件混存
+- 新增 `g_mark_count` 计数
+- `download_done()` 自动判断：有 Mark → 先 P2 建系 → 再 P1 贴装；无 Mark → 直接 P1
+- `Component_t` 新增字段：`footprint[32]`, `layer`, `is_mark`
+
+### 20.4 加热台集成
+
+- `Host_Task` 初始化调用 `Heater_Init()`
+- 主循环每轮调用 `Heater_ProcessStatus()` 处理 CAN 状态帧
+- `HEAT_ON` → `Heater_SendStart()`, `HEAT_OFF` → `Heater_SendStop()`
+
+### 20.5 P1 类别询问（v2 协议适配）
+
+- `find_comp_step()` 新增 `VISION_GOT_CATEGORY_QUERY` 状态处理
+- 调用 `Vision_ClsReply()` 回复元件类别
+- 所有 `Vision_Start()` 补全 `class_id` 参数
+
+### 20.6 标定系统
+
+- `CalibrationData_t`（`app_config.h`）存储散料区/PCB区域/下相机/Z轴高度等标定值
+- `g_calib` 全局变量，`Calib_Save()`/`Calib_Load()` 通过 W25Q64 Flash 持久化
+- `HOST_PICK`/`HOST_PLACE`/`mark_align_step` 使用 `g_calib.*` 替代硬编码 `BOTTOM_CAM_*`/`FEEDER_AREA_*` 宏
+
+### 20.7 编译修复
+
+- 移除 `handle_debug_cmd` 中未使用变量 `int32_t steps;`
+- 补全 `g_mark_count = 0` + `memset(g_marks, ...)` 初始化
+- 补全 `Heater_Init()` 调用
+- 修复 `HOST_PLACE` case 块括号配对
+- 修复 `app_uart_parser.c` 中 `#undef MATCH` 被错误拼接到 `}` 同行
+
+### 20.8 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_uart_parser.h` | +`HCMD_HEAT_ON/OFF` + 标定 11 条命令枚举 |
+| `Task/app_uart_parser.c` | `parse_cmd()` 新增 HEAT + 标定命令匹配 |
+| `Task/app_host.h` | `Component_t` +footprint/layer/is_mark; `MAX_MARKS`; 移除硬编码校准宏 |
+| `Task/app_host.c` | CSV解析重写; Mark/元件分离; HEAT+标定命令; 加热台集成; P1类别询问 |
+| `Task/app_config.h` | `CalibrationData_t` + `g_calib` + `Calib_Save/Load` 声明 |
+### 20.9 P3 err3_3 重试修复
+
+- `offset_check_step()` 新增 `VISION_GOT_ERR_RETRY` case，调用 `Vision_Go()` 重发 go 帧
+- 修复前：err3_3 时 Host_Task 不做响应，P3 卡死
+- 修复后：`Vision_Go()` 内部检测 `VISION_GOT_ERR_RETRY` 自动重发，最多容忍 3 次，第 4 次 Cam 发 err3_7 → VISION_ERROR → 降级贴装
+
+### 20.10 P1 分类 ID 动态映射
+
+- 新增 `footprint_to_class_id(fp)` 函数，根据封装名映射 P1 类别：`LED*` → cledo(2)，`C0*`/`R0*` → ccapt(0)
+- 所有 `Vision_Start(VCMD_P1, 0)` 硬编码替换为 footprint 映射
+- 注意：LED-SMD 封装无法区分 cledy/cledo 子类，当前一律映射为 cledo
+
+### 20.11 P1 错误分级重试
+
+- 新增 `g_p1_retry_count` 静态变量跟踪每元件重试次数
+- `find_comp_step()` VISION_ERROR 按错误码分级：
+  - `err1_5`/`err1_8`/`err1_9`（可恢复）和 `err1_1`/`err1_4`（相机故障）：重试最多 3 次
+  - 其他错误或重试耗尽：跳过当前元件
+- VISION_DONE 成功后复位 `g_p1_retry_count = 0`
+
+### 20.12 StartCamTestTask 角度追踪闭环
+
+- `cam_test_run()` 新增 `float *out_angle_deg` 出参，VISION_DONE 时写入视觉检测角度（°）
+- `StartCamTestTask` 测试流程改为完整闭环：P1找元件→存角度→吸取→移下相机→P3复核→存角度→R轴旋转验证→释放
+- 初始化新增：`Servo_Init`、`TMC_Init`、`DRV8803_EnableChip(2)`、`Calib_Load`、`Valve_Off`
+
+### 20.13 app_vision.c 变量重命名
+
+- `g_tmp_ang` → `g_tmp_cls`（4 处），消除 P1 Phase1 第三字段为 class_id 而非角度的命名误导
+
+### 20.14 Flash 驱动修复 (driver_spiflash_w25q64.c)
+
+审查发现并修复三个问题：
+- **P0：CS 引脚定义错误。** 宏定义为 `GPIOC, GPIO_PIN_11`（SPI3 MISO），修正为 `GPIOA, GPIO_PIN_15`（SPI3 硬件 CS）。注释中 `SPI1_*` 同步更正为 `SPI3_*`
+- **P1：`W25Q64_WaitReady` 超时永远返回成功。** `while(timeout--)` 循环 + `if(!timeout)` 死代码，超时时返回 0。改为 `for(i=0;i<W25Q64_TIMEOUT;i++)` + 明确的 `return -1`
+- **P2：`W25Q64_Erase` 对齐检查用 `&&` 应为 `||`。** 单侧不对齐时漏过检查，改为 `||`
+
+### 20.15 视觉角度未使用（已知待办）
+
+P1/P3 视觉检测的 `angle_x100` 在 `Host_Task` 的 `find_comp_step`/`offset_check_step` 中 `VISION_DONE` 时未被保存。`HOST_PLACE` 的 `r_axis_rotate` 仅使用 CSV 原始 `target_angle`。需在 `Component_t` 增加 `vision_angle_offset` 字段，在 P1/P3 完成时累加，在 PLACE 时合成最终 R 轴旋转角。此逻辑已在 `StartCamTestTask` 中验证完毕，待并入 `Host_Task`。
+

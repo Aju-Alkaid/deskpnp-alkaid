@@ -1,99 +1,82 @@
-﻿#ifndef __APP_VISION_H
+#ifndef __APP_VISION_H
 #define __APP_VISION_H
 
 #include <stdint.h>
 #include <stdbool.h>
 
-/* Mark 点数量 (供 app_host.c 使用) */
+/* Mark point count (for app_host.c) */
 #define P2_MARK_COUNT  3
 
-/* ================================================================
- *  新协议类型 (MaixCAM 2026)
- * ================================================================ */
+/*
+ * Vision module external states (MaixCAM 2026 v2 protocol)
+ */
 
-/* 视觉模块对外状态 */
+/* External states */
 typedef enum {
-    VISION_IDLE = 0,     /* 空闲，无进行中的 Process */
-    VISION_BUSY,         /* 等待 CAM 响应 */
-    VISION_GOT_STOP,     /* 收到 "stp"，需停电机后调用 Vision_Go() */
-    VISION_GOT_POS,      /* 收到位置数据，需移动后调用 Vision_Go() */
-    VISION_DONE,         /* 收到 "ok"，流程完成 */
-    VISION_ERROR,        /* 收到错误 */
+    VISION_IDLE = 0,     
+    VISION_BUSY,         
+    VISION_GOT_STOP,     
+    VISION_GOT_POS,      
+    VISION_DONE,         
+    VISION_ERROR,        
+    VISION_GOT_ERR_RETRY,
+    VISION_GOT_CATEGORY_QUERY,/* P1: Cam asked for category, host must call Vision_ClsReply() */
 } VisionState_t;
 
-/* 命令类型 */
+/* Command types */
 typedef enum {
-    VCMD_P1,             /* YOLO 检测元件 + 迭代对齐 */
-    VCMD_P2,             /* Mark 点建系 */
-    VCMD_P3,             /* 下相机边缘检测 + 对齐 */
+    VCMD_P1,             
+    VCMD_P2,             
+    VCMD_P3,             
 } VisionCmd_t;
 
-/* 单次 Process 的结果数据 */
+/* P1 component class mapping (MaixCAM YOLO model_284490) */
+#define P1_CLASS_CCAPT   0
+#define P1_CLASS_CLEDY   1
+#define P1_CLASS_CLEDO   2
+#define P1_CLASS_CREST   3
+
+/* Single Process result data */
 typedef struct {
-    /* P1 / P3 共用 */
-    int32_t dx, dy;           /* 偏移 (P1/P3: 像素; P2: mm*10000) */
-    /* P1 Phase 1 独有 */
-    int32_t angle_x100;       /* 角度 x 100 (例: 450 = 4.50deg) */
-    char    class_name[8];    /* 类别: "crest"/"ccapt"/"cledy"/"cledo" */
-    /* P2 独有 */
-    int32_t mark_index;       /* 当前 Mark 序号 (0-based) */
-    int32_t mark_count;       /* 总 Mark 数 */
+    int32_t dx, dy;           
+    int32_t angle_x100;       
+    bool    angle_valid;      
+    int32_t class_id;         
+    char    class_name[8];    
+    int32_t mark_index;       
+    int32_t mark_count;       
 } VisionResult_t;
 
-/* ---- 新协议 API ---- */
+/* ---- New protocol API ---- */
 
 void Vision_Init(void);
 
-/* 启动 Process (非阻塞)，状态变为 VISION_BUSY */
-void Vision_Start(VisionCmd_t cmd);
+/* P0 startup handshake: send p0, wait for rdy. Returns false on timeout. */
+bool Vision_Handshake(uint32_t timeout_ms);
 
-/* 发送 "go" (主机停稳/移动完成后调用)，状态变为 VISION_BUSY */
+/* Start Process (non-blocking), state becomes VISION_BUSY */
+/* class_id: component class for P1 (0~3), ignored for P2/P3 */
+void Vision_Start(VisionCmd_t cmd, int class_id);
+
+/* Send "go" (after host stops/moves), state becomes VISION_BUSY */
 void Vision_Go(void);
 
-/* 查询当前状态 */
+/* P1 category reply: send cls + N:{id} + end (task context only) */
+void Vision_ClsReply(void);
+
+/* Query current state */
 VisionState_t Vision_GetState(void);
 
-/* 获取结果 (VISION_DONE / VISION_GOT_POS 时有效) */
+/* Get result (valid when VISION_DONE / VISION_GOT_POS) */
 const VisionResult_t* Vision_GetResult(void);
 
-/* 获取错误码字符串 (VISION_ERROR 时有效) */
+/* Get error code string (valid when VISION_ERROR) */
 const char* Vision_GetError(void);
 
-/* UART 回调：逐字节喂入 (由 driver_uart ISR 路径调用，内部不做阻塞操作) */
+/* Convert P1 class ID to string */
+const char* Vision_ClassName(int class_id);
+
+/* UART callback: feed bytes (ISR path, no blocking ops) */
 void CamUart_RecvCallback(uint8_t *data, int len);
-
-
-/* ================================================================
- *  旧协议类型 (保留以兼容 app_host.h / app_host.c)
- *  Host_Task 集成完成后可移除
- * ================================================================ */
-
-typedef enum {
-    CAM_NONE = 0,
-    CAM_PROC1_OK,
-    CAM_PROC1_ERR,
-    CAM_PROC2_OK,
-    CAM_PROC2_ERR,
-    CAM_PROC3_OK,
-    CAM_PROC3_ERR,
-} CamResult_t;
-
-typedef struct {
-    CamResult_t result;
-    int32_t x_offset;
-    int32_t y_offset;
-    int32_t comp_info;
-    int32_t mark1_x, mark1_y;
-    int32_t mark2_x, mark2_y;
-} CamData_t;
-
-typedef enum {
-    CAM_CMD_PROC1,
-    CAM_CMD_PROC2,
-    CAM_CMD_PROC3,
-} CamCmd_t;
-
-/* 旧 API 包装 (映射到新 API，逐步废弃) */
-void Vision_SendCmd(CamCmd_t cmd);
 
 #endif

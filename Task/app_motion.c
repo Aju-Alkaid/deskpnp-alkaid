@@ -202,6 +202,9 @@ static int32_t speed_to_vactual(float speed_rpm, uint8_t dir) {
 /* ---- R 轴当前角度 (供外部读写) ---- */
 static float g_cur_r_angle = 0.0f;
 
+void r_axis_set_zero(void) {
+    g_cur_r_angle = 0.0f;
+}
 void r_axis_rotate(float angle, float speed_rpm) {
     float delta = angle - g_cur_r_angle;
     if (delta < -180.0f) delta += 360.0f;
