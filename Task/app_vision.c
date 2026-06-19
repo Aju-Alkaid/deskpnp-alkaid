@@ -98,6 +98,10 @@ static int32_t       g_tmp_dx       = 0;
 static int32_t       g_tmp_dy       = 0;
 static int32_t       g_tmp_cls      = 0;
 
+/* ---- 超时保护 ---- */
+#define VISION_TIMEOUT_MS   30000
+static uint32_t g_vision_start_tick = 0;
+
 /* ---- 结果与错误 ---- */
 static VisionResult_t g_result;
 static char           g_error_code[8];
@@ -573,6 +577,7 @@ bool Vision_Handshake(uint32_t timeout_ms) {
 
 void Vision_Start(VisionCmd_t cmd, int class_id) {
     reset_all();
+    g_vision_start_tick = osKernelGetTickCount();
     g_active_cmd = cmd;
 
     switch (cmd) {
@@ -722,4 +727,13 @@ void CamUart_RecvCallback(uint8_t *data, int len) {
     for (int i = 0; i < len; i++) {
         feed_byte(data[i]);
     }
+}
+
+bool Vision_IsTimedOut(void) {
+    return (osKernelGetTickCount() - g_vision_start_tick) >= pdMS_TO_TICKS(VISION_TIMEOUT_MS);
+}
+
+void Vision_ForceIdle(void) {
+    PrintDebug("[VISION] Force idle due to timeout\r\n");
+    reset_all();
 }

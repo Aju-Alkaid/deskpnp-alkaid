@@ -1,4 +1,4 @@
-# PnP 贴片机嵌入式固件 — 项目说明书
+﻿# PnP 贴片机嵌入式固件 — 项目说明书
 
 > **文件编辑规则（AI Agent 必读）**
 > 
@@ -24,9 +24,11 @@
 > 多次替换在同一个 node -e 内串联 replaceAll。
 > 匹配失败 node 输出 NOT FOUND，不破坏文件。
 > 
-> **手动使用：** 编辑 `tools\_replace.ps1` 中的 `$TARGET_FILE` / `$OLD_TEXT` / `$NEW_TEXT`，
+> **手动使用（推荐）：** 编辑 `tools\_replace.ps1` 中的 `$TARGET_FILE` / `$OLD_TEXT` / `$NEW_TEXT`，
 > 然后 `powershell -ExecutionPolicy Bypass -File .\tools\_replace.ps1` 运行。
 > 多行文本直接粘贴在 `@'...'@` 之间，无需转义。
+> 
+> **v2 特性：** `-DryRun` 预览模式 | 4 种 CRLF/LF 自动回退匹配 | 失败时输出诊断（搜索文本首行 + 文件偏移）
 
 
 ## 一、项目概览
@@ -120,17 +122,21 @@ pnp_1/
   - `MOVE_*_START <速度mm/s>` — 连续移动开始（1~50），第二次点击自动发 `MOVE_STOP`
   - `MOVE_STOP` — 停止连续移动
   - `MOVE_TO <x> <y>` — 运动至绝对坐标 (mm)
-  - `SET_ORIGIN` — 当前位置设为零点
+  - `SET_ORIGIN` — 当前位置设为零点（HOST_HOME 状态下触发进入 HOST_DEBUG）
   - `SET_SERVO <角度>` — Z 轴舵机 (0~180°)
   - `SET_R_AXIS <角度>` — R 轴旋转 (0~360°)
   - `PUMP_ON` — 开启气泵
   - `PUMP_OFF` — 关闭气泵 + 电磁阀吹气 1s 后关阀
-  - `EXIT_DEBUG_MODE` — 退出调试模式
+  - HEAT_ON / HEAT_OFF — 加热台启动/停止
+  - EXIT_DEBUG_MODE — 退出调试模式
+  - RESUME — 从 WAIT_REFILL / ERROR 恢复
+  - ABORT — 中止当前 PnP 流程，回 HOST_DEBUG
+  - **标定命令：** SET_SCATTER_AREA / SET_SCATTER_SIZE <mm> / SET_PCB_AREA_MIN / SET_PCB_AREA_MAX / SET_BOTTOM_CAM / SET_Z_SAFE / SET_Z_PICK / SET_Z_PLACE / SET_R_ZERO / SAVE_CALIB
 - **文件下载流程：**
   1. G4 发送 `DOWNLOAD_READY\n` 给上位机
   2. 上位机逐行发送 CSV 数据（每行以 `\n` 结尾）
   3. 首行作为表头解析（识别 X/Y/Rotation/SMD 列）
-  4. 300ms 超时无新行 → 下载完成，自动进入 Mark 点对齐流程
+  4. 500ms 超时无新行 → 下载完成，自动进入 Mark 点对齐流程
   5. CSV 格式：`ID,Name,X(mm),Y(mm),Rotation(deg),SMD`
 - **无校验：** 纯文本协议，依赖 UART 硬件可靠性
 
@@ -329,8 +335,8 @@ pnp_1/
 - `evtAxesDone` 事件组 — CAN_Process_Task 通知到位
 - `keyEventQueue` (16深) — Key_Task → KeyController → TouchGFX 按键事件
 - `dataTransferQueue` (16深) — 主系统 Task → Model::processQueue() → UI 数据同步
-- `vsync_queue` (1深) — TIM7 ISR → TouchGFX 渲染循环
-- `frame_buffer_sem` — TouchGFX 帧缓冲互斥锁
+- `vsync_queue` (1深) — TouchGFX 内部 (OSWrappers.cpp)，TIM7 ISR → 渲染循环
+- `frame_buffer_sem` — TouchGFX 内部 (OSWrappers.cpp)，帧缓冲互斥锁
 - `semX1Done/semX2Done/semYDone` 信号量 — 已废弃，统一使用 evtAxesDone 事件组（见 §9.6-5）
 - `heater_rx_queue` (10深度) — CAN ISR → Heater_ProcessStatus()，加热台状态帧专用队列
 
@@ -398,21 +404,22 @@ pnp_1/
 4. **`motor_send_move_cmd` 函数体冗余：** 该函数的 buffer 填充逻辑与 `positionMode3Run` 重复，实际调用也是转发到后者。建议移除冗余逻辑或直接废弃此函数。
 
 ### 9.3 功能性问题（部分已解决）
+5. **离散移动命令去重 BUG（已修复，见 §21.1）：** `handle_debug_cmd` 的去重逻辑原先对所有命令生效，导致同方向同步长的离散移动（MOVE_UP/DOWN/LEFT/RIGHT）只能执行一次。已收窄为仅对 JOG START 命令去重。
 5. **正式运动任务（已解决，见 §9.8）：** `PnP_Motion_Task` 已由 `Host_Task` 取代，`Host_Task` 统一处理调试命令和 PnP 流程。
 6. **MOTION_CMD_PICK/PLACE 缺少 XY 移动到吸嘴/贴装位置：** `pick_component()` 和 `place_component()` 直接操作 Z 轴舵机，但调用前需要上层先发送 `MOTION_CMD_MOVE_TO` 到达目标位置。
 7. **连续移动（已解决，见 §9.8）：** `Host_Task` 的 `handle_debug_cmd` 已实现完整的 JOG 控制（同步模式+positionMode3Run+motorSyncTrigger）。
-8. **R 轴控制：** `r_axis_rotate` 通过 `TMC_SetSpeed`（VACTUAL 寄存器）直接驱动 TMC2209（UART3），已对接。R 轴使用「使能→旋转→关闭」模式，`TMC_Init()` 初始化后驱动默认关闭，`r_axis_rotate` 内部自动使能/关闭。详见 §16.7。
+8. **R 轴控制：** `r_axis_rotate` 通过 `TMC_SetSpeed`（VACTUAL 寄存器）直接驱动 TMC2209（UART3），已对接。R 轴使用「使能→旋转→关闭」模式，`TMC_Init()` 初始化后驱动默认关闭，`r_axis_rotate` 内部自动使能/关闭。P1/P3 阶段已加入两步闭环角度矫正（详见 §9.16）。详见 §16.7。
 9. **LPUART1 未配置 DMA 接收：** `hdmarx = NULL`，仅用作 TMC2209 半双工阻塞通信。如果该通道用于其他用途需重新配置。
 ### 9.4 代码质量
 10. **`driver_motor.c runFail/runOK` 死循环：** 两个函数都是 `while(1){}` 空循环，无实际错误处理逻辑。
-11. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`CAN_ID`、`realTimeLocation` 等，部分来自早期代码残留。`can_rx_queue` 已删除。
+11. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`realTimeLocation` 等，部分来自早期代码残留。注意：`CAN_ID` 在 `canCRC_ATM()` 中有实际使用（CRC 计算），`can_rx_queue` 已删除。
 12. **`app_test.h` 与 `app_motion.h` 重复声明（已修复，见 §9.6-5）：** 重复的 `semX1Done`、`evtAxesDone` 等 extern 声明已从 `app_test.h` 移除。
 ### 9.5 编译与构建
 14. **Keil MDK 工程：** 主要使用 MDK-ARM 目录下的 Keil 工程编译。CMakeLists.txt 也可用于构建。
 15. **`overflow_count` 唯一声明在 `timestamp.c`：** `timestamp.h` 有 `extern volatile`，`main.c` 通过包含 `timestamp.h` 使用，不得在 main.c 中重复定义。
 
 ### 9.6 已完成的架构改进（2026-05）
-1. **已创建 `host_pkt_queue`：** 16 深度 `HostMsg_t` 队列，UART 空闲中断回调 → 队列 → Host_Task。修复了原先队列未创建导致 NULL 写入的运行时 Bug。
+1. **已创建 `host_pkt_queue`：** 64 深度 `HostMsg_t` 队列，UART 空闲中断回调 → 队列 → Host_Task。修复了原先队列未创建导致 NULL 写入的运行时 Bug。
 2. **已添加 `g_debug_mutex` + `DEBUG_CAN_ISR` 条件编译：** 互斥锁保护任务上下文 `PrintDebug` 的静态 `s_debug_buf`，解决多任务并发日志交错。ISR 中 PrintDebug 由 `DEBUG_CAN_ISR` 宏控制（默认关闭），彻底消除 ISR 阻塞 UART 问题。
 3. **`StartHostMotionTestTask` 已改为事件驱动：** 原主循环 `vTaskDelay(10ms)` 轮询改为 `osThreadFlagsWait` 阻塞等待。UART 空闲中断通过 `osThreadFlagsSet(hostMotionTaskHandle, ...)` 唤醒任务，延迟从 ≤10ms 降至 <1ms。
 4. **`Key_Task` 已改用 `osDelayUntil`：** 原 `osDelay(10)` 改为 `osDelayUntil`，消除任务执行时间导致的周期漂移，保证精确 10ms 扫描间隔。
@@ -465,6 +472,78 @@ if (pkt.ID == HEATER_STATUS_ID && heater_rx_queue != NULL) {
 | `driver_heater.c` | 新增 Heater_Transmit 原生发送 + 全部命令函数重写 + ProcessStatus 修复 + print_temp 辅助函数 + 死代码移除 |
 | `driver_can.c` | 加热台 ID=0x05 路由 + DataLength 赋值 |
 | `AGENTS.md` | §4.4 新增加热台协议文档 + 硬件表/目录结构/任务通信/数据结构表更新 |
+
+
+### 9.9 TMC2209
+### 9.16 R 轴两步闭环角度矫正 + Host_Task 坐标映射修正（2026-06-19）
+
+**背景：** 原先 Host_Task 和 StartCamTestTask 中 R 轴角度矫正逻辑存在两个问题：（1）P1 检测到的元件角度未被用于矫正，仅打印日志；（2）P3 残余角度也未做二次精修。此外 Host_Task 的三个视觉 step 函数使用直接坐标映射（dx→X, dy→Y），与 cam_test_run 中已验证的摄像头→电机轴映射（cam Y→X1+X2, cam X→Y 电机）不一致。
+
+#### R 轴两步闭环矫正流程
+
+```
+P1 检测角度 → [矫正1: r_axis_rotate(p1_angle)] → 吸取 → 移至下相机
+  → P3 验证 → [矫正2: 若 |residual| > 阈值 → r_axis_rotate(residual)]
+  → 贴装/释放
+```
+
+**设计要点：**
+- 矫正 1（P1 后）：摄像头检测到元件偏角后**立即**旋转补偿，而非等到贴装前一次性旋转。补偿后吸取，确保元件以零偏角吸附在吸嘴上。
+- 矫正 2（P3 后）：下相机验证矫正结果。若仍有残余偏角（机械公差、吸取偏移导致），执行二次精修。
+- 两次矫正使用相同的阈值 `R_CORRECTION_THRESHOLD_DEG`（0.1°）和转速 `R_SPEED_RPM`（60 RPM）。
+
+#### host_correct_r_from_vision 辅助函数
+
+Host_Task 中提取了公共辅助函数（[app_host.c](E:/Desktop/qiansai/pnp_1/Task/app_host.c:782)），消除 find_comp_step 和 offset_check_step 中的重复代码：
+
+```c
+static bool host_correct_r_from_vision(const VisionResult_t *r, const char *stage) {
+    if (!r || !r->angle_valid) return false;          // 空指针 + 有效性守卫
+    float ang = (float)r->angle_x100 / 100.0f;
+    if (fabsf(ang) <= R_CORRECTION_THRESHOLD_DEG) return false;  // 低于阈值跳过
+    PrintDebug("[HOST] %s: R correction %.2f deg\r\n", stage, (double)ang);
+    r_axis_rotate(ang, R_SPEED_RPM);
+    return true;
+}
+```
+
+调用点：
+- `find_comp_step` VISION_DONE → `host_correct_r_from_vision(r, "P1")` → HOST_PICK
+- `offset_check_step` VISION_DONE → `host_correct_r_from_vision(r, "P3")` → HOST_MOVE_TO_PCB
+
+#### Host_Task 坐标映射修正
+
+三处视觉 step 函数的坐标映射均已修正为与 cam_test_run 一致的摄像头→电机轴映射（§9.14）：
+
+| 函数 | 进程 | 修正前 | 修正后 |
+|------|------|--------|--------|
+| `find_comp_step` | P1 | `dx_s = r->dx * coeff` | `dx_s = -(r->dy * coeff)` — cam Y→X1+X2, 取反 |
+| | | `dy_s = r->dy * coeff` | `dy_s = -(r->dx * coeff)` — cam X→Y 电机, 取反 |
+| `mark_align_step` | P2 | `dx_s = r->dx / 10000 * steps` | `dx_s = -(r->dy / 10000 * steps)` |
+| | | `dy_s = r->dy / 10000 * steps` | `dy_s = -(r->dx / 10000 * steps)` |
+| `offset_check_step` | P3 | `dx_s = r->dx * 0.1f` | `dx_s = (r->dy * 0.1f)` — cam Y→X1+X2, 不取反 |
+| | | `dy_s = r->dy * 0.1f` | `dy_s = -(r->dx * 0.1f)` — cam X→Y 电机, 取反 |
+
+#### 共享常量治理
+
+| 常量 | 定义位置 | 说明 |
+|------|----------|------|
+| `R_CORRECTION_THRESHOLD_DEG` (0.1f) | `app_config.h` | 新增。R 轴矫正最小角度阈值，host + test 共用 |
+| `R_SPEED_RPM` (60.0f) | `app_config.h` | 从 `app_host.h` 迁移。R 轴矫正/贴装转速，host + test 共用 |
+
+#### StartCamTestTask 测试流程更新
+
+初始化流程对齐 Host_Task（DRV8803→舵机上电→Valve_Off→TMC→Calib_Load→舵机安全角→CAN→Motor→Vision→P0握手）。
+测试流程激活完整闭环：P1 检测 → R 矫正1 → pick_component 吸取 → 移至下相机 → P3 验证 → R 矫正2 → 释放 → P2 Mark 建系。
+
+#### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `app_config.h` | 新增 `R_CORRECTION_THRESHOLD_DEG`；移入 `R_SPEED_RPM` |
+| `app_host.h` | 移除 `R_SPEED_RPM`（已迁至 app_config.h） |
+| `app_host.c` | 新增 `host_correct_r_from_vision` 辅助函数；find_comp_step/offset_check_step VISION_DONE 调用辅助函数；find_comp_step/mark_align_step/offset_check_step VISION_GOT_POS 坐标映射修正 |
+| `app_test.c` | StartCamTestTask 初始化流程对齐；P1/P2/P3 测试流程激活；R 轴两步矫正逻辑；硬编码 0.1f/60.0f 替换为命名常量；cam_test_run 移动调用改为 safe_move_to |
 
 
 ### 9.9 TMC2209 使能/关闭设计（2026-06-11~12）
@@ -731,6 +810,7 @@ osEventFlagsClear → 发 CAN 命令 → while(真实时钟未超时) {
 |------|------|
 | app_test.c | move_xy_relative：队列轮询→事件组 osEventFlagsGet + 真实时钟 + 文档注释 |
 | app_test.c | cam_test_run P1/P2：两轴取反；P3：r->dx 取反（dy_s 为负），r->dy 不取反（dx_s 为正），因下相机镜头朝上 |
+| app_host.c | find_comp_step / mark_align_step / offset_check_step 同步修正为相同轴映射（§9.16） |
 | app_test.c | 新增 `#define DEBUG_MOVE` / `#define DEBUG_CAN_PROC` 诊断开关 |
 | app_motion.c | CAN_Process_Task：到位帧日志加 `#ifdef DEBUG_CAN_PROC` 保护 |
 
@@ -957,6 +1037,11 @@ MKS SERVO42D 同步模式流程：
 
 ### 11.7 disable_sync_stop 函数设计
 
+> **【2026-06-20 校正】** 以下内容描述的是早期"同步模式"设计。当前实际代码已迁移至 `Task/app_motion.c`，
+> 且 `Motor_Init()` 调用 `motorSyncEnable(0)` 关闭了同步模式，三轴独立执行。
+> `disable_sync_stop` 当前实现仅依次调用 `axis_stop(X1/X2/Y)` + `osDelay(5)`，无需 `motorSyncTrigger`。
+> 详见 §23.1。
+
 最终版本（`Task/app_test.c` 第 523-533 行）：
 ```c
 static void disable_sync_stop(void) {
@@ -976,6 +1061,10 @@ static void disable_sync_stop(void) {
 2. 二版：去掉同步切换，纯缓存+触发。问题：触发后同步状态丢失，下次单步 X1/X2 直接执行不走同步
 3. **终版**：缓存急停 + 触发 + 恢复同步。兼顾可靠停止与状态一致性
 ### 11.8 move_xy_relative 当前实现（2026-05 最终版）
+
+> **【2026-06-20 校正】** 以下内容描述的是早期"同步模式"设计。当前实际代码已迁移至 `Task/app_motion.c`，
+> 且不再调用 `motorSyncEnable(1)` / `motorSyncTrigger(0)`。`Motor_Init()` 关闭同步模式后，
+> `positionMode3Run` 通过 `CAN_Transmit_Data` 直接发送，各轴独立执行。详见 §23.1。
 
 （`Task/app_test.c` move_xy_relative 函数）
 
@@ -1895,4 +1984,342 @@ CSV 格式从逗号分隔动态列升级为**制表符 `\t` 分隔 15 固定列*
 ### 20.15 视觉角度未使用（已知待办）
 
 P1/P3 视觉检测的 `angle_x100` 在 `Host_Task` 的 `find_comp_step`/`offset_check_step` 中 `VISION_DONE` 时未被保存。`HOST_PLACE` 的 `r_axis_rotate` 仅使用 CSV 原始 `target_angle`。需在 `Component_t` 增加 `vision_angle_offset` 字段，在 P1/P3 完成时累加，在 PLACE 时合成最终 R 轴旋转角。此逻辑已在 `StartCamTestTask` 中验证完毕，待并入 `Host_Task`。
+
+## 二十一、2026-06-19 会话更新 — 电机去重BUG修复 + 替换工具升级
+
+### 22.1 handle_debug_cmd 去重范围收窄
+
+**问题：** `handle_debug_cmd` 的去重逻辑 `if (cmd->cmd == g_last_cmd && cmd->param == g_last_param)` 对所有命令生效。离散移动命令（`MOVE_UP/DOWN/LEFT/RIGHT`）执行一次后，`g_last_cmd` 和 `g_last_param` 被设置为该命令，后续相同命令被静默丢弃，导致「每个方向只能动一次」。
+
+**根因：** `g_last_cmd`/`g_last_param` 是 static 变量，仅在收到不同命令时才会被覆盖。同方向同步长连续发送时永远命中去重条件。
+
+**修复（[`Task/app_host.c`](Task/app_host.c:256)）：** 去重条件改为仅对 JOG 连续移动的 START 命令生效：
+
+```c
+// 改前
+if (cmd->cmd == g_last_cmd && cmd->param == g_last_param) {
+    return;
+}
+
+// 改后
+if ((cmd->cmd == HCMD_MOVE_UP_START   || cmd->cmd == HCMD_MOVE_DOWN_START ||
+     cmd->cmd == HCMD_MOVE_LEFT_START || cmd->cmd == HCMD_MOVE_RIGHT_START) &&
+    cmd->cmd == g_last_cmd && cmd->param == g_last_param) {
+    return;
+}
+```
+
+**效果：**
+- 离散移动 `MOVE_UP/DOWN/LEFT/RIGHT` — 每次点击都执行
+- 连续 JOG `MOVE_*_START` — 同方向同速度双击防抖保留
+- `MOVE_STOP` 或换方向自动复位去重状态
+
+### 22.2 tools/_replace.ps1 升级到 v2
+
+**原问题：**
+1. `@'...'@` here-string 的换行符取决于 `.ps1` 文件自身格式，与目标文件 CRLF/LF 不一致时匹配失败
+2. node 脚本内嵌在 `@"..."@` 中，`\"` 链条过长时 PowerShell 解析报错
+3. 失败时仅输出 `NOT FOUND`，无诊断信息
+
+**v2 改进：**
+
+| 改进项 | 说明 |
+|--------|------|
+| 4 种 CRLF/LF 回退 | 精确→双 LF→old LF+file CRLF→old CRLF，自动适配 |
+| 临时文件执行 | node 脚本写入临时 `.js` 文件再执行，消除转义问题 |
+| `-DryRun` 开关 | 预览替换而不写入文件 |
+| 失败诊断 | NOT FOUND 时显示搜索文本前 80 字符 + 首行在文件中的位置 |
+| `.Replace()` 替代 `-replace` | 避免正则转义（路径中的 `\`） |
+
+**用法不变：** 编辑顶部三个变量 → 运行 `powershell -ExecutionPolicy Bypass -File .\tools\_replace.ps1`（加 `-DryRun` 预览）。
+
+**涉及文件：**
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_host.c` | `handle_debug_cmd` 去重条件收窄为仅 JOG START |
+| `tools/_replace.ps1` | 引擎重写：CRLF 回退 + 临时文件 + DryRun + 诊断 |
+
+
+---
+
+## 二十二、2026-06-19 会话更新 — PnP 流程完善与 Bug 修复
+
+本次会话基于 [框架及后续修改.md](E:/Desktop/qiansai/框架及后续修改.md) 的方案，完成以下改造：
+
+### 22.1 Z 轴角度修正
+
+- **安全高度 / P3 检测高度：** 75°（原 120°）
+- **吸取高度 / 贴装高度：** 110°（原 60° / 55°）
+- 修改位置：pp_motion.c 的 ANGLE_UP/ANGLE_DOWN 宏，pp_config.h 的 CALIB_DEFAULT_Z_* 宏
+- 注意：角度越大吸嘴越低（与早期代码方向相反）
+
+### 22.2 安全运动封装
+
+- 新增 safe_move_to(target_x, target_y, speed, acc, cur_x, cur_y) — 所有 XY 运动统一入口，内部先调 z_safe() 抬 Z 到安全高度
+- 新增 z_safe() / z_pick() / z_place() — 使用 g_calib 标定值的三高度函数
+- pick_component() / place_component() 改用 z_pick()/z_place() 替代 z_down()，用 z_safe() 替代 z_up()
+- pp_host.c 中 10 处 move_xy_relative 调用全部替换为 safe_move_to
+- 新增全局 olatile bool g_motor_error，safe_move_to 检测到返回 -2（限位/堵转）时置位
+
+### 22.3 状态机扩充
+
+HostState_t 新增 4 个状态，流程变更为：
+`
+HOST_HOME → (SET_ORIGIN) → HOST_DEBUG → (CSV下载) → HOST_DOWNLOADING
+  → HOST_MARK_ALIGN (P2) → HOST_FIND_COMP (P1) → HOST_PICK
+  → HOST_MOVE_TO_BOTTOM_CAM → HOST_OFFSET_CHECK (P3)
+  → HOST_MOVE_TO_PCB (旋转补偿+移动) → HOST_PLACE
+  → 循环至 HOST_DONE → (回零点) → HOST_DEBUG
+  ⇡ HOST_WAIT_REFILL (RESUME恢复)  ⇡ HOST_ERROR (自动恢复)
+`
+
+| 状态 | 说明 |
+|------|------|
+| HOST_HOME | 上电等待 SET_ORIGIN，收到后自动发 DEBUG_MODE 并进入 HOST_DEBUG |
+| HOST_MOVE_TO_BOTTOM_CAM | 吸取完成后移动到下相机站，复位 g_p3_offset |
+| HOST_MOVE_TO_PCB | 旋转补偿 + PCB 原点平移 + P3 偏移 → R 轴旋转 → XY 移动到贴装位 |
+| HOST_WAIT_REFILL | 连续 3 个元件 P1 失败，发 REFILL_NEEDED，等待上位机 RESUME |
+
+### 22.4 P2 引导式扫描 + 建系 + 旋转补偿
+
+**网格扫描（Mark0）：**
+- download_done 中根据 g_calib.pcb_area_min/max 计算扫描网格（步长 9mm ≈ 29491 步）
+- 蛇形扫描：偶数行左→右，奇数行右→左，减少空行程
+- 每格位超时 ~3s（P2_SCAN_TIMEOUT=300），超时后 Vision_Start+Go 重发搜索
+- PCB 区域未标定（全 0）时退化为当前位置单点扫描
+- 网格耗尽未找到 → HOST_ERROR
+
+**跳转（Mark1/Mark2）：**
+- Mark0 对齐完成后，从 g_marks_actual[prev] + CSV 理论间距跳转到下一 Mark 预估位置
+- 跳转后相机搜索超时 → HOST_ERROR（防止挂死）
+- g_mark_just_jumped 标志防止同一 Mark 的二次 VISION_GOT_STOP 触发冗余跳转
+
+**建系（VISION_DONE）：**
+- 用 Mark1+Mark2 实际位置和 CSV 理论坐标计算 	heta = atan2f(actual) - atan2f(theory)
+- PCB 原点 = 实际中点 − 旋转后的理论中点
+- Mark3 验证：预期位置 vs 实际位置误差 < 0.3mm 则 g_pcb_frame.valid = true
+- Mark 理论坐标来自 CSV 中 SMD="MARK" 行的 Mid X/Y，无需硬编码
+
+**旋转补偿（HOST_MOVE_TO_PCB）：**
+`c
+machine_x = rotate(csv_x, theta) + pcb_origin_x + p3_offset_x
+machine_y = rotate(csv_y, theta) + pcb_origin_y + p3_offset_y
+`
+- g_pcb_frame.valid=false 时 fallback 到 Mark 平均偏移（无旋转）
+
+### 22.5 散料区四等分 + 子位扫描
+
+- SCATTER_CELLS=4 个单元格（左上/右上/左下/右下），中心偏移 ±size/4
+- 每格 SCATTER_SUBPOS=5 个子扫描位（中心+四角），偏移 ±size/8
+- scatter_init_cells() 预计算 g_scatter_subpos[4][5][2]
+- component_cell() 通过 ootprint_to_class_id() 映射元件→单元格
+- P1 err1_5（未找到）时依次尝试 5 个子位，全部失败后才计为连续失败
+- scatter_size_steps=0（未标定）时全部退化为散料区中心
+
+### 22.6 P3 偏移累积
+
+- offset_check_step 每次 VISION_GOT_POS 移动后将 dx_s/dy_s 累加到 g_p3_offset_x/y
+- HOST_MOVE_TO_BOTTOM_CAM 进入时复位（每个元件独立）
+- HOST_MOVE_TO_PCB 的旋转补偿公式中叠加 P3 偏移
+- 新增 VISION_GOT_ERR_RETRY 处理（err3_3 可恢复错误 → Vision_Go() 重试）
+
+### 22.7 电机错误检测
+
+- CAN_Process_Task 收到状态 0x03 时设 EVENT_ANY_ERROR
+- safe_move_to 检测 move_xy_relative 返回 -2 时置 g_motor_error = true
+- 主循环每轮结束后检测 g_motor_error，非 HOST_DEBUG/HOST_HOME 状态自动 z_safe() + HOST_ERROR
+
+### 22.8 新增上位机命令
+
+| 命令 | 说明 |
+|------|------|
+| RESUME | 从 HOST_WAIT_REFILL / HOST_ERROR 恢复，重试当前元件 |
+| ABORT | 中止当前 PnP 流程（≥DOWNLOADING），回 HOST_DEBUG |
+
+### 22.9 Bug 修复汇总
+
+| Bug | 修复 |
+|-----|------|
+| Mark1/Mark2 二次 VISION_GOT_STOP 触发冗余跳转 | g_mark_just_jumped 标志，首次跳转后置位，二次跳过 |
+| 跳转后相机找不到 Mark 永久挂起 | VISION_BUSY 通用超时：扫描超时→下一格，跳转超时→HOST_ERROR |
+| P3 err3_3 导致挂死 | offset_check_step 新增 VISION_GOT_ERR_RETRY case |
+| g_mark_just_jumped 跨下载残留 | download_done marks 路径显式清零 |
+| g_pcb_frame / g_mark_avg / g_consecutive_failures 跨下载残留 | download_done 开头统一 memset + 清零 |
+| HOST_ERROR 未确保 Z 轴安全 | HOST_ERROR 开头加 z_safe() |
+| HOST_DONE 缺少回零点 | safe_move_to(0, 0) 回到机器零点 |
+
+### 22.10 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| Task/app_host.h | +MarkPoint_t, PCBFrame_t, ScatterCell_t, SCATTER_CELLS/SUBPOS; +HOST_HOME/Wait_REFILL/MOVE_TO_* 状态枚举; +extern g_pcb_frame |
+| Task/app_host.c | +safe_move_to 全面替换; +P2 扫描+跳转+建系+旋转补偿; +散料区子位扫描; +P3 偏移累积; +电机错误检测; +RESUME/ABORT; +download_done 状态复位; +Mark 坐标从 CSV 读取; +scatter_init_cells; +component_cell |
+| Task/app_motion.h | +safe_move_to, z_safe/pick/place, g_motor_error 声明 |
+| Task/app_motion.c | +z_safe/pick/place/safe_move_to 实现; +g_motor_error; pick/place_component 改用三高度 |
+| Task/app_uart_parser.h | +HCMD_RESUME, HCMD_ABORT |
+| Task/app_uart_parser.c | +RESUME, ABORT 命令解析 |
+| Task/app_config.h | CALIB_DEFAULT_Z_SAFE 120→75, Z_PICK 60→110, Z_PLACE 55→110 |
+| AGENTS.md | §4.1 命令列表更新; §5 任务描述更新; §7 数据结构表扩充; 新增 §21 |
+
+### 22.11 视觉状态覆盖矩阵
+
+三个 step 函数对所有 VisionState_t 的处理覆盖：
+
+| VisionState | mark_align_step | find_comp_step | offset_check_step |
+|-------------|:---:|:---:|:---:|
+| VISION_BUSY | 超时→扫描/跳转超时→ERROR | — | — |
+| VISION_GOT_CATEGORY_QUERY | — | Vision_ClsReply() | — |
+| VISION_GOT_STOP | 条件跳转+Vision_Go() | 清扫描位+Vision_Go() | — |
+| VISION_GOT_POS | 移动+记录实际坐标 | 移动+Vision_Go() | 移动+累加偏移 |
+| VISION_GOT_ERR_RETRY | — | — | Vision_Go() 重试 |
+| VISION_DONE | 建系+Mark3验证 | R矫正→HOST_PICK | R矫正→HOST_MOVE_TO_PCB |
+| VISION_ERROR | →HOST_ERROR | 分级处理(重试/子位扫描/跳过/WAIT_REFILL) | →HOST_MOVE_TO_PCB(容错) |
+
+
+
+## 二十三、2026-06-20 会话 — PnP 架构完善与代码治理
+
+### 23.1 代码归位（第一层地基）
+
+将核心运动函数从测试文件迁移到正式模块：
+
+| 函数 | 迁移前 | 迁移后 |
+|------|--------|--------|
+| `move_xy_relative` | `Task/app_test.c` | `Task/app_motion.c` |
+| `axis_stop` | `Task/app_test.c` | `Task/app_motion.c` |
+| `disable_sync_stop` | `Task/app_test.c` | `Task/app_motion.c` |
+| `s_cmd_interrupted` | `Task/app_test.c` | `Task/app_motion.c` |
+
+`app_test.h` 改为 `#include "app_motion.h"` 透传引用。
+
+**重要发现**：`Motor_Init()` 调用 `motorSyncEnable(0)` 关闭了同步模式。三轴独立执行，每个 `positionMode3Run` 直接通过 `CAN_Transmit_Data` 发送，无需 `motorSyncTrigger`。`disable_sync_stop` 的三个 `axis_stop` 各自立即生效，函数名中的 "sync" 易误解但功能正确。§11.7/§11.8 的旧分析基于"同步模式开启"假设，与实际代码不符。修正后的注释已写入 `app_motion.c`。
+
+### 23.2 视觉超时保护（第二层）
+
+`app_vision.h/c` 新增：
+- `Vision_IsTimedOut()` — 30s 超时检测
+- `Vision_ForceIdle()` — 强制复位视觉状态机
+
+三级降级策略：
+| 进程 | 超时行为 |
+|------|----------|
+| P2 | → HOST_ERROR（Mark 建系不可跳过） |
+| P1 | 子位扫描 → 跳过当前元件 → 连续 3 次失败进 WAIT_REFILL |
+| P3 | → HOST_MOVE_TO_PCB（容错跳过，贴装优先于卡死） |
+
+### 23.3 吸取确认（第二层）
+
+`pick_component()` 返回值改为 `bool`，内部增加真空检测分支。`void vacuum_ok(void)` 用 `__weak` 占位（当前始终返回 true），后续接入 GPIO/ADC 传感器时覆盖即可，不修改调用侧。
+
+HOST_PICK 状态：吸取失败 → 重启 P1 视觉搜索，不浪费 P3 周期。
+
+### 23.4 ABORT 增强（第二层）
+
+增强 `handle_debug_cmd` 中 `HCMD_ABORT` 处理：
+- 停止 JOG（若激活）
+- `disable_sync_stop()` 急停三轴
+- 关气泵 + 短吹气释放元件
+- Z 轴回安全角
+- `Heater_SendStop()` 停止加热台
+- 回到 HOST_DEBUG
+
+### 23.5 R 轴归零修正（第二层）
+
+**Bug**：`host_correct_r_from_vision` 调用 `r_axis_rotate(ang)` 传入的是视觉检测到的**增量角度**，但 `r_axis_rotate` 是**绝对角度**接口。P3 矫正时 `g_cur_r_angle=5.0`，视觉返回 +0.5° 残差，调用 `r_axis_rotate(0.5)` 导致 nozzle 从 5.0° 倒转 4.5°。
+
+**修复**：`r_axis_rotate` 后调用 `r_axis_set_zero()`，P1/P3 矫正均通过同一辅助函数，一次修改两端生效。
+
+### 23.6 代码债务清理（D1~D5）
+
+| 项 | 文件 | 改动 |
+|----|------|------|
+| D1 | `driver_motor.c` | `runFail` → 设置 `g_motor_error`；`runOK` → 空操作 |
+| D2 | `driver_can.h/c` | 删除 7 个 `CAN1_0x*_Tx_Data` 数组、`CAN_Supercap`、`CAN_RxDone`、`CAN_ID`、`canCRC_ATM` 函数 |
+| D2 | `driver_motor.c` | 删除 `realTimeLocation`、`runSpeed` |
+| D3 | `driver_motor.c` | 删除 `MotorController_t` 结构体、`g_current_*state`、`g_motor_ctrl`、`motor_send_move_cmd` |
+| D4 | — | LPUART1 `hdmarx=NULL` 是 CubeMX 配置，无需代码改动 |
+| D5 | `app_motion.c` | `disable_sync_stop` 注释修正：同步模式描述 → 非同步独立急停 |
+
+### 23.7 电机异常分级（第三层 3.2）
+
+`app_motion.h` 新增 `MotorError_t` 枚举：`MOTOR_OK` / `MOTOR_ERR_TIMEOUT` / `MOTOR_ERR_LIMIT`。
+
+- `move_xy_relative` 在 `return -1` 前记录 `TIMEOUT`，`return -2` 前记录 `LIMIT`
+- `safe_move_to` 收到 -1 时自动重试一次（CAN 丢帧可恢复），两次超时才升级为错误
+- Host_Task 错误日志区分 "Motor TIMEOUT" vs "Motor LIMIT/BLOCK"
+
+### 23.8 分级运动速度（第四层 4.1）
+
+`app_host.c` 新增三级速度：
+
+| 常量 | 值 | 场景 |
+|------|-----|------|
+| `PNP_SPEED_FAST` | 300 | 长距离移动（→下相机/→PCB/→零点） |
+| `PNP_SPEED` | 300 | 通用（网格扫描、散料区定位） |
+| `PNP_SPEED_FINE` | 100 | 视觉迭代微调 |
+| `PNP_ACC_FINE` | 10 | 微调加速度（更平缓） |
+
+3 个视觉微调点 + 4 个长距离移动点已替换对应常量。
+
+### 23.9 加热台联动（第五层 5.3）
+
+新增 `AUTO_HEAT ON/OFF` 命令开关。流程：
+1. `HOST_DONE` 后若 `g_auto_heat=true` → `Heater_SendStart()` → 进入 `HOST_REFLOW`
+2. `HOST_REFLOW` 每 200ms 轮询加热台状态
+3. `COMPLETE/IDLE` → 通知上位机 `REFLOW_DONE` → 回 `HOST_DEBUG`
+4. `HEATER_STATE_ERROR` → `REFLOW_ERROR` → `HOST_ERROR`
+5. ABORT 在任何状态都会 `Heater_SendStop()`
+
+新增 `HOST_REFLOW` 状态枚举值、`HCMD_AUTO_HEAT` 命令解析。
+
+### 23.10 SPI Flash 运行日志（第五层 5.4）
+
+新增 `Task/app_logger.h` 和 `Task/app_logger.c`。
+
+**存储布局**：W25Q64 倒数第二扇区 `0x7FE000`（4KB），8 字节头 + 255 条 × 16 字节。满后整扇区擦除回绕。
+
+**事件码**：
+| 码 | 事件 | 数据 |
+|----|------|------|
+| 0x01 | LOG_PNP_START | comp_count(2B) + mark_count |
+| 0x02 | LOG_PNP_DONE | comp_count(2B) |
+| 0x03 | LOG_PNP_ERROR | error_type + comp_index(2B) |
+| 0x04 | LOG_MOTOR_ERROR | err_detail (1=TIMEOUT, 2=LIMIT) |
+| 0x05 | LOG_HEATER_START | 全 0 |
+| 0x06 | LOG_HEATER_DONE | final_state |
+| 0x07 | LOG_ABORT | 全 0 |
+
+8 个调用点分布在 `app_host.c` 的 `download_done`、`HOST_DONE`、`HOST_ERROR`、电机异常检测、HOST_REFLOW 启动/完成/失败、ABORT。
+
+W25Q64 芯片确认为 `W25Q64JV` 系列。现有驱动 `W25Q64_Read/Write/Erase` 经验证与手册一致（Sector Erase 0x20、4KB 扇区、默认无保护）。日志扇区 `0x7FE000` 不与标定扇区 `0x7FF000` 冲突。
+
+### 23.11 涉及文件
+
+| 文件 | 改动类型 |
+|------|----------|
+| `Task/app_motion.h` | 新增 `MotorError_t`、`g_motor_error_detail`、`axis_stop`/等声明、`pick_component` 改 `bool` |
+| `Task/app_motion.c` | 迁移三个运动函数、`pick_component` 真空逻辑、`safe_move_to` 重试、错误类型记录、`disable_sync_stop` 注释修正 |
+| `Task/app_host.h` | 新增 `HOST_REFLOW` 状态 |
+| `Task/app_host.c` | 视觉超时×3、pick 失败处理、ABORT 增强、R 轴归零、速度分级×7、电机异常日志、加热台联动、Logger 调用×8 |
+| `Task/app_vision.h` | 新增 `Vision_IsTimedOut`/`Vision_ForceIdle` |
+| `Task/app_vision.c` | 超时跟踪 + 两个函数实现 |
+| `Task/app_uart_parser.h` | 新增 `HCMD_AUTO_HEAT` |
+| `Task/app_uart_parser.c` | 解析 `AUTO_HEAT` |
+| `Task/app_test.h` | 运动函数声明替换为 `#include "app_motion.h"` |
+| `Task/app_test.c` | 删除三个运动函数 + `s_cmd_interrupted` |
+| `Task/app_logger.h` | **新增** — 事件码 + 结构体 + API |
+| `Task/app_logger.c` | **新增** — 扇区管理 + Log_Init/Log_Write |
+| `Drivers/ZeMCU-G4/driver_can.h` | 删除 10 行未使用 extern |
+| `Drivers/ZeMCU-G4/driver_can.c` | 删除 8 个数组 + 2 个变量 + `canCRC_ATM` |
+| `Drivers/ZeMCU-G4/driver_motor.c` | `runFail`/`runOK` 修正 + 删除死代码 |
+
+### 23.12 关键设计决策
+
+- **R 轴归零而非相对旋转**：保持 `r_axis_rotate` 绝对角度语义不变，矫正后归零。比新增相对旋转接口更简洁。
+- **真空检测用 `__weak`**：硬件未就绪仍可编译运行，后续只需覆盖一个函数。
+- **视觉超时降级而非统一进 ERROR**：P3 超时仍继续贴装——贴歪比不贴强，且贴装精度由 Mark 建系保证。
+- **电机超时重试一次**：CAN 丢帧是偶发软故障，重试可恢复。限位/堵转不重试。
+- **日志扇区满即擦**：255 条/会话绰绰有余，无需双扇区交替或磨损均衡。
+- **加热台联动为可选**：`AUTO_HEAT OFF` 保持旧行为，不影响现有调试流程。
 

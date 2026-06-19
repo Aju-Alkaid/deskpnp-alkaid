@@ -1,8 +1,9 @@
-﻿#ifndef __APP_MOTION_H
+#ifndef __APP_MOTION_H
 #define __APP_MOTION_H
 
 #include "cmsis_os2.h"
 #include <stdint.h>
+#include <stdbool.h>
 
 #define R_AXIS_ADDR   0x04   // 虚拟地址，用于日志记录和调试，实际 R 轴控制可能复用 X/Y 的某个地址
 
@@ -54,8 +55,31 @@ void nozzle_on(void);
 void nozzle_off(void);
 void z_down(void);
 void z_up(void);
-void pick_component(void);
+void z_safe(void);
+void z_pick(void);
+void z_place(void);
+bool pick_component(void);
 void place_component(void);
+bool vacuum_ok(void);  /* __weak stub, override with GPIO/ADC */
 void r_axis_set_zero(void);
 void r_axis_rotate(float angle, float speed_rpm);
+int  safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc, int32_t *cur_x, int32_t *cur_y);
+
+/* 电机异常分级 */
+typedef enum {
+    MOTOR_OK = 0,
+    MOTOR_ERR_TIMEOUT,   /* 10s 内未到位，可重试 */
+    MOTOR_ERR_LIMIT,     /* 限位触发或堵转，不可恢复 */
+} MotorError_t;
+
+extern volatile bool g_motor_error;
+extern volatile MotorError_t g_motor_error_detail;
+
+/* ---- XY 运动控制（从 app_test.c 迁移）---- */
+void axis_stop(int32_t addr);
+void disable_sync_stop(void);
+int  move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
+                      int32_t *cur_x, int32_t *cur_y);
+extern volatile bool s_cmd_interrupted;
+
 #endif

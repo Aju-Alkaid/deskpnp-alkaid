@@ -9,6 +9,10 @@
 #define X1_ADDR          0x01
 #define X2_ADDR          0x02
 #define Y_ADDR           0x03
+/* R 轴角度矫正阈值 — |angle| <= 此值跳过矫正 (deg) */
+#define R_CORRECTION_THRESHOLD_DEG  0.1f
+/* R 轴旋转速度 (RPM) — 矫正和贴装共用 */
+#define R_SPEED_RPM                 60.0f
 
 /* ================================================================
  *  标定数据 — W25Q64 Flash 持久化
@@ -60,9 +64,9 @@ typedef struct {
  * 默认标定值 — 首次上电 magic 不匹配时使用。
  * 所有坐标字段为 0，Z 角度使用代码中的硬编码默认值。
  */
-#define CALIB_DEFAULT_Z_SAFE     120.0f
-#define CALIB_DEFAULT_Z_PICK      60.0f
-#define CALIB_DEFAULT_Z_PLACE     55.0f
+#define CALIB_DEFAULT_Z_SAFE      75.0f
+#define CALIB_DEFAULT_Z_PICK     110.0f
+#define CALIB_DEFAULT_Z_PLACE    110.0f
 #define CALIB_DEFAULT_CAM_P1      0.003f
 #define CALIB_DEFAULT_CAM_P3      0.001f
 

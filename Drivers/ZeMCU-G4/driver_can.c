@@ -15,10 +15,6 @@ uint8_t rx_queue_buffer[10];
 
 volatile uint32_t g_rx_irq_count = 0;//全局计数器检查中断是否触发
 
-uint16_t  CAN_ID;
-
-uint8_t  CAN_RxDone = FALSE;  //接收标致位
-
 // CAN通信发送缓冲区 
 
 // 定义接收缓冲区变量 (根据你的 HAL 库版本调整)
@@ -29,14 +25,6 @@ uint8_t RxData[8];
 // 电机共享区
 
 // CAN1对应的ID
-uint8_t CAN1_0x1fe_Tx_Data[8];
-uint8_t CAN1_0x1ff_Tx_Data[8];
-uint8_t CAN1_0x200_Tx_Data[8];
-uint8_t CAN1_0x2fe_Tx_Data[8];
-uint8_t CAN1_0x2ff_Tx_Data[8];
-uint8_t CAN1_0x3fe_Tx_Data[8];
-uint8_t CAN1_0x4fe_Tx_Data[8];
-
 struct Struct_CAN_Manage_Object CAN1_Manage_Object = {NULL};
 
 
@@ -249,22 +237,6 @@ void HAL_FDCAN_ErrorStatusCallback(FDCAN_HandleTypeDef *hfdcan, uint32_t ErrorSt
         HAL_FDCAN_Stop(hfdcan);
         HAL_FDCAN_Start(hfdcan);
     }
-}
-
-//计算校验和
-uint8_t canCRC_ATM(uint8_t *buf,uint8_t len) //CRC_SUM8
-{
-	uint32_t i;
-	uint8_t check_sum;
-	uint32_t sum = 0;
-	
-	for(i=0;i<len;i++)
-	{
-		sum += buf[i];
-	}
-	sum += CAN_ID;
-	check_sum = sum & 0xFF;
-	return check_sum;
 }
 
 /**

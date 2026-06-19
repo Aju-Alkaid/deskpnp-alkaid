@@ -121,7 +121,16 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("SAVE_CALIB")) {
         return HCMD_SAVE_CALIB;
     }
-    #undef MATCH
+    if (MATCH("RESUME")) {
+        return HCMD_RESUME;
+    }
+    if (MATCH("ABORT")) {
+        return HCMD_ABORT;
+    }
+    if (MATCH("AUTO_HEAT")) {
+        return HCMD_AUTO_HEAT;
+    }
+    #undef MATCH#undef MATCH
     return HCMD_UNKNOWN;
 }
 

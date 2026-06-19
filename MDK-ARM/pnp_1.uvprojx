@@ -2879,6 +2879,16 @@
               <FileType>5</FileType>
               <FilePath>..\Task\app_esp_task.h</FilePath>
             </File>
+            <File>
+              <FileName>app_logger.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Task\app_logger.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_logger.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Task\app_logger.h</FilePath>
+            </File>
           </Files>
         </Group>
         <Group>

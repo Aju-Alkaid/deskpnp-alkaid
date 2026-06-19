@@ -86,20 +86,6 @@ extern bool init_finished;
 
 extern struct Struct_CAN_Manage_Object CAN1_Manage_Object;
 
-extern uint8_t CAN1_0x1fe_Tx_Data[];
-extern uint8_t CAN1_0x1ff_Tx_Data[];
-extern uint8_t CAN1_0x200_Tx_Data[];
-extern uint8_t CAN1_0x2fe_Tx_Data[];
-extern uint8_t CAN1_0x2ff_Tx_Data[];
-extern uint8_t CAN1_0x3fe_Tx_Data[];
-extern uint8_t CAN1_0x4fe_Tx_Data[];
-
-extern uint8_t CAN_Supercap_Tx_Data[];
-
-extern uint16_t  CAN_ID;
-extern uint8_t  CAN_RxDone;  //接收标致位
-
-
 void CAN_Init(FDCAN_HandleTypeDef *hfdcan, CAN_Callback Callback_Function);
 
 uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t ID, uint8_t *Data, uint16_t Length);
@@ -107,8 +93,6 @@ uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t ID, uint8_t *Dat
 //void TIM_100us_CAN_PeriodElapsedCallback();
 
 //void TIM_1ms_CAN_PeriodElapsedCallback();
-
-uint8_t canCRC_ATM(uint8_t *buf,uint8_t len) ;//CRC_SUM8
 
 void error_handling(void);
 #endif

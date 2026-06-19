@@ -540,154 +540,6 @@ void StartHostCommTestTask(void *argument)
     }
 }
 
-/**
- * @brief 发送急停指令到指定电机轴
- * @param addr 电机 CAN ID (0x01/0x02/0x03)
- */
-void axis_stop(int32_t addr)
-{
-    uint8_t tx[8] = {0};
-    tx[0] = 0xF5;
-    tx[3] = 255;  // 最大减速度
-    CAN_Transmit_Data(&hfdcan1, addr, tx, 7);
-}
-/**
- * @brief 强制急停三轴（同步模式下缓存急停 + 触发执行）
- * @note  不切换同步模式，直接用 0xF5 速度=0 + 0x4B 触发。
- *        电机运行期间缓存可被新 0xF5 覆盖，0x4B 触发后中止当前运动。
- */
-void disable_sync_stop(void)
-{
-    // 重开同步，使后续 0xF5 进入缓存（覆盖电机当前执行的命令）
-    // 三轴急停（直接发送，无同步模式）
-
-
-    // 三轴急停（缓存到同步缓冲区，acc=255 最大减速度）
-    axis_stop(X1_ADDR);
-    axis_stop(X2_ADDR);
-    axis_stop(Y_ADDR);
-    osDelay(5);
-
-    // 触发同步执行 → 三轴同时最大减速度停止
-
-
-
-
-
-}
-
-
-/**
-/**
- * @brief  XY 相对移动（阻塞式）
- *
- * 向指定轴发送绝对位置指令后，轮询 evtAxesDone 事件组等待到位。
- * CAN_Process_Task 负责从 motor_event_queue 消费 CAN 到位帧并设置事件标志，
- * 本函数不再直接访问队列，避免竞争。
- *
- * @param  dx     X 轴相对位移 (步数，X1+X2 双电机同步)
- * @param  dy     Y 轴相对位移 (步数，单电机)
- * @param  speed  速度 (RPM)
- * @param  acc    加速度
- * @param  cur_x  当前 X 绝对坐标 (输入输出，仅成功时更新)
- * @param  cur_y  当前 Y 绝对坐标 (输入输出，仅成功时更新)
- * @retval  0  全部轴到位
- * @retval -1  超时 (10s)
- * @retval -2  电机异常 (堵转/限位)
- * @retval -3  UART 中断命令 (上位机 MOVE_STOP)
- */
-volatile bool s_cmd_interrupted = false;
-
-int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
-                             int32_t *cur_x, int32_t *cur_y)
-{
-    int32_t target_x = *cur_x + dx;
-    int32_t target_y = *cur_y + dy;
-
-    if (target_x >  8388607) target_x =  8388607;
-    if (target_x < -8388607) target_x = -8388607;
-    if (target_y >  8388607) target_y =  8388607;
-    if (target_y < -8388607) target_y = -8388607;
-
-    if (dx == 0 && dy == 0) {
-        return 0;
-    }
-
-
-    /* 通过事件组等待到位，CAN_Process_Task 负责消费队列并设置标志 */
-    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-
-    if (dx != 0) {
-        positionMode3Run(X1_ADDR, speed, acc, target_x);
-        osDelay(2);
-        positionMode3Run(X2_ADDR, speed, acc, target_x);
-        osDelay(2);
-    }
-    if (dy != 0) {
-        positionMode3Run(Y_ADDR,  speed, acc, target_y);
-        osDelay(2);
-    }
-
-    uint32_t done_mask = 0;
-    if (dx != 0) done_mask |= (EVENT_X1_DONE | EVENT_X2_DONE);
-    if (dy != 0) done_mask |= EVENT_Y_DONE;
-
-    UART_ClearData(UART_CH1);
-
-    const uint32_t poll_ms = 100;
-    const uint32_t total_timeout = 10000;
-    uint32_t start_tick = osKernelGetTickCount();
-
-    while ((osKernelGetTickCount() - start_tick) < pdMS_TO_TICKS(total_timeout)) {
-        /* 直接读事件组当前值，不阻塞不修改 */
-        uint32_t flags = osEventFlagsGet(evtAxesDone);
-
-        if (flags & EVENT_ANY_ERROR) {
-#ifdef DEBUG_MOVE
-            PrintDebug("[MOVE] ERROR flag set (0x%lX)\r\n", flags);
-#endif
-            axis_stop(X1_ADDR);
-            axis_stop(X2_ADDR);
-            axis_stop(Y_ADDR);
-            osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-            return -2;
-        }
-
-        if ((flags & done_mask) == done_mask) {
-#ifdef DEBUG_MOVE
-            PrintDebug("[MOVE] all done: flags=0x%lX\r\n", flags);
-#endif
-            *cur_x = target_x;
-            *cur_y = target_y;
-            osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-            return 0;
-        }
-
-        /* 检查 UART 中断命令 */
-        UART_Driver_Process();
-        {
-            const uint8_t *rx = NULL; uint16_t rx_len = 0;
-            if (UART_PeekData(UART_CH1, &rx, &rx_len)) {
-                axis_stop(X1_ADDR);
-                axis_stop(X2_ADDR);
-                axis_stop(Y_ADDR);
-                osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-                s_cmd_interrupted = true;
-                return -3;
-            }
-        }
-
-        osDelay(poll_ms);
-    }
-
-    axis_stop(X1_ADDR);
-    axis_stop(X2_ADDR);
-    axis_stop(Y_ADDR);
-    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-    return -1;
-
-}
-
 /* 上位机通讯 + XY 运动控制测试任务 属性 */
 //const osThreadAttr_t hostMotionTestTask_attributes = {
 //    .name = "HostMotion",
@@ -1133,9 +985,9 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
                                (int)r->mark_index, (int)r->mark_count,
                                (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
                 } else if (cmd == VCMD_P3) {
-									  /* P3 下相机：r->dx 取反，r->dy 不取反 */
-									  dx_s = (int32_t)(r->dy * CAM_PX_TO_STEPS);  // cam Y → X1+X2（物理 Y）   不取反
-                    dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  //cam X → Y 电机（物理 X），取反
+                    /* P3 下相机：r->dx 取反，r->dy 不取反 */
+                    dx_s = (int32_t)(r->dy * CAM_PX_TO_STEPS);// cam Y → X1+X2（物理 Y）   不取反
+                    dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS); //cam X → Y 电机（物理 X），取反
                     if (r->class_id >= 0) {
                         PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px cls=%s(id=%ld) -> move(%ld,%ld)\r\n",
                                    (long)r->dx, (long)r->dy,
@@ -1155,9 +1007,10 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
                         PrintDebug("[CAM_TEST]   dx=%ld dy=%ld px -> move(%ld,%ld)\r\n",
                                    (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
                     }
-                }if (dx_s != 0 || dy_s != 0) {
-                    int ret = move_xy_relative(dx_s, dy_s, CAM_MOVE_SPEED,
-                                               CAM_MOVE_ACC, cur_x, cur_y);
+                }
+                if (dx_s != 0 || dy_s != 0) {
+                    int ret = safe_move_to(*cur_x + dx_s, *cur_y + dy_s,
+                                           CAM_MOVE_SPEED, CAM_MOVE_ACC, cur_x, cur_y);
                     PrintDebug("[CAM_TEST]   move done, cur=(%ld,%ld) ret=%d\r\n",
                                (long)*cur_x, (long)*cur_y, ret);
                 }
@@ -1215,23 +1068,33 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
 void StartCamTestTask(void *argument) {
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    /* ---- 0. 气泵初始化（常开，方便 P3 测试） ---- */
+    /* ---- 0. DRV8803 + 舵机 + 电磁阀初始化 ---- */
     DRV8803_Init();
-    DRV8803_EnableChip(1, true);
+    DRV8803_EnableChip(1, true);   /* U12 12V 芯片使能 */
     DRV8803_EnableChip(2, true);   /* U13 24V 芯片使能（电磁阀） */
-    Pump_On();
-    PrintDebug("[CamTest] 气泵已开启\r\n");
-    /* R 轴 + 舵机初始化 */
-    Servo_Init(&htim2);
-//    DRV8803_SetOutput(&Port_12VO4, true);  /* 舵机上电 */
-    osDelay(100);
+    Servo_Init(&htim2);            /* Z轴舵机 TIM2_CH3 */
+    DRV8803_SetOutput(&Port_12VO4, true);  /* 舵机上电 (12VO4) */
+    Valve_Off();                        /* 电磁阀初始关断 (PA6=LOW) */
+    osDelay(300);
+
+    /* TMC2209 (R轴) 初始化 */
     if (!TMC_Init()) {
         PrintDebug("[CamTest] TMC_Init FAILED!\r\n");
     }
-    TMC_SetEnable(false);
+    TMC_SetEnable(false);          /* ENN 低有效: HIGH=关闭 */
 
-//    Calib_Load(&g_calib);  /* 从 Flash 加载标定值 */
-//    Valve_Off();
+    /* 从 Flash 加载标定值 */
+    if (Calib_Load(&g_calib) != 0) {
+        PrintDebug("[CamTest] Flash read failed, using defaults.\r\n");
+    }
+
+    /* 舵机归安全角度 */
+    Servo_SetAngle(2, 120.0f);
+    osDelay(300);
+
+    /* 气泵开启（方便 P3 测试） */
+    Pump_On();
+    PrintDebug("[CamTest] 气泵已开启\r\n");
 
     /* ---- 1. CAN + 电机初始化 ---- */
     CAN_Init(&hfdcan1, NULL);
@@ -1248,7 +1111,6 @@ void StartCamTestTask(void *argument) {
         vTaskSuspend(NULL);
     }
     osDelay(100);
-
     PrintDebug("========================================\r\n");
     PrintDebug("  Camera + Motor Interactive Test\r\n");
     PrintDebug("  USART2 -> MaixCam  |  CAN -> X1/X2/Y\r\n");
@@ -1260,62 +1122,69 @@ void StartCamTestTask(void *argument) {
     float p1_angle = 0.0f, p3_angle = 0.0f;
 
     /* ---- P1: 散料区元件检测 + 角度记录 ---- */
-//    PrintDebug("\r\n--- Test 1/3: P1 (component detect + angle) ---\r\n");
-//    if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &cur_x, &cur_y, &p1_angle)) {
-//        PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
-//    } else {
-//        PrintDebug("[CAM_TEST] P1 PASSED, angle=%.2f deg\r\n", (double)p1_angle);
-//    }
+    PrintDebug("\r\n--- Test 1/3: P1 (component detect + angle) ---\r\n");
+    if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &cur_x, &cur_y, &p1_angle)) {
+        PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
+    } else {
+        PrintDebug("[CAM_TEST] P1 PASSED, angle=%.2f deg\r\n", (double)p1_angle);
+    }
+
+    /* ---- P1 角度矫正：检测到元件偏角后立即 R 轴旋转补偿 ---- */
+    if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
+        PrintDebug("\r\n--- R axis correction (P1 angle=%.2f deg) ---\r\n", (double)p1_angle);
+        r_axis_rotate(p1_angle, R_SPEED_RPM);
+        PrintDebug("[CamTest] R axis rotated by %.2f deg\r\n", (double)p1_angle);
+    } else {
+        PrintDebug("[CamTest] P1 angle small, skip R correction\r\n");
+    }
 
     /* ---- 吸取元件 ---- */
-//    PrintDebug("\r\n--- Pick component ---\r\n");
-//    Servo_SetAngle(2, 60.0f);        /* Z轴下降 */
-//    osDelay(300);
-//    Pump_On();
-//    osDelay(200);
-//    Servo_SetAngle(2, 120.0f);       /* Z轴上升 */
-//    osDelay(300);
+    PrintDebug("\r\n--- Pick component ---\r\n");
+    pick_component();
 
     /* 移动到下相机位置（使吸嘴进入 P3 视野） */
-//    {
-//        extern CalibrationData_t g_calib;
-//        int32_t dx = g_calib.bottom_cam_x_steps - cur_x;
-//        int32_t dy = g_calib.bottom_cam_y_steps - cur_y;
-//        if (dx != 0 || dy != 0) {
-//            move_xy_relative(dx, dy, CAM_MOVE_SPEED, CAM_MOVE_ACC, &cur_x, &cur_y);
-//        }
-//        PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
-//                   (long)cur_x, (long)cur_y);
-//    }
+    {
+        int32_t dx = g_calib.bottom_cam_x_steps - cur_x;
+        int32_t dy = g_calib.bottom_cam_y_steps - cur_y;
+        if (dx != 0 || dy != 0) {
+            safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps,
+                         CAM_MOVE_SPEED, CAM_MOVE_ACC, &cur_x, &cur_y);
+        }
+        PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
+                   (long)cur_x, (long)cur_y);
+    }
 
-    /* ---- P3: 下相机偏移检测 + 角度叠加 ---- */
-    PrintDebug("\r\n--- Test 2/3: P3 (bottom cam offset + angle) ---\r\n");
+    /* ---- P3: 下相机偏移检测，验证 P1 矫正是否到位 ---- */
+    PrintDebug("\r\n--- Test 2/3: P3 (verify P1 correction) ---\r\n");
     if (!cam_test_run(VCMD_P3, 0, CAM_TEST_TIMEOUT_P3, &cur_x, &cur_y, &p3_angle)) {
         PrintDebug("[CAM_TEST] P3 FAILED, continuing...\r\n");
     } else {
-        PrintDebug("[CAM_TEST] P3 PASSED, angle=%.2f deg\r\n", (double)p3_angle);
+        PrintDebug("[CAM_TEST] P3 PASSED, residual angle=%.2f deg\r\n", (double)p3_angle);
     }
 
-//    /* ---- R 轴旋转验证：P1角度 + P3角度 = 补偿旋转量 ---- */
-//    {
-//        float angle_correction = p1_angle + p3_angle;  /* R轴绝对角度修正量 */
-//        PrintDebug("\r\n--- R axis rotation test ---\r\n");
-//        PrintDebug("[CamTest] P1=%.2f + P3=%.2f = %.2f deg (correction)\r\n",
-//                   (double)p1_angle, (double)p3_angle, (double)angle_correction);
-//        if (fabsf(angle_correction) > 0.1f) {
-//            r_axis_rotate(angle_correction, 60.0f);
-//            PrintDebug("[CamTest] R axis rotated by %.2f deg\r\n", (double)angle_correction);
-//        } else {
-//            PrintDebug("[CamTest] Angle too small, skip R rotation\r\n");
-//        }
-//    }
+    /* ---- P3 二次矫正：若 P3 仍有残余偏角，再次 R 轴旋转补偿 ---- */
+    if (fabsf(p3_angle) > R_CORRECTION_THRESHOLD_DEG) {
+        PrintDebug("\r\n--- R axis 2nd correction (P3 residual=%.2f deg) ---\r\n", (double)p3_angle);
+        r_axis_rotate(p3_angle, R_SPEED_RPM);
+        PrintDebug("[CamTest] R axis 2nd correction by %.2f deg\r\n", (double)p3_angle);
+    } else {
+        PrintDebug("[CamTest] P3 residual small, no 2nd correction needed\r\n");
+    }
 
     /* ---- 释放元件 ---- */
-//    Pump_Off();
-//    Valve_On();
-//    osDelay(200);
-//    Valve_Off();
+    Pump_Off();
+    Valve_On();
+    osDelay(200);
+    Valve_Off();
 
-//    PrintDebug("\r\n=== Camera + Angle + R-Axis Test Complete ===\r\n");
-//    vTaskSuspend(NULL);
+    /* ---- P2: Mark 点建系测试 ---- */
+    PrintDebug("\r\n--- Test 3/3: P2 (Mark alignment) ---\r\n");
+    if (!cam_test_run(VCMD_P2, 0, CAM_TEST_TIMEOUT_P2, &cur_x, &cur_y, NULL)) {
+        PrintDebug("[CAM_TEST] P2 FAILED\r\n");
+    } else {
+        PrintDebug("[CAM_TEST] P2 PASSED\r\n");
+    }
+
+    PrintDebug("\r\n=== Camera + Motor Interactive Test Complete ===\r\n");
+    vTaskSuspend(NULL);
 }

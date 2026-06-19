@@ -12,14 +12,6 @@
 #define PULSES_PER_MM  512  
 
 
- //uint8_t txBuffer[8];      //待发送数据数组（因为要传给xy轴一个数组容易出问题）
-int32_t realTimeLocation;		//电机实时位置                            
-												//计算出位置，可设置断点观察(示例）	
-                         // realTimeLocation = (int32_t)(CanRxBuf.Data[3]<<24 | CanRxBuf.Data[4]<<16 | CanRxBuf.Data[5]<<8 | CanRxBuf.Data[6]<<0)												;
-												//接收位置信息失败（1.检查连接线；2.检查电机是否上电；3.检查从机地址，波特率）
-												
-uint16_t runSpeed=100;    //电机运行速度
-uint8_t runDir  = 1;      //电机运行方向
 
 int32_t absoluteAxis = 163840;           //绝对坐标 163840(10圈)
 
@@ -32,22 +24,6 @@ int32_t PositionError;				//电机位置误差
 
 
 
-typedef struct {
-    MotorState_t state;          // 当前状态
-    int32_t target_pulse_x;      // 目标位置缓存
-    int32_t target_pulse_y;
-    uint32_t start_time;         // 用于超时检测
-    uint8_t retry_count;         // 重试次数
-} MotorController_t;
-
-volatile MotorState_t g_current_xstate = MOTOR_STATE_IDLE; 
-volatile MotorState_t g_current_ystate = MOTOR_STATE_IDLE; 
-
-static MotorController_t g_motor_ctrl = {0};
-
-//计算出误差，可设置断点观察
-			// 360度 对应 51200
-		//	PositionError = (int32_t)(CanRxBuf.Data[1]<<24 | CanRxBuf.Data[2]<<16 | CanRxBuf.Data[3]<<8 | CanRxBuf.Data[4]<<0) ;
 
 /*
 功能：初始化流程
@@ -303,43 +279,6 @@ void positionMode3Run(uint8_t slaveAddr,uint16_t speed,uint16_t acc,int32_t absA
 }
 
 
-uint8_t motor_send_move_cmd(MotorController_t *motor, 
-                            uint8_t slave_addr, 
-                            int32_t absAxis,uint16_t speed,uint8_t acc){
-	
-	// 1. 在栈上创建临时 Buffer (线程安全)
-  uint8_t txBuffer[8] = {0}; 
-	
-	    // TODO: 这里需要填充 positionMode3Run 的逻辑
-    // 根据你的需求，这里应该是填充 txBuffer 数据
-    // 例如：positionMode3Run 的逻辑...
-		//CAN_ID = slave_addr;				//ID
-
-    txBuffer[0] = 0xF5; // 功能码：坐标绝对运动
-    txBuffer[1] = (speed >> 8) & 0xFF;
-    txBuffer[2] = speed & 0xFF;
-    txBuffer[3] = acc;
-    txBuffer[4] = (absAxis >> 16) & 0xFF;
-    txBuffer[5] = (absAxis >> 8) & 0xFF;
-    txBuffer[6] = absAxis & 0xFF;
-    // txBuffer[7] 通常为 CRC 或保留，根据协议填充
-	  // 如果需要手动加 CRC，长度是 8；如果由 CAN 驱动处理数据域，长度传 7
-    // 这里只负责发送，不关心结果
-	uint8_t result;
-	result = CAN_Transmit_Data(&hfdcan1, slave_addr, txBuffer, 7); // 7 字节数据，CRC 由函数自动计算添加
-
-if (result == 0) {
-    // 发送成功，进入等待状态
-    motor->state = MOTOR_STATE_WAITING;
-} else {
-    // 发送失败（比如总线忙），进行重试或报错
-    error_handling();
-}
-//    result = positionMode3Run(slave_addr, 300, 100, pulses); 
-    return result; 
-}
-
-
 /*
 功能：设置工作模式
 输入：slaveAddr 从机地址
@@ -444,22 +383,15 @@ void motorSetZero(uint8_t slaveAddr) {
 //运行失败
 void runFail(void)
 {
-			while(1)                
-			{
-				
-			}	
+    extern volatile bool g_motor_error;
+    g_motor_error = true;
 }
 
 //运行成功
 void runOK(void)
 {
-			while(1)                
-			{
-				
-			}	
+    /* no-op: motion completed successfully */
 }
-
-
 
 
 

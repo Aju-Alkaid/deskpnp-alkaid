@@ -79,4 +79,8 @@ const char* Vision_ClassName(int class_id);
 /* UART callback: feed bytes (ISR path, no blocking ops) */
 void CamUart_RecvCallback(uint8_t *data, int len);
 
+/* Timeout protection (30s default) */
+bool Vision_IsTimedOut(void);
+void Vision_ForceIdle(void);
+
 #endif

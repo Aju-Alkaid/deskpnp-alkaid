@@ -10,12 +10,8 @@
 
 #include "app_config.h"   /* 共享运动常量 */
 
-/* ---- 共享运动控制函数 (定义在 app_test.c) ---- */
-void axis_stop(int32_t addr);
-void disable_sync_stop(void);
-int  move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
-                      int32_t *cur_x, int32_t *cur_y);
-extern volatile bool s_cmd_interrupted;
+/* ---- 共享运动控制函数 (已迁移到 app_motion.c/h) ---- */
+#include "app_motion.h"
 
 
 /* ---- 原测试任务声明 ---- */

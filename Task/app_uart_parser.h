@@ -42,6 +42,9 @@ typedef enum {
     HCMD_SET_Z_PLACE,         // 记录贴装高度
     HCMD_SET_R_ZERO,          // R 轴当前位置 = 0deg
     HCMD_SAVE_CALIB,          // 保存标定值到 Flash
+    HCMD_RESUME,              // 从暂停/WAIT_REFILL/ERROR 恢复
+    HCMD_ABORT,               // 中止当前流程 -> HOST_IDLE
+    HCMD_AUTO_HEAT,           // AUTO_HEAT ON/OFF — 自动回流焊开关
 
     /* 未知命令 */
     HCMD_UNKNOWN
