@@ -339,6 +339,7 @@ pnp_1/
 - `frame_buffer_sem` — TouchGFX 内部 (OSWrappers.cpp)，帧缓冲互斥锁
 - `semX1Done/semX2Done/semYDone` 信号量 — 已废弃，统一使用 evtAxesDone 事件组（见 §9.6-5）
 - `heater_rx_queue` (10深度) — CAN ISR → Heater_ProcessStatus()，加热台状态帧专用队列
+- `g_coord_mutex` (互斥锁) — Coord_Get/Update/Invalidate 内部，保护 MachineCoord_t 读写
 
 ## 六、关键数据流
 
@@ -379,6 +380,7 @@ pnp_1/
 | `HostParsed_t` | app_uart_parser.h | 上位机行解析结果 | cmd, param(float), raw[512] |
 | `VisionResult_t` | app_vision.h | 视觉结果数据（v2 协议） | dx, dy, angle_x100, angle_valid, class_id, class_name[8], mark_index, mark_count |
 | `MotionCmd_t` | app_motion.h | 运动指令 | cmd_type, target_x/y/r, speed, acc |
+| `MachineCoord_t` | app_motion.h | 机器座标系（线程安全单例） | x, y, r, z, homed, valid |
 | `CAN_Rx_Packet_t` | driver_can.h | CAN 数据包 | ID, FuncCode, Status, Data[8], Timestamp |
 | `RingBuf_t` | ringbuf.h | 环形缓冲区 | buffer, size, head(写)/tail(读) |
 | `LineParser_t` | app_uart_parser.h | 行解析器状态机 | buf[512], idx, complete |
@@ -2230,6 +2232,8 @@ HOST_PICK 状态：吸取失败 → 重启 P1 视觉搜索，不浪费 P3 周期
 
 **修复**：`r_axis_rotate` 后调用 `r_axis_set_zero()`，P1/P3 矫正均通过同一辅助函数，一次修改两端生效。
 
+> **2026-06-20 更新（ 24）：** `g_cur_r_angle` 已被 `Coord_Get().r` 取代，`r_axis_rotate` 改为 `int` 返回值。详见  24.2。
+
 ### 23.6 代码债务清理（D1~D5）
 
 | 项 | 文件 | 改动 |
@@ -2247,7 +2251,9 @@ HOST_PICK 状态：吸取失败 → 重启 P1 视觉搜索，不浪费 P3 周期
 
 - `move_xy_relative` 在 `return -1` 前记录 `TIMEOUT`，`return -2` 前记录 `LIMIT`
 - `safe_move_to` 收到 -1 时自动重试一次（CAN 丢帧可恢复），两次超时才升级为错误
-- Host_Task 错误日志区分 "Motor TIMEOUT" vs "Motor LIMIT/BLOCK"
+> **2026-06-20 更新（ 24）：** TIMEOUT 已改为原地重试（不进 ERROR），仅 LIMIT 进 HOST_ERROR。详见  24.3。
+
+- Host_Task 错误日志区分 "Motor TIMEOUT" vs "Motor LIMIT/BLOCK"`r`n`r`n> **2026-06-20 更新（§24）**：TIMEOUT 行为已改为原地重试（不进 ERROR），仅 LIMIT 进 HOST_ERROR。详见 §24.3。
 
 ### 23.8 分级运动速度（第四层 4.1）
 
@@ -2323,3 +2329,208 @@ W25Q64 芯片确认为 `W25Q64JV` 系列。现有驱动 `W25Q64_Read/Write/Erase
 - **日志扇区满即擦**：255 条/会话绰绰有余，无需双扇区交替或磨损均衡。
 - **加热台联动为可选**：`AUTO_HEAT OFF` 保持旧行为，不影响现有调试流程。
 
+
+> **前置更新说明：** 以下改动修正/替换了已有文档中的部分内容：
+> - §23.5（R 轴归零）→ `g_cur_r_angle` 已删除，统一由 `Coord_Get().r` 管理
+> - §23.7（电机异常分级）→ TIMEOUT 行为已改为原地重试，不再进 HOST_ERROR
+> - §七（关键数据结构）→ 新增 `MachineCoord_t`（app_motion.h）
+> - §五（任务间通信）→ 新增 `g_coord_mutex`
+
+
+## 二十四、2026-06-20 会话 — 运动控制架构治理
+
+> **前置更新说明：** 以下改动修正/替换了已有文档中的部分内容：
+> - §23.5（R 轴归零）→ g_cur_r_angle 已删除，统一由 Coord_Get().r 管理
+> - §23.7（电机异常分级）→ TIMEOUT 行为已改为原地重试，不再进 HOST_ERROR
+> - §七（关键数据结构）→ 新增 MachineCoord_t（app_motion.h）
+> - §五（任务间通信）→ 新增 g_coord_mutex\r
+
+### 24.1 座标核心 — MachineCoord_t 统一座标系
+
+**问题：** `g_cur_x/y` 散落在 `Host_Task` 的 static 局部变量中，R 轴角度在 `app_motion.c` 的 `g_cur_r_angle` 单独维护，Z 轴未记录。无互斥保护，失步无感知。
+
+**方案：** 在 `app_motion.h/c` 中新增 `MachineCoord_t` 单例 + 7 个 `Coord_*` 函数：
+
+```c
+typedef struct {
+    int32_t x, y;    // XY 步数
+    float   r;       // R 轴角度 (deg)
+    float   z;       // Z 轴角度 (deg)
+    bool    homed;   // 是否归零
+    bool    valid;   // 座标是否可信
+} MachineCoord_t;
+
+void Coord_Init(void);           // 幂等，可多任务调用
+MachineCoord_t Coord_Get(void);  // 返回副本，mutex 保护
+void Coord_UpdateXY/R/Z(...);    // 到位后更新，同时置 valid=true
+void Coord_SetHome(void);        // 归零：x=y=r=0, homed=valid=true
+void Coord_Invalidate(void);     // 失步标记：valid=false，保留旧值供诊断
+```
+
+**关键设计：**
+- 内部 FreeRTOS 互斥锁保护读写
+- `Coord_Get()` 返回副本，调用方不持有锁——避免死锁
+- `Coord_Invalidate` 不修改坐标值，只设 `valid=false`——旧值仍可用于绝对移动的 dx 计算
+- `Coord_Init` 幂等——`Host_Task` 和 `StartCamTestTask` 均可安全调用
+
+**涉及的签名变更：**
+- `safe_move_to` 去掉了 `int32_t *cur_x, *cur_y` 参数
+- `move_xy_relative` 同理
+- 所有调用点改为读 `Coord_Get()` 获取当前位置
+
+**涉及文件：** `app_motion.h`, `app_motion.c`, `app_host.c`, `app_test.c`
+
+### 24.2 r_axis_rotate 改造
+
+| 改动 | 说明 |
+|------|------|
+| 删除 `static float g_cur_r_angle` | 统一由 `Coord_Get().r` 管理 |
+| `r_axis_set_zero()` → `Coord_UpdateR(0.0f)` | — |
+| `r_axis_rotate` 改 `int` 返回值 | 0=旋转成功, -1=角度小于阈值跳过 |
+| 内部读 `Coord_Get().r` 算 delta | 替代旧的 `g_cur_r_angle` |
+
+### 24.3 错误恢复分级（重写 §23.7）
+
+**旧行为：** TIMEOUT 和 LIMIT 都进 `HOST_ERROR`，只是日志不同。
+
+**新行为：**
+
+| 错误类型 | 行为 | 理由 |
+|----------|------|------|
+| `MOTOR_ERR_TIMEOUT` | 不改变 `g_state`，下轮主循环重试当前状态。视觉相关状态（MARK_ALIGN/FIND_COMP/OFFSET_CHECK）先调 `Vision_ForceIdle()` 重置相机 | CAN 丢帧是偶发软故障，重试可恢复 |
+| `MOTOR_ERR_LIMIT` | `z_safe()` → `g_state = HOST_ERROR` | 堵转/限位是硬件故障，需人工介入 |
+
+### 24.4 Coord_Invalidate 全覆盖
+
+8 处调用确保所有导致电机位置不确定的操作都标记座标不可信：
+
+| 位置 | 触发条件 |
+|------|---------|
+| JOG 方向切换 ×4 | 旧 JOG 被新方向打断，`disable_sync_stop` 后位置未知 |
+| `HCMD_MOVE_STOP` | 用户主动停止 JOG |
+| `HCMD_ABORT` | 紧急中止 |
+| P3 超时 | 下相机视觉验证失败，R 轴位置未经确认 |
+| P3 错误 | 同上 |
+
+### 24.5 handle_calib_cmd 拆分
+
+`handle_debug_cmd` 中 10 个标定命令（`SET_SCATTER_AREA` ~ `SAVE_CALIB`）抽成独立函数 `handle_calib_cmd`（~75 行），返回 `bool`：
+
+```c
+static bool handle_calib_cmd(HostParsed_t *cmd) { ... }
+
+// handle_debug_cmd 顶部：
+if (handle_calib_cmd(cmd)) { g_during_cmd = false; return; }
+```
+
+无新文件。`handle_debug_cmd` 从 ~270 行缩到 ~200 行。
+
+### 24.6 PnP step 函数规范化
+
+`Host_Task` 主循环中 7 个内联 case 块抽成独立 step 函数：
+
+| 函数 | 对应状态 | 职责 |
+|------|---------|------|
+| `pick_step()` | HOST_PICK | 吸取元件，失败→重启 P1 |
+| `move_to_bottom_step()` | HOST_MOVE_TO_BOTTOM_CAM | 移到下相机→启动 P3 |
+| `move_to_pcb_step()` | HOST_MOVE_TO_PCB | 坐标变换 + R 轴旋转 + XY 移到贴装位 |
+| `place_step()` | HOST_PLACE | 贴装→下一元件或 DONE |
+| `done_step()` | HOST_DONE | 回零 + 可选自动回流焊 |
+| `reflow_step()` | HOST_REFLOW | 轮询加热台状态 |
+| `error_step()` | HOST_ERROR | 等 RESUME/ABORT，30s 超时自回 DEBUG |
+
+主循环 switch 缩至 14 行统一风格：
+
+```c
+switch (g_state) {
+case HOST_HOME:              osDelay(100);            break;
+case HOST_DEBUG:             osDelay(10);             break;
+case HOST_DOWNLOADING:       osDelay(10);             break;
+case HOST_MARK_ALIGN:        mark_align_step();       break;
+case HOST_FIND_COMP:         find_comp_step();        break;
+case HOST_PICK:              pick_step();             break;
+case HOST_MOVE_TO_BOTTOM_CAM: move_to_bottom_step();  break;
+case HOST_OFFSET_CHECK:      offset_check_step();     break;
+case HOST_MOVE_TO_PCB:       move_to_pcb_step();      break;
+case HOST_PLACE:             place_step();            break;
+case HOST_DONE:              done_step();             break;
+case HOST_REFLOW:            reflow_step();           break;
+case HOST_WAIT_REFILL:       osDelay(200);            break;
+case HOST_ERROR:             error_step();             break;
+}
+```
+
+### 24.7 HOST_ERROR 策略 — 选项 A
+
+**旧行为：** `HOST_ERROR` 当场调用 `Heater_SendStop + z_safe`，清零 `g_comp_count/mark_count/index`，跳 `HOST_DEBUG`。上位机无窗口发 `RESUME`。
+
+**新行为（选项 A）：**
+
+```c
+static void error_step(void) {
+    if (!g_error_entered) {
+        Heater_SendStop(); z_safe();
+        Log_Write(LOG_PNP_ERROR, ...);
+        host_send("ERROR");           // 通知上位机
+        g_error_entered = true;
+        g_error_start_tick = osKernelGetTickCount();
+    }
+    // 30s 超时自动回 DEBUG
+    if (tick - g_error_start_tick >= 30s) {
+        g_comp_count = 0; ... ; g_error_entered = false;
+        g_state = HOST_DEBUG;
+    }
+}
+```
+
+`RESUME` 命令处理增强：
+- 清除 `g_error_entered` 标志
+- 检查 `g_comp_count > 0`（无元件数据时拒绝恢复）
+- `ABORT` 也清除 `g_error_entered`
+
+### 24.8 P2 Mark 建系修复
+
+审查 `mark_align_step` 后修复了 2 个实际隐患：
+
+**Bug 2 — 三个 HOST_ERROR 出口未重置视觉：** 网格穷尽、跳转搜索超时、VISION_ERROR 三处直接 `g_state = HOST_ERROR` 而不调 `Vision_ForceIdle()`。加上了。
+
+**Bug 3 — VISION_DONE 未验证 Mark 数量：** 建系前直接读 `g_marks_actual[0..2]`，如果 CSV 少于 3 个 Mark，数据是垃圾。加了守卫：
+
+```c
+if (g_mark_count < P2_MARK_COUNT) {
+    Vision_ForceIdle();
+    g_state = HOST_ERROR;
+    break;
+}
+```
+
+**Bug 1（网格切换未终止旧 P2 会话）：** 审查 `Vision_Start` 实现后发现内部调了 `reset_all()`，安全——不存在。
+
+### 24.9 启动路径守卫
+
+| 问题 | 修复 |
+|------|------|
+| `HOST_HOME` 状态下可发 CSV 开始下载（Coord 未归零） | 下载入口改为只允许 `HOST_DEBUG` |
+| `SET_ORIGIN` 在 PnP 途中可被意外调用，毁掉座标系 | 加状态守卫：仅 `HOST_HOME` 或 `HOST_DEBUG` 才执行归零 |
+
+### 24.10 app_host.c 分区导航
+
+文件顶部增加分区注释，划分 6 个逻辑区域（§1 常量 ~ §6 主循环），便于快速定位。
+
+### 24.11 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_motion.h` | 新增 `MachineCoord_t` + 7 个 `Coord_*` 声明；`safe_move_to`/`move_xy_relative` 去指针参数；`r_axis_rotate` 改 `int` |
+| `Task/app_motion.c` | 座标核心实现（~80 行）；`move_xy_relative` 内部接入 Coord；`safe_move_to` 去指针参数；`z_*`/`r_axis_*` 接入 Coord；删除 `g_cur_r_angle`；`MotionTask_Func` 同步更新 |
+| `Task/app_host.c` | `g_cur_x/y` → `Coord_Get()`；`Coord_Init/SetHome` 调用；错误分级；`handle_calib_cmd` 拆分；7 个 step 函数；主循环 14 行 switch；8 处 `Coord_Invalidate`；P2 修复；启动路径守卫；HOST_ERROR 策略；分区导航 |
+| `Task/app_test.c` | 局部 `cur_x/y` → `Coord_Get()`；`cam_test_run` 参数精简；`Coord_Init` 调用 |
+
+### 24.12 设计决策记录
+
+- **不建新文件：** 座标核心放 `app_motion.c`，标定命令/step 函数留 `app_host.c`。单人嵌入式项目，组织良好的单文件优于互相 extern 的多文件。
+- **Coord_Invalidate 只标记不修改值：** 失效的旧坐标仍可用于绝对移动的 delta 计算，到位后自动恢复可信。
+- **Planner 层不做：** MKS 伺服内置加减速控制（`acc` 参数），PnP 单段移动不需要轨迹规划。
+- **独立运动任务不做：** PnP 流程天然串行——每次运动后必须等视觉/传感器反馈。阻塞式原语已够用。
+- **多板支持不做：** 当前一次贴一块。
+- **软限位搁置：** 需要在标定流程中先加 `SET_X_RANGE`/`SET_Y_RANGE` 命令。

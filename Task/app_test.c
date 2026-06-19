@@ -558,8 +558,6 @@ void StartHostMotionTestTask(void *argument)
     HostParsed_t parsed;
     LineParser_Init(&parser);
 
-    int32_t cur_x = 0;
-    int32_t cur_y = 0;
     bool jog_active = false;
 
     const uint16_t speed = 300;
@@ -594,32 +592,32 @@ void StartHostMotionTestTask(void *argument)
                     case HCMD_MOVE_UP:
                         steps = (int32_t)(parsed.param * STEPS_PER_MM);
                         PrintDebug("[HostMotion] MOVE_UP %.2fmm -> %ld steps\r\n", parsed.param, steps);
-                        result = move_xy_relative(steps, 0, speed, acc, &cur_x, &cur_y);
-                        PrintDebug("[HostMotion] MOVE_UP done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        result = move_xy_relative(steps, 0, speed, acc);
+                        PrintDebug("[HostMotion] MOVE_UP done, pos=(%ld,%ld) ret=%d\r\n", Coord_Get().x, Coord_Get().y, result);
                         jog_active = false;
                         break;
 
                     case HCMD_MOVE_DOWN:
                         steps = (int32_t)(-parsed.param * STEPS_PER_MM);
                         PrintDebug("[HostMotion] MOVE_DOWN %.2fmm -> %ld steps\r\n", parsed.param, steps);
-                        result = move_xy_relative(steps, 0, speed, acc, &cur_x, &cur_y);
-                        PrintDebug("[HostMotion] MOVE_DOWN done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        result = move_xy_relative(steps, 0, speed, acc);
+                        PrintDebug("[HostMotion] MOVE_DOWN done, pos=(%ld,%ld) ret=%d\r\n", Coord_Get().x, Coord_Get().y, result);
                         jog_active = false;
                         break;
 
                     case HCMD_MOVE_LEFT:
                         steps = (int32_t)(parsed.param * STEPS_PER_MM);
                         PrintDebug("[HostMotion] MOVE_LEFT %.2fmm -> %ld steps\r\n", parsed.param, steps);
-                        result = move_xy_relative(0, steps, speed, acc, &cur_x, &cur_y);
-                        PrintDebug("[HostMotion] MOVE_LEFT done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        result = move_xy_relative(0, steps, speed, acc);
+                        PrintDebug("[HostMotion] MOVE_LEFT done, pos=(%ld,%ld) ret=%d\r\n", Coord_Get().x, Coord_Get().y, result);
                         jog_active = false;
                         break;
 
                     case HCMD_MOVE_RIGHT:
                         steps = (int32_t)(-parsed.param * STEPS_PER_MM);
                         PrintDebug("[HostMotion] MOVE_RIGHT %.2fmm -> %ld steps\r\n", parsed.param, steps);
-                        result = move_xy_relative(0, steps, speed, acc, &cur_x, &cur_y);
-                        PrintDebug("[HostMotion] MOVE_RIGHT done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        result = move_xy_relative(0, steps, speed, acc);
+                        PrintDebug("[HostMotion] MOVE_RIGHT done, pos=(%ld,%ld) ret=%d\r\n", Coord_Get().x, Coord_Get().y, result);
                         jog_active = false;
                         break;
 
@@ -671,10 +669,10 @@ void StartHostMotionTestTask(void *argument)
                         PrintDebug("[HostMotion] MOVE_TO (%.2f, %.2f)mm -> (%ld, %ld) steps\r\n",
                                    parsed.param, parsed.param2, target_x, target_y);
                         if (jog_active) { axis_stop(X1_ADDR); axis_stop(X2_ADDR); axis_stop(Y_ADDR); jog_active = false; }
-                        int32_t dx = target_x - cur_x;
-                        int32_t dy = target_y - cur_y;
-                        int result = move_xy_relative(dx, dy, speed, acc, &cur_x, &cur_y);
-                        PrintDebug("[HostMotion] MOVE_TO done, pos=(%ld,%ld) ret=%d\r\n", cur_x, cur_y, result);
+                        int32_t dx = target_x - Coord_Get().x;
+                        int32_t dy = target_y - Coord_Get().y;
+                        int result = move_xy_relative(dx, dy, speed, acc);
+                        PrintDebug("[HostMotion] MOVE_TO done, pos=(%ld,%ld) ret=%d\r\n", Coord_Get().x, Coord_Get().y, result);
                         break;
                     }
                     case HCMD_SET_ORIGIN:
@@ -682,8 +680,7 @@ void StartHostMotionTestTask(void *argument)
                         motorSetZero(X1_ADDR);
                         motorSetZero(X2_ADDR);
                         motorSetZero(Y_ADDR);
-                        cur_x = 0;
-                        cur_y = 0;
+                        Coord_SetHome();
                         osDelay(100);
                         break;
 
@@ -935,13 +932,13 @@ void StartPickPlaceTestTask(void *argument)
  * @brief 运行一个视觉 Process 到完成或超时
  * @param cmd        VCMD_P1 / VCMD_P2 / VCMD_P3
  * @param timeout_ms 超时 (ms)
- * @param cur_x      当前 X 坐标 (步数, 输入输出)
- * @param cur_y      当前 Y 坐标 (步数, 输入输出)
+ * @param Coord_Get().x      当前 X 坐标 (步数, 输入输出)
+ * @param Coord_Get().y      当前 Y 坐标 (步数, 输入输出)
  * @param out_angle_deg  [出参] 视觉检测角度 (deg)，仅 VISION_DONE 时写入；可为 NULL
  * @return true=完成, false=超时或出错
  */
 static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
-                         int32_t *cur_x, int32_t *cur_y, float *out_angle_deg) {
+                         float *out_angle_deg) {
     Vision_Start(cmd, class_id);
 
     /* P2 启动后状态是 IDLE，需要主动发 "go" */
@@ -1009,10 +1006,10 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
                     }
                 }
                 if (dx_s != 0 || dy_s != 0) {
-                    int ret = safe_move_to(*cur_x + dx_s, *cur_y + dy_s,
-                                           CAM_MOVE_SPEED, CAM_MOVE_ACC, cur_x, cur_y);
+                    int ret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s,
+                                           CAM_MOVE_SPEED, CAM_MOVE_ACC);
                     PrintDebug("[CAM_TEST]   move done, cur=(%ld,%ld) ret=%d\r\n",
-                               (long)*cur_x, (long)*cur_y, ret);
+                               (long)Coord_Get().x, (long)Coord_Get().y, ret);
                 }
                 Vision_Go();
                 break;
@@ -1076,12 +1073,14 @@ void StartCamTestTask(void *argument) {
     DRV8803_SetOutput(&Port_12VO4, true);  /* 舵机上电 (12VO4) */
     Valve_Off();                        /* 电磁阀初始关断 (PA6=LOW) */
     osDelay(300);
-
+	
     /* TMC2209 (R轴) 初始化 */
     if (!TMC_Init()) {
         PrintDebug("[CamTest] TMC_Init FAILED!\r\n");
     }
     TMC_SetEnable(false);          /* ENN 低有效: HIGH=关闭 */
+
+    Coord_Init();
 
     /* 从 Flash 加载标定值 */
     if (Calib_Load(&g_calib) != 0) {
@@ -1118,12 +1117,11 @@ void StartCamTestTask(void *argument) {
                CAM_PX_TO_STEPS, CAM_MM10000_TO_STEPS);
     PrintDebug("========================================\r\n");
 
-    int32_t cur_x = 0, cur_y = 0;
     float p1_angle = 0.0f, p3_angle = 0.0f;
 
     /* ---- P1: 散料区元件检测 + 角度记录 ---- */
     PrintDebug("\r\n--- Test 1/3: P1 (component detect + angle) ---\r\n");
-    if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &cur_x, &cur_y, &p1_angle)) {
+    if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &p1_angle)) {
         PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
     } else {
         PrintDebug("[CAM_TEST] P1 PASSED, angle=%.2f deg\r\n", (double)p1_angle);
@@ -1144,19 +1142,19 @@ void StartCamTestTask(void *argument) {
 
     /* 移动到下相机位置（使吸嘴进入 P3 视野） */
     {
-        int32_t dx = g_calib.bottom_cam_x_steps - cur_x;
-        int32_t dy = g_calib.bottom_cam_y_steps - cur_y;
+        int32_t dx = g_calib.bottom_cam_x_steps - Coord_Get().x;
+        int32_t dy = g_calib.bottom_cam_y_steps - Coord_Get().y;
         if (dx != 0 || dy != 0) {
             safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps,
-                         CAM_MOVE_SPEED, CAM_MOVE_ACC, &cur_x, &cur_y);
+                         CAM_MOVE_SPEED, CAM_MOVE_ACC);
         }
         PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
-                   (long)cur_x, (long)cur_y);
+                   (long)Coord_Get().x, (long)Coord_Get().y);
     }
 
     /* ---- P3: 下相机偏移检测，验证 P1 矫正是否到位 ---- */
     PrintDebug("\r\n--- Test 2/3: P3 (verify P1 correction) ---\r\n");
-    if (!cam_test_run(VCMD_P3, 0, CAM_TEST_TIMEOUT_P3, &cur_x, &cur_y, &p3_angle)) {
+    if (!cam_test_run(VCMD_P3, 0, CAM_TEST_TIMEOUT_P3, &p3_angle)) {
         PrintDebug("[CAM_TEST] P3 FAILED, continuing...\r\n");
     } else {
         PrintDebug("[CAM_TEST] P3 PASSED, residual angle=%.2f deg\r\n", (double)p3_angle);
@@ -1179,7 +1177,7 @@ void StartCamTestTask(void *argument) {
 
     /* ---- P2: Mark 点建系测试 ---- */
     PrintDebug("\r\n--- Test 3/3: P2 (Mark alignment) ---\r\n");
-    if (!cam_test_run(VCMD_P2, 0, CAM_TEST_TIMEOUT_P2, &cur_x, &cur_y, NULL)) {
+    if (!cam_test_run(VCMD_P2, 0, CAM_TEST_TIMEOUT_P2, NULL)) {
         PrintDebug("[CAM_TEST] P2 FAILED\r\n");
     } else {
         PrintDebug("[CAM_TEST] P2 PASSED\r\n");

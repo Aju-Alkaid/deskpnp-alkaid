@@ -1,4 +1,4 @@
-﻿#include "app_motion.h"
+#include "app_motion.h"
 #include "driver_motor.h"
 #include "driver_can.h"
 #include "cmsis_os2.h"
@@ -50,6 +50,67 @@ volatile bool s_cmd_interrupted = false;
 #define STATUS_START      0x01    // 普通模式：运行开始 (未使用同步时可能收到)
 
 #define ACK_TIMEOUT_MS   2000      // 单轴到位超时 (ms)
+
+/* ================================================================
+ *  座标核心 — 线程安全的机器座标系单例
+ * ================================================================ */
+static MachineCoord_t g_coord;
+static osMutexId_t    g_coord_mutex;
+
+void Coord_Init(void) {
+    if (g_coord_mutex != NULL) return;  /* 幂等，允许多处调用 */
+    g_coord_mutex = osMutexNew(NULL);
+    memset(&g_coord, 0, sizeof(g_coord));
+    g_coord.z = 75.0f;                  /* 默认安全角度 */
+}
+
+MachineCoord_t Coord_Get(void) {
+    MachineCoord_t c;
+    if (g_coord_mutex) {
+        osMutexAcquire(g_coord_mutex, osWaitForever);
+        c = g_coord;
+        osMutexRelease(g_coord_mutex);
+    } else {
+        c = g_coord;                    /* 初始化前的安全回退 */
+    }
+    return c;
+}
+
+void Coord_SetHome(void) {
+    if (g_coord_mutex) osMutexAcquire(g_coord_mutex, osWaitForever);
+    g_coord.x = 0;
+    g_coord.y = 0;
+    g_coord.r = 0.0f;
+    g_coord.homed = true;
+    g_coord.valid = true;
+    if (g_coord_mutex) osMutexRelease(g_coord_mutex);
+}
+
+void Coord_UpdateXY(int32_t x, int32_t y) {
+    if (g_coord_mutex) osMutexAcquire(g_coord_mutex, osWaitForever);
+    g_coord.x = x;
+    g_coord.y = y;
+    g_coord.valid = true;               /* 到位 = 座标可信 */
+    if (g_coord_mutex) osMutexRelease(g_coord_mutex);
+}
+
+void Coord_UpdateR(float angle) {
+    if (g_coord_mutex) osMutexAcquire(g_coord_mutex, osWaitForever);
+    g_coord.r = angle;
+    if (g_coord_mutex) osMutexRelease(g_coord_mutex);
+}
+
+void Coord_UpdateZ(float angle) {
+    if (g_coord_mutex) osMutexAcquire(g_coord_mutex, osWaitForever);
+    g_coord.z = angle;
+    if (g_coord_mutex) osMutexRelease(g_coord_mutex);
+}
+
+void Coord_Invalidate(void) {
+    if (g_coord_mutex) osMutexAcquire(g_coord_mutex, osWaitForever);
+    g_coord.valid = false;              /* 保留上次坐标值供诊断 */
+    if (g_coord_mutex) osMutexRelease(g_coord_mutex);
+}
 
 /* ---------- 内部辅助函数 ---------- */
 
@@ -122,18 +183,16 @@ void disable_sync_stop(void)
  * @param  dy     Y 轴相对位移 (步数，单电机)
  * @param  speed  速度 (RPM)
  * @param  acc    加速度
- * @param  cur_x  当前 X 绝对坐标 (输入输出，仅成功时更新)
- * @param  cur_y  当前 Y 绝对坐标 (输入输出，仅成功时更新)
  * @retval  0  全部轴到位
  * @retval -1  超时 (10s)
  * @retval -2  电机异常 (堵转/限位)
  * @retval -3  UART 中断命令 (上位机 MOVE_STOP)
  */
-int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
-                             int32_t *cur_x, int32_t *cur_y)
+int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
 {
-    int32_t target_x = *cur_x + dx;
-    int32_t target_y = *cur_y + dy;
+    MachineCoord_t c0 = Coord_Get();
+    int32_t target_x = c0.x + dx;
+    int32_t target_y = c0.y + dy;
 
     if (target_x >  8388607) target_x =  8388607;
     if (target_x < -8388607) target_x = -8388607;
@@ -181,6 +240,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
             axis_stop(Y_ADDR);
             osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
             g_motor_error_detail = MOTOR_ERR_LIMIT;
+            Coord_Invalidate();  /* 堵转/限位: 座标不可信 */
             return -2;
         }
 
@@ -188,8 +248,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
 #ifdef DEBUG_MOVE
             PrintDebug("[MOVE] all done: flags=0x%lX\r\n", flags);
 #endif
-            *cur_x = target_x;
-            *cur_y = target_y;
+            Coord_UpdateXY(target_x, target_y);  /* 到位: 座标可信 */
             osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
             return 0;
         }
@@ -204,6 +263,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
                 axis_stop(Y_ADDR);
                 osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
                 s_cmd_interrupted = true;
+                Coord_Invalidate();  /* 中断停止: 停在哪不知道 */
                 return -3;
             }
         }
@@ -216,12 +276,13 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc,
     axis_stop(Y_ADDR);
     osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
     g_motor_error_detail = MOTOR_ERR_TIMEOUT;
+    Coord_Invalidate();  /* 超时: 可能停在半路 */
     return -1;
 
 }
 
 /**
- * @brief 阻塞等待指定电机进入“运行完成”状态 (0x02)      已被事件组代替，暂无用
+ * @brief 阻塞等待指定电机进入"运行完成"状态 (0x02)      已被事件组代替，暂无用
  * @param addr 电机 CAN ID
  * @param timeout_ms 超时 (ms)
  * @retval 0 成功, -1 超时
@@ -290,11 +351,13 @@ static void servo_delay_ms(uint32_t ms) {
 void z_down(void) {
     Servo_SetAngle(SERVO_CH_Z, ANGLE_DOWN);
     servo_delay_ms(300);   // 等待到位
+    Coord_UpdateZ(ANGLE_DOWN);
 }
 
 void z_up(void) {
     Servo_SetAngle(SERVO_CH_Z, ANGLE_UP);
     servo_delay_ms(300);
+    Coord_UpdateZ(ANGLE_UP);
 }
 
 /* ---------- Z 轴三高度 (使用 g_calib 标定值) ---------- */
@@ -302,32 +365,35 @@ void z_up(void) {
 void z_safe(void) {
     Servo_SetAngle(SERVO_CH_Z, g_calib.z_safe_angle);
     servo_delay_ms(300);
+    Coord_UpdateZ(g_calib.z_safe_angle);
 }
 
 void z_pick(void) {
     Servo_SetAngle(SERVO_CH_Z, g_calib.z_pick_angle);
     servo_delay_ms(300);
+    Coord_UpdateZ(g_calib.z_pick_angle);
 }
 
 void z_place(void) {
     Servo_SetAngle(SERVO_CH_Z, g_calib.z_place_angle);
     servo_delay_ms(300);
+    Coord_UpdateZ(g_calib.z_place_angle);
 }
 
 /* ---------- 安全 XY 运动 (移动前自动抬 Z 到安全高度) ---------- */
 
-int safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc,
-                 int32_t *cur_x, int32_t *cur_y) {
+int safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc) {
     z_safe();
     osDelay(100);
-    int32_t dx = target_x - *cur_x;
-    int32_t dy = target_y - *cur_y;
-    int ret = move_xy_relative(dx, dy, speed, acc, cur_x, cur_y);
+    MachineCoord_t c0 = Coord_Get();
+    int32_t dx = target_x - c0.x;
+    int32_t dy = target_y - c0.y;
+    int ret = move_xy_relative(dx, dy, speed, acc);
     if (ret == -1) {
         /* 超时：可能 CAN 丢帧，重试一次 */
         PrintDebug("[MOVE] timeout, retry once\r\n");
         osDelay(50);
-        ret = move_xy_relative(dx, dy, speed, acc, cur_x, cur_y);
+        ret = move_xy_relative(dx, dy, speed, acc);
     }
     if (ret == -2) g_motor_error = true;   /* 限位/堵转，不可恢复 */
     if (ret == -1) g_motor_error = true;   /* 两次超时，升级为错误 */
@@ -374,20 +440,18 @@ static int32_t angle_to_usteps(float angle) {
  * @brief R 轴旋转到指定角度 (开环，基于时间)
  * @param angle  目标角度 (绝对角度，0~360)
  * @param speed_rpm 转速
- * @note  当前角度未记录，需先在系统任务中维护
  */
-/* ---- R 轴当前角度 (供外部读写) ---- */
-static float g_cur_r_angle = 0.0f;
-
 void r_axis_set_zero(void) {
-    g_cur_r_angle = 0.0f;
+    Coord_UpdateR(0.0f);
 }
-void r_axis_rotate(float angle, float speed_rpm) {
-    float delta = angle - g_cur_r_angle;
+
+int r_axis_rotate(float angle, float speed_rpm) {
+    MachineCoord_t c0 = Coord_Get();
+    float delta = angle - c0.r;
     if (delta < -180.0f) delta += 360.0f;
     else if (delta > 180.0f) delta -= 360.0f;   // 选择最短路径
 
-    if (fabsf(delta) <= R_CORRECTION_THRESHOLD_DEG) return;  // 最小矫正阈值
+    if (fabsf(delta) <= R_CORRECTION_THRESHOLD_DEG) return -1;  // 最小矫正阈值，无动作
 
     uint8_t  dir = (delta >= 0) ? 0 : 1;
     int32_t  usteps = angle_to_usteps(fabsf(delta));
@@ -422,7 +486,8 @@ void r_axis_rotate(float angle, float speed_rpm) {
     /* 关闭 TMC2209 驱动 */
     TMC_SetEnable(false);
 
-    g_cur_r_angle = angle;
+    Coord_UpdateR(angle);
+    return 0;
 }
 
 /* ---------- 任务入口 ---------- */
@@ -439,10 +504,6 @@ void MotionTask_Func(void *argument)
     TMC_Init();               // TMC2209 初始化
     // 可选：将开机当前位置设为工作零点
     // motorSetZero(0x01); ...
-
-    // 跟踪当前绝对坐标 (编码器值)
-    int32_t cur_x = 0;
-    int32_t cur_y = 0;
 
     MotionCmd_t cmd;
 
@@ -468,25 +529,25 @@ void MotionTask_Func(void *argument)
                     send_axis_stop(X2_ADDR, 0);
                     send_axis_stop(Y_ADDR, 0);
                     PrintDebug("Emergency stop! \r\n");
+                    Coord_Invalidate();
                 } else if ((flags & EVENT_ALL_AXES) == EVENT_ALL_AXES) {
                     PrintDebug("Move to (%ld, %ld) done.\r\n", cmd.target_x, cmd.target_y);
-                    cur_x = cmd.target_x;
-                    cur_y = cmd.target_y;                    
-                    // 正常到位
+                    Coord_UpdateXY(cmd.target_x, cmd.target_y);
                 }else {
                     // 超时处理
                     send_axis_stop(X1_ADDR, 0);
                     send_axis_stop(X2_ADDR, 0);
                     send_axis_stop(Y_ADDR, 0);
                     PrintDebug("Move timeout! \r\n");
+                    Coord_Invalidate();
                 }
                 break;
 
             case MOTION_CMD_HOME:
                 // 回零：向坐标 0 移动，速度稍慢
-                move_to(0, 0, 100, 50);
-                cur_x = 0;
-                cur_y = 0;
+                if (move_to(0, 0, 100, 50) == 0) {
+                    Coord_SetHome();
+                }
                 break;
 
             case MOTION_CMD_STOP:
@@ -494,6 +555,7 @@ void MotionTask_Func(void *argument)
                 send_axis_stop(X1_ADDR, 0);
                 send_axis_stop(X2_ADDR, 0);
                 send_axis_stop(Y_ADDR, 0);
+                Coord_Invalidate();
                 break;
 
             case MOTION_CMD_DISABLE:
@@ -561,4 +623,3 @@ void CAN_Process_Task(void *argument) {
         }
     }
 }
-
