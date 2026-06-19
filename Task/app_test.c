@@ -1006,10 +1006,12 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
                     }
                 }
                 if (dx_s != 0 || dy_s != 0) {
-                    int ret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s,
+                    MachineCoord_t mc = Coord_Get();
+                    int ret = safe_move_to(mc.x + dx_s, mc.y + dy_s,
                                            CAM_MOVE_SPEED, CAM_MOVE_ACC);
+                    mc = Coord_Get();
                     PrintDebug("[CAM_TEST]   move done, cur=(%ld,%ld) ret=%d\r\n",
-                               (long)Coord_Get().x, (long)Coord_Get().y, ret);
+                               (long)mc.x, (long)mc.y, ret);
                 }
                 Vision_Go();
                 break;
@@ -1030,9 +1032,16 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
                 return true;
             }
 
-            case VISION_ERROR:
-                PrintDebug("[CAM_TEST]   ERROR: %s\r\n", Vision_GetError());
+            case VISION_ERROR: {
+                const char *err = Vision_GetError();
+                if (err[0] == 'e' && err[1] == 'r' && err[2] == 'r' &&
+                    err[3] == '3' && err[4] == '_' && err[5] == '8' && err[6] == '\0') {
+                    PrintDebug("[CAM_TEST]   ERROR: nozzle empty (err3_8)\r\n");
+                } else {
+                    PrintDebug("[CAM_TEST]   ERROR: %s\r\n", err);
+                }
                 return false;
+            }
 
             default:
                 break;
@@ -1069,6 +1078,7 @@ void StartCamTestTask(void *argument) {
     DRV8803_Init();
     DRV8803_EnableChip(1, true);   /* U12 12V 芯片使能 */
     DRV8803_EnableChip(2, true);   /* U13 24V 芯片使能（电磁阀） */
+    Coord_Init();                  /* 座标核心须在任何运动前初始化 */
     Servo_Init(&htim2);            /* Z轴舵机 TIM2_CH3 */
     DRV8803_SetOutput(&Port_12VO4, true);  /* 舵机上电 (12VO4) */
     Valve_Off();                        /* 电磁阀初始关断 (PA6=LOW) */
@@ -1080,8 +1090,6 @@ void StartCamTestTask(void *argument) {
     }
     TMC_SetEnable(false);          /* ENN 低有效: HIGH=关闭 */
 
-    Coord_Init();
-
     /* 从 Flash 加载标定值 */
     if (Calib_Load(&g_calib) != 0) {
         PrintDebug("[CamTest] Flash read failed, using defaults.\r\n");
@@ -1091,9 +1099,6 @@ void StartCamTestTask(void *argument) {
     Servo_SetAngle(2, 120.0f);
     osDelay(300);
 
-    /* 气泵开启（方便 P3 测试） */
-    Pump_On();
-    PrintDebug("[CamTest] 气泵已开启\r\n");
 
     /* ---- 1. CAN + 电机初始化 ---- */
     CAN_Init(&hfdcan1, NULL);
@@ -1130,50 +1135,96 @@ void StartCamTestTask(void *argument) {
     /* ---- P1 角度矫正：检测到元件偏角后立即 R 轴旋转补偿 ---- */
     if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
         PrintDebug("\r\n--- R axis correction (P1 angle=%.2f deg) ---\r\n", (double)p1_angle);
-        r_axis_rotate(p1_angle, R_SPEED_RPM);
-        PrintDebug("[CamTest] R axis rotated by %.2f deg\r\n", (double)p1_angle);
+        int rret = r_axis_rotate(p1_angle, R_SPEED_RPM);
+        PrintDebug("[CamTest] R axis correction %s (%.2f deg)\r\n", rret==0?"done":"skipped", (double)p1_angle);
     } else {
         PrintDebug("[CamTest] P1 angle small, skip R correction\r\n");
     }
 
-    /* ---- 吸取元件 ---- */
-    PrintDebug("\r\n--- Pick component ---\r\n");
-    pick_component();
-
-    /* 移动到下相机位置（使吸嘴进入 P3 视野） */
+    /* ---- 吸取 + P3 验证（含 err3_8 吸嘴空取重试，最多 3 次） ---- */
+    PrintDebug("\r\n--- Test 2/3: P3 (pick + verify) ---\r\n");
     {
-        int32_t dx = g_calib.bottom_cam_x_steps - Coord_Get().x;
-        int32_t dy = g_calib.bottom_cam_y_steps - Coord_Get().y;
-        if (dx != 0 || dy != 0) {
-            safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps,
-                         CAM_MOVE_SPEED, CAM_MOVE_ACC);
+        int nozzle_retry = 0;
+        bool p3_ok = false;
+        /* 保存当前散料区位置，err3_8 重试时移回此处 */
+        MachineCoord_t scatter_pos = Coord_Get();
+
+        while (nozzle_retry < 3 && !p3_ok) {
+            if (nozzle_retry > 0) {
+                /* 重试：移回散料区 → 重新 P1 找取 → R 矫正 */
+                PrintDebug("[CAM_TEST] err3_8 retry %d/3: re-running P1...\r\n", nozzle_retry);
+                safe_move_to(scatter_pos.x, scatter_pos.y, CAM_MOVE_SPEED, CAM_MOVE_ACC);
+                if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &p1_angle)) {
+                    PrintDebug("[CAM_TEST] P1 retry FAILED, aborting P3\r\n");
+                    break;
+                }
+                if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
+                    r_axis_rotate(p1_angle, R_SPEED_RPM);
+                    PrintDebug("[CamTest] R axis re-correction done (%.2f deg)\r\n", (double)p1_angle);
+                }
+            }
+
+            /* 吸取元件 */
+            PrintDebug("[CamTest] Pick component...\r\n");
+            Pump_On();
+            if (!pick_component()) {
+                PrintDebug("[CamTest] Pick FAILED!\r\n");
+                Pump_Off();
+                break;
+            }
+            PrintDebug("[CamTest] Pick OK\r\n");
+
+            /* 移动到下相机位置（使吸嘴进入 P3 视野） */
+            {
+                MachineCoord_t mc0 = Coord_Get();
+                int32_t dx = g_calib.bottom_cam_x_steps - mc0.x;
+                int32_t dy = g_calib.bottom_cam_y_steps - mc0.y;
+                if (dx != 0 || dy != 0) {
+                    safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps,
+                                 CAM_MOVE_SPEED, CAM_MOVE_ACC);
+                }
+                MachineCoord_t mc1 = Coord_Get();
+                PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
+                           (long)mc1.x, (long)mc1.y);
+            }
+
+            /* P3: 下相机偏移检测，验证 P1 矫正是否到位 */
+            if (!cam_test_run(VCMD_P3, 0, CAM_TEST_TIMEOUT_P3, &p3_angle)) {
+                const char *err = Vision_GetError();
+                if (err[0] == 'e' && err[1] == 'r' && err[2] == 'r' &&
+                    err[3] == '3' && err[4] == '_' && err[5] == '8' && err[6] == '\0') {
+                    nozzle_retry++;
+                    PrintDebug("[CAM_TEST] P3 nozzle empty, retry %d/3\r\n", nozzle_retry);
+                    /* 释放（实际无元件可放）+ 吹气清理吸嘴 */
+                    Pump_Off();
+                    Valve_On(); osDelay(200); Valve_Off();
+                    continue;
+                }
+                PrintDebug("[CAM_TEST] P3 FAILED: %s\r\n", err);
+                break;
+            }
+
+            p3_ok = true;
+            PrintDebug("[CAM_TEST] P3 PASSED, residual angle=%.2f deg\r\n", (double)p3_angle);
         }
-        PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
-                   (long)Coord_Get().x, (long)Coord_Get().y);
-    }
 
-    /* ---- P3: 下相机偏移检测，验证 P1 矫正是否到位 ---- */
-    PrintDebug("\r\n--- Test 2/3: P3 (verify P1 correction) ---\r\n");
-    if (!cam_test_run(VCMD_P3, 0, CAM_TEST_TIMEOUT_P3, &p3_angle)) {
-        PrintDebug("[CAM_TEST] P3 FAILED, continuing...\r\n");
-    } else {
-        PrintDebug("[CAM_TEST] P3 PASSED, residual angle=%.2f deg\r\n", (double)p3_angle);
+        if (p3_ok) {
+            /* P3 二次矫正：若 P3 仍有残余偏角，再次 R 轴旋转补偿 */
+            if (fabsf(p3_angle) > R_CORRECTION_THRESHOLD_DEG) {
+                PrintDebug("\r\n--- R axis 2nd correction (P3 residual=%.2f deg) ---\r\n", (double)p3_angle);
+                int rret2 = r_axis_rotate(p3_angle, R_SPEED_RPM);
+                PrintDebug("[CamTest] R axis 2nd correction %s (%.2f deg)\r\n",
+                           rret2==0?"done":"skipped", (double)p3_angle);
+            } else {
+                PrintDebug("[CamTest] P3 residual small, no 2nd correction needed\r\n");
+            }
+            /* 释放元件 */
+            Pump_Off();
+            Valve_On(); osDelay(200); Valve_Off();
+        } else if (nozzle_retry >= 3) {
+            PrintDebug("[CAM_TEST] P3 nozzle empty x3, check feeder!\r\n");
+        }
     }
-
-    /* ---- P3 二次矫正：若 P3 仍有残余偏角，再次 R 轴旋转补偿 ---- */
-    if (fabsf(p3_angle) > R_CORRECTION_THRESHOLD_DEG) {
-        PrintDebug("\r\n--- R axis 2nd correction (P3 residual=%.2f deg) ---\r\n", (double)p3_angle);
-        r_axis_rotate(p3_angle, R_SPEED_RPM);
-        PrintDebug("[CamTest] R axis 2nd correction by %.2f deg\r\n", (double)p3_angle);
-    } else {
-        PrintDebug("[CamTest] P3 residual small, no 2nd correction needed\r\n");
-    }
-
-    /* ---- 释放元件 ---- */
-    Pump_Off();
-    Valve_On();
-    osDelay(200);
-    Valve_Off();
 
     /* ---- P2: Mark 点建系测试 ---- */
     PrintDebug("\r\n--- Test 3/3: P2 (Mark alignment) ---\r\n");

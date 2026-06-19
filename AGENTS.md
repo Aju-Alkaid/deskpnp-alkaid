@@ -134,10 +134,12 @@ pnp_1/
   - **标定命令：** SET_SCATTER_AREA / SET_SCATTER_SIZE <mm> / SET_PCB_AREA_MIN / SET_PCB_AREA_MAX / SET_BOTTOM_CAM / SET_Z_SAFE / SET_Z_PICK / SET_Z_PLACE / SET_R_ZERO / SAVE_CALIB
 - **文件下载流程：**
   1. G4 发送 `DOWNLOAD_READY\n` 给上位机
-  2. 上位机逐行发送 CSV 数据（每行以 `\n` 结尾）
-  3. 首行作为表头解析（识别 X/Y/Rotation/SMD 列）
+  2. 上位机逐行发送 CSV 数据（每行以 `\n` 结尾，UTF-8 编码）
+  3. 首行作为表头解析（检测 `"Designator"` 或 `Designator`，兼容引号/无引号两种格式）
   4. 500ms 超时无新行 → 下载完成，自动进入 Mark 点对齐流程
-  5. CSV 格式：`ID,Name,X(mm),Y(mm),Rotation(deg),SMD`
+  5. CSV 格式：15 列，`\t` 分隔，字段以双引号包裹。列：Designator / Device / Footprint / Mid X / Mid Y / Ref X / Ref Y / Pad X / Pad Y / Pins / Layer / Rotation / SMD / Comment / Name
+  6. 坐标值含 `mm` 后缀（如 `"8mm"`），固件自动去后缀解析为浮点数
+  7. 详细规范见上位机文档《单片机端 CSV 数据处理规范》
 - **无校验：** 纯文本协议，依赖 UART 硬件可靠性
 
 
@@ -203,11 +205,13 @@ pnp_1/
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
   | 1 | Host→Cam | `p3` | 启动 P3 |
+  | — | Cam | Phase0：吸嘴圆检测（10帧，阈值≥7帧） | |
+  | — | Cam→Host | `err3_8` | 检测到吸嘴圆 → 吸嘴空取（无元件） |
   | 2 | Cam→Host | `pos` `N:{dx}` `N:{dy}` | Phase1 自动检测（**无 end**，dx/dy 已×1.5） |
   | 3 | Host→Cam | `go` | 移动完成 → Phase2 |
   | 4 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 未重合（|dx|>3 或 |dy|>3） |
   | 5 | 对齐完成：Cam→Host: `ok` → Cam→Host: `N:{ao}`（**角度×100，紧跟 ok**） |
-  - **错误码：** `err3_1`/`err3_2`（致命），`err3_3`（**可重试**—Cam 收到非 go，Host 重发 go），`err3_5`/`err3_6`/`err3_7`（致命）
+  - **错误码：** `err3_1`/`err3_2`（致命），`err3_3`（**可重试**—Cam 收到非 go，Host 重发 go），`err3_5`/`err3_6`/`err3_7`（致命），`err3_8`（**吸嘴空取**—Phase0 检测到吸嘴圆，不可降级贴装，主控回退重新吸取）
 
 - **pos 格式汇总：**
 
@@ -2176,7 +2180,7 @@ machine_y = rotate(csv_y, theta) + pcb_origin_y + p3_offset_y
 | VISION_GOT_POS | 移动+记录实际坐标 | 移动+Vision_Go() | 移动+累加偏移 |
 | VISION_GOT_ERR_RETRY | — | — | Vision_Go() 重试 |
 | VISION_DONE | 建系+Mark3验证 | R矫正→HOST_PICK | R矫正→HOST_MOVE_TO_PCB |
-| VISION_ERROR | →HOST_ERROR | 分级处理(重试/子位扫描/跳过/WAIT_REFILL) | →HOST_MOVE_TO_PCB(容错) |
+| VISION_ERROR | →HOST_ERROR | 分级处理(重试/子位扫描/跳过/WAIT_REFILL) | err3_8→回散料区重取 / 其他→MOVE_TO_PCB(容错) |
 
 
 
@@ -2534,3 +2538,260 @@ if (g_mark_count < P2_MARK_COUNT) {
 - **独立运动任务不做：** PnP 流程天然串行——每次运动后必须等视觉/传感器反馈。阻塞式原语已够用。
 - **多板支持不做：** 当前一次贴一块。
 - **软限位搁置：** 需要在标定流程中先加 `SET_X_RANGE`/`SET_Y_RANGE` 命令。
+
+## 二十五、2026-06-20 会话 — CSV 解析健壮性修正
+
+### 25.1 背景
+
+对照上位机规范文档《单片机端 CSV 数据处理规范》与实测 CSV 文件
+（PickAndPlace_Mark_贴装测试板_2026_06_14.csv），
+审查 `app_host.c` 中 `parse_csv_line` 的实现，发现两个问题。
+
+### 25.2 问题 1 — 表头检测仅匹配带引号形式（P1）
+
+**规范描述：** 表头行为 `"Designator"\t"Device"\t...`（字段以双引号包裹）。
+
+**实测 CSV：** 该 PCB 设计工具输出的 CSV 表头为 **无引号** 格式
+`Designator\tDevice\tFootprint\t...`。
+两个不同日期的 CSV 文件均保持一致，说明是工具的统一输出格式。
+
+**原代码**（`parse_csv_line`，第 229 行）：
+```c
+if (len >= 12 && memcmp(line, "\"Designator\"", 12) == 0) {
+```
+仅匹配 `"Designator"`（12 字节含引号），
+实测 CSV 的 `Designator`（10 字节无引号）无法命中。
+
+**为何未暴露：** 代码有 fallback `g_header_parsed = true`，
+之后走 SMD 字段过滤——表头第 12 列值为 `SMD`，
+`strcmp("SMD", "Yes") != 0` 且 `strcmp("SMD", "MARK") != 0`，
+被当作无效行丢弃。这是偶然正确，依赖列名巧合。
+
+**修复（第 229 行）：**
+```c
+if ((len >= 12 && memcmp(line, "\"Designator\"", 12) == 0) ||
+    (len >= 10 && memcmp(line, "Designator", 10) == 0)) {
+```
+- 两条分支各自带 `len >= N` 长度守卫，`len < 10` 时不执行 `memcmp`，无越界读取
+- 单行复合条件，与同文件 1258-1260 行 `raw_len == N && memcmp` 模式一致
+- 引号/无引号两路覆盖，不再依赖 SMD 列名巧合
+
+### 25.3 问题 2 — Footprint 缓冲区不足以容纳长封装名（P2）
+
+**实测数据：**
+- `"LED-SMD_6P-L5.0-W5.0-P1.6-LS5.4-TL"` — 38 字符
+- `"CAP-SMD_BD6.3-L6.6-W6.6-LS7.3-FD-H7.7"` — 37 字符
+
+**原代码：**
+- `Component_t.footprint` — `char[32]`（`app_host.h:24`）
+- 局部 `tmp` — `char[32]`（`app_host.c:265`）
+
+38 字符的封装名在 `csv_get_field` 中被截断到 31 字符（`out_max - 1`），
+丢失后缀。当前 `footprint_to_class_id` 仅比较前 2-3 字符用于散料区分类，
+截断暂不影响功能。但若后续需要完整封装名做匹配
+（feeder 分配、视觉模板切换），静默截断会成为隐蔽 bug。
+
+**修复：**
+
+| 位置 | 旧值 | 新值 |
+|------|------|------|
+| `app_host.h:24` `footprint` | `char[32]` | `char[48]` |
+| `app_host.c:265` `tmp` | `char[32]` | `char[48]` |
+
+48 字节对最长 38 字符的封装名留有 26% 余量。
+`tmp` 与 `footprint` 尺寸一致，
+`csv_get_field(line, len, 2, tmp, sizeof(tmp))` 的截断上限与结构体字段对齐。
+`MAX_COMPONENTS=128` + `MAX_MARKS=8` 共 136 实例，
+结构体从 52 字节增至 68 字节（+16），总计增加约 2.1KB RAM，
+占 STM32G474 128KB SRAM 的 1.7%。
+
+### 25.4 完整流程验证
+
+代入实测 CSV 文件逐行推演（29 元件 + 1 SMD="No" + 3 Mark），
+覆盖以下场景：
+
+| 场景 | 输入 | 结果 |
+|------|------|------|
+| 表头（引号） | `"Designator"\t...` | 第一分支命中，跳过 ✅ |
+| 表头（无引号） | `Designator\t...` | 第二分支命中，跳过 ✅ |
+| 极短行（len<10） | `"X"` | 两分支长度守卫均不满足，走 SMD 过滤后丢弃 ✅ |
+| 空行 | `\n` | LineParser 不产生调用 ✅ |
+| 数据行 SMD="Yes" | `"C1"\t...\t"Yes"` | 存入 `g_components[]` ✅ |
+| 数据行 SMD="No" | `"H1"\t...\t"No"` | 丢弃 ✅ |
+| Mark 行 SMD="MARK" | `""\t""\t"Mark1"...` | 存入 `g_marks[]` ✅ |
+| 长封装名（38 字符） | `LED-SMD_6P-...` | `tmp[48]` 完整读入，不截断 ✅ |
+
+### 25.5 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_host.c` | 表头检测增加 `len >= 10` 守卫 + 无引号分支（第 229 行）；`tmp[32]` → `tmp[48]`（第 265 行） |
+| `Task/app_host.h` | `footprint[32]` → `footprint[48]`（第 24 行） |
+
+### 25.6 设计决策记录
+
+- **双 memcmp 而非跳过引号方案：** 跳过引号的方案增加了局部变量和控制流，
+  边界安全问题未根本解决（短行跳过引号后依然越界），
+  且与代码库既有的 `memcmp + 显式长度守卫` 模式不一致。
+  保持双分支 `memcmp` 各带独立长度守卫。
+- **48 字节选型：** 当前最长封装名 38 字符，
+  48 = 38 × 1.26，留有合理余量。不盲目扩到 64 以节省 RAM。
+- **不改 `csv_get_field` 内部逻辑：**
+  该函数通过 `out_max` 参数由调用方控制截断上限，接口已足够通用。
+
+
+## 二十六、2026-06-20 会话 — P3 吸嘴空取检测 (err3_8)
+
+### 26.1 背景
+
+上位机（MaixCAM）对 P3 进程新增 Phase0 吸嘴圆检测。P3 启动后 Cam 先检测是否有吸嘴圆（10帧 HoughCircles，阈值≥7帧判为空取），而非直接进入元件对准。若检测到吸嘴圆（即吸嘴上无元件），Cam 发送 `err3_8` 并结束 P3，不再进入 Phase1/Phase2。
+
+主控无需新增发送指令，仅需处理新增的接收信号。
+
+### 26.2 协议变更
+
+**P3 流程（更新后）：**
+```
+Host 发 "p3"
+  → Cam Phase0：吸嘴圆检测（~100-200ms）
+      ├─ 检测到吸嘴圆 → Cam 发 "err3_8" → P3 结束
+      └─ 未检测到吸嘴圆 → 进入 Phase1/Phase2（与原流程相同）
+```
+
+**新增错误码：**
+
+| 错误码 | 触发时机 | 含义 | 主控应对 |
+|--------|---------|------|---------|
+| `err3_8` | P3 Phase0 | 吸嘴未吸取元件（检测到吸嘴圆形） | 重新吸取该元件，不可降级贴装 |
+
+> `err3_8` 与 `err3_1`~`err3_7` 不同：**不允许降级到 P1 精度继续贴装**，因为吸嘴上根本没有元件。
+
+### 26.3 固件实现
+
+**未修改的文件：** `app_vision.c` / `app_vision.h` — `process_p3_frame` 的通用错误分支已自动兼容：非 `err3_3` 的 `err*` 帧统一走 `VISION_ERROR` + `save_error(str)`，`Vision_GetError()` 可直接返回 `"err3_8"` 字符串。
+
+**修改文件：** `Task/app_host.c`（+15 行 / -3 行），`Task/app_test.c`（+43 行 / -38 行）。
+
+### 26.4 Host_Task 新增变量
+
+```c
+static int g_p3_nozzle_retry = 0; /* P3 吸嘴空取重试计数 */
+```
+
+位于 `g_p1_retry_count` 旁，与 P1 重试计数器平行管理。
+
+### 26.5 offset_check_step 核心逻辑
+
+```c
+case VISION_ERROR: {
+    const char *err = Vision_GetError();
+    Component_t *c = &g_components[g_comp_index];
+    int cl;
+    if (err[0] == 'e' && err[1] == 'r' && err[2] == 'r' &&
+        err[3] == '3' && err[4] == '_' && err[5] == '8' && err[6] == '\0') {
+        g_p3_nozzle_retry++;
+        if (g_p3_nozzle_retry >= 3) {
+            PrintDebug("[HOST] P3 nozzle empty x3, check feeder!\r\n");
+            g_state = HOST_ERROR;
+        } else {
+            PrintDebug("[HOST] P3 nozzle empty, retry pickup (%d/3)\r\n", g_p3_nozzle_retry);
+            /* 回退散料区重新 P1 找取同一元件 */
+            cl = component_cell(c);
+            g_p1_scan_pos = 0;
+            safe_move_to(g_scatter_subpos[cl][0][0], g_scatter_subpos[cl][0][1],
+                         PNP_SPEED, PNP_ACC);
+            Vision_Start(VCMD_P1, footprint_to_class_id(c->footprint));
+            g_state = HOST_FIND_COMP;
+        }
+    } else {
+        PrintDebug("[HOST] Offset check ERROR: %s\r\n", err);
+        Coord_Invalidate();
+        g_state = HOST_MOVE_TO_PCB;  /* 容错：仍然贴装 */
+    }
+    break;
+}
+```
+
+**关键设计要点：**
+
+1. **字符串比较含终止符**：`err[6] == '\0'` 防止误匹配 `err3_80` 等变体，与 `app_vision.c` 中 `err3_3` 的判断模式一致。
+
+2. **必须移到散料区再启 P1**：err3_8 时机器在下相机位置（`move_to_bottom_step` 已移动），而 P1 需要上相机看向散料区。回退路径必须遵循 `component_cell → g_p1_scan_pos=0 → safe_move_to(scatter) → Vision_Start(P1)` 四步模式，与项目中所有 6 处 HOST_FIND_COMP 过渡点一致。
+
+3. **错误分层**：err3_8 与其他 P3 错误走不同分支——err3_8 回退重取，err3_1~err3_7 降级贴装（保持原有容错逻辑）。err3_3 走独立路径（VISION_GOT_ERR_RETRY），互不干扰。
+
+### 26.6 计数器生命周期
+
+`g_p3_nozzle_retry` 共 8 个引用点：
+
+| 位置 | 操作 | 说明 |
+|------|------|------|
+| 静态声明 | `= 0` | 编译期初始化 |
+| ABORT 处理 | `= 0` | 流程中止清零 |
+| P3 超时 | `= 0` | 超时降级贴装，清零重试计数 |
+| P3 VISION_DONE | `= 0` | P3 成功完成清零 |
+| err3_8 命中 | `++` | 吸嘴空取累加 |
+| ≥3 判断 | 读 | 触发 HOST_ERROR |
+| 日志输出 | 读 | 重试次数显示 |
+| ERROR 超时 | `= 0` | 30s 无人干预回 DEBUG 清零 |
+
+**设计原则：** 计数器不在 `move_to_bottom_step` 中复位（否则 err3_8 → P1 → pick → move_to_bottom 会将计数器清零，导致重试循环永远达不到 3）。仅在 P3 成功或流程终止时清零。
+
+### 26.7 典型路径
+
+```
+正常：P3 → VISION_DONE → 清零 → 贴装 → 下一元件
+重试成功：err3_8(1) → 移散料区 → P1+pick → P3 → VISION_DONE → 清零
+重试耗尽：err3_8(1) → ... → err3_8(2) → ... → err3_8(3) → HOST_ERROR
+超时兜底：err3_8(1) → P3超时 → 清零 → 降级贴装 → 下一元件
+其他错误：err3_1~err3_7 → 降级贴装（计数器不变）
+```
+
+### 26.8 视觉状态覆盖矩阵更新
+
+| VisionState | offset_check_step（更新后） |
+|-------------|---------------------------|
+| VISION_GOT_ERR_RETRY | Vision_Go() 重发（err3_3） |
+| VISION_GOT_POS | 移动+累加偏移 |
+| VISION_DONE | R矫正+清零计数器→HOST_MOVE_TO_PCB |
+| VISION_ERROR（err3_8） | 计数器++ → <3回散料区重取 / ≥3进HOST_ERROR |
+| VISION_ERROR（其他） | →HOST_MOVE_TO_PCB（容错降级） |
+
+### 26.9 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_host.c` | 新增 `g_p3_nozzle_retry` 计数器；扩展 `offset_check_step` 的 VISION_ERROR 分支；4 处清零复位点（VISION_DONE、超时、ABORT、ERROR_TIMEOUT） |
+| `Task/app_test.c` | `cam_test_run` VISION_ERROR 增加 err3_8 识别；`StartCamTestTask` 吸取+P3 段重构为 while 重试循环 |
+| `Task/app_vision.c` | 无需修改 — `process_p3_frame` 通用错误分支自动兼容 |
+| `Task/app_vision.h` | 无需修改 |
+
+### 26.10 设计决策记录
+
+- **不新增 VisionState**：使用现有 `VISION_ERROR` + 字符串比较区分 err3_8，避免枚举膨胀。比较含 `\0` 终止符确保精确匹配。
+- **计数器跨元件累积**：`g_p3_nozzle_retry` 不在 VISION_DONE 以外的地方清零（除流程终止）。`move_to_bottom_step` 不干预，确保 err3_8 → P1+pick → P3 的重试循环能正确累加。
+- **err3_8 不触发降级贴装**：与其他 P3 错误不同，吸嘴空取意味着贴装头上无元件，降级贴装（HOST_MOVE_TO_PCB）无意义。直接回退到 HOST_FIND_COMP 重新 P1 找取。
+- **重试上限 3 次**：与 P1 重试次数一致。连续 3 次吸嘴空取表明供料器/气泵硬件问题，需人工介入。
+
+### 26.11 StartCamTestTask 同步更新
+
+测试任务同步适配 err3_8 吸嘴空取检测：
+
+**cam_test_run 改进：** VISION_ERROR 分支新增 err3_8 识别，输出 `"nozzle empty (err3_8)"` 而非通用错误信息。
+
+**StartCamTestTask 结构重构：** 吸取+P3 验证段从平铺 if-else 改为带重试循环的结构：
+
+```
+保存散料区位置 scatter_pos
+while (retry < 3 && !p3_ok) {
+    if (retry > 0) { 移回 scatter_pos → P1 → R矫正 }
+    吸取 → 移到下相机 → cam_test_run(P3)
+    if (err3_8) { retry++; 吹气清理; continue }
+    if (其他错误) { break }
+    p3_ok = true
+}
+if (p3_ok) { P3二次矫正 + 释放 }
+else if (retry >= 3) { 告警检查供料器 }
+```
+
+**关键设计：** 使用 `Coord_Get()` 在 P1 执行后保存散料区位置（`scatter_pos`），err3_8 重试时移回此处重新 P1。不依赖 `g_scatter_subpos`（测试任务中该数组可能未初始化）。

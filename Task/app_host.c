@@ -88,6 +88,7 @@ static int32_t g_mark_count_done = 0;
 /* Mark 对齐平均偏移 (mm*10000)，PLACE 时应用到贴装坐标 */
 static int32_t g_mark_avg_dx = 0;
 static int32_t g_mark_avg_dy = 0;
+static int     g_p3_nozzle_retry = 0; /* P3 吸嘴空取重试计数 */
 static int     g_p1_retry_count = 0;  /* P1重试计数 */
 static int     g_consecutive_failures = 0;  /* 连续元件失败计数 */
 
@@ -226,7 +227,7 @@ static float parse_mm(const char *str) {
  */
 static bool parse_csv_line(const char *line, uint16_t len) {
     if (!g_header_parsed) {
-        if (len >= 12 && memcmp(line, "\"Designator\"", 12) == 0) {
+        if ((len >= 12 && memcmp(line, "\"Designator\"", 12) == 0) || (len >= 10 && memcmp(line, "Designator", 10) == 0)) {
             g_header_parsed = true;
             PrintDebug("[HOST] Header detected, skipping.\r\n");
             return false;
@@ -262,7 +263,7 @@ static bool parse_csv_line(const char *line, uint16_t len) {
     memset(c, 0, sizeof(*c));
     c->feeder_id = 1;
 
-    char tmp[32];
+    char tmp[48];
 
     if (csv_get_field(line, len, 2, tmp, sizeof(tmp))) {
         uint16_t n = (uint16_t)strlen(tmp);
@@ -624,6 +625,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         g_comp_count = 0;
         g_mark_count = 0;
         g_comp_index = 0;
+        g_p3_nozzle_retry = 0;
         PrintDebug("[HOST] ABORT: motion stopped, back to DEBUG\r\n");
         Heater_SendStop();  /* 若回流焊进行中也停止 */
         { uint8_t d[8] = {0}; Log_Write(LOG_ABORT, d); }
@@ -983,6 +985,7 @@ static void offset_check_step(void) {
 
     if (Vision_IsTimedOut()) {
         PrintDebug("[HOST] Offset check timeout, skipping to place\r\n");
+        g_p3_nozzle_retry = 0;  /* 超时降级，清零重试计数 */
         Coord_Invalidate();  /* R 轴位置未经 P3 验证 */
         Vision_ForceIdle();
         g_state = HOST_MOVE_TO_PCB;
@@ -1010,16 +1013,40 @@ static void offset_check_step(void) {
 
     case VISION_DONE:
         /* P3 完成 → 二次 R 轴矫正 → 计算 PCB 坐标 */
+        g_p3_nozzle_retry = 0;
         host_correct_r_from_vision(r, "P3");
         PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
         g_state = HOST_MOVE_TO_PCB;
         break;
 
-    case VISION_ERROR:
-        PrintDebug("[HOST] Offset check ERROR: %s\r\n", Vision_GetError());
-        Coord_Invalidate();  /* P3 失败，R 轴位置不可信 */
-        g_state = HOST_MOVE_TO_PCB;  /* 容错：仍然贴装 */
+    case VISION_ERROR: {
+        const char *err = Vision_GetError();
+        Component_t *c = &g_components[g_comp_index];
+        int cl;
+        /* err3_8: 吸嘴空取 — 回退重新吸取，不降级贴装 */
+        if (err[0] == 'e' && err[1] == 'r' && err[2] == 'r' &&
+            err[3] == '3' && err[4] == '_' && err[5] == '8' && err[6] == '\0') {
+            g_p3_nozzle_retry++;
+            if (g_p3_nozzle_retry >= 3) {
+                PrintDebug("[HOST] P3 nozzle empty x3, check feeder!\r\n");
+                g_state = HOST_ERROR;
+            } else {
+                PrintDebug("[HOST] P3 nozzle empty, retry pickup (%d/3)\r\n", g_p3_nozzle_retry);
+                /* 回退散料区重新 P1 找取同一元件 */
+                cl = component_cell(c);
+                g_p1_scan_pos = 0;
+                safe_move_to(g_scatter_subpos[cl][0][0], g_scatter_subpos[cl][0][1],
+                             PNP_SPEED, PNP_ACC);
+                Vision_Start(VCMD_P1, footprint_to_class_id(c->footprint));
+                g_state = HOST_FIND_COMP;
+            }
+        } else {
+            PrintDebug("[HOST] Offset check ERROR: %s\r\n", err);
+            Coord_Invalidate();  /* P3 失败，R 轴位置不可信 */
+            g_state = HOST_MOVE_TO_PCB;  /* 容错：仍然贴装 */
+        }
         break;
+    }
 
     default:
         break;
@@ -1126,6 +1153,7 @@ static void error_step(void) {
     if ((osKernelGetTickCount() - g_error_start_tick) >= pdMS_TO_TICKS(30000)) {
         PrintDebug("[HOST] ERROR timeout, auto-returning to DEBUG.\r\n");
         g_comp_count = 0; g_mark_count = 0; g_comp_index = 0;
+        g_p3_nozzle_retry = 0;
         g_error_entered = false;
         g_state = HOST_DEBUG;
     }

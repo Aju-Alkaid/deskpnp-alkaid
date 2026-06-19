@@ -22,7 +22,7 @@ typedef struct {
     float target_x;
     float target_y;
     float target_angle;
-    char     footprint[32];   /* 封装名称 (C0805, R0805, LED-SMD, Mark1~5) */
+    char     footprint[48];   /* 封装名称 (C0805, R0805, LED-SMD, Mark1~5) */
     char     layer;           /* 层面 'T' 或 'B' */
     bool     is_mark;         /* SMD=="MARK" 时为 true */
     uint8_t feeder_id;
