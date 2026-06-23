@@ -23,6 +23,8 @@ osEventFlagsId_t evtAxesDone = NULL;   // 用于三轴到位同步
 volatile bool g_motor_error = false;
 volatile MotorError_t g_motor_error_detail = MOTOR_OK;
 volatile bool s_cmd_interrupted = false;
+volatile uint32_t g_axes_done_bits = 0;
+volatile bool g_axes_error = false;
 
 /* ---------- 电机地址定义 ---------- */
 #define X1_ADDR   0x01
@@ -42,6 +44,9 @@ volatile bool s_cmd_interrupted = false;
 #define R_STEPS_PER_REV (200 * R_MICROSTEPS)  // 51200 微步/圈
 #define R_ACCEL_DELAY   50                    // 加减速/停止延时（ms）
 #define R_RAMP_FRACTION 0.5f                  // 软启动斜坡起始速度比例
+
+/* MKS SERVO42D 编码器参数 */
+#define MKS_PULSES_PER_REV  16384.0f  /* 电机每圈脉冲数 */
 
 /* 协议常量 */
 #define FUNC_ABS_POS   0xF5       // 坐标绝对运动功能码
@@ -130,20 +135,11 @@ static void send_axis_abs(int32_t addr, int32_t abs_coord, uint16_t speed, uint8
  * @brief 向指定电机发送急停（立即减速停止）
  *        acc=0 时立即停止，否则减速停止
  */
-static void send_axis_stop(int32_t addr, uint8_t acc)
+static void send_axis_stop(int32_t addr)
 {
     uint8_t tx[8] = {0};
-    tx[0] = 0xF5;
-    tx[1] = 0x00;
-    tx[2] = 0x00;
-    tx[3] = acc;
-    
-    // 坐标任意（0）
-    tx[4] = 0x00;
-    tx[5] = 0x00;
-    tx[6] = 0x00;
-    // 你的库函数会自动加 CRC
-    CAN_Transmit_Data(&hfdcan1, addr, tx, 7);
+    tx[0] = 0xF7;  // 立即停止（不受同步模式影响）
+    CAN_Transmit_Data(&hfdcan1, addr, tx, 1);
 }
 
 /* ---- XY 相对移动与急停（从 app_test.c 迁移）---- */
@@ -155,38 +151,36 @@ static void send_axis_stop(int32_t addr, uint8_t acc)
 void axis_stop(int32_t addr)
 {
     uint8_t tx[8] = {0};
-    tx[0] = 0xF5;
-    tx[3] = 255;  // 最大减速度
-    CAN_Transmit_Data(&hfdcan1, addr, tx, 7);
+    tx[0] = 0xF7;  // 立即停止（不受同步模式影响）
+    CAN_Transmit_Data(&hfdcan1, addr, tx, 1);
 }
 /**
- * @brief 急停三轴（非同步模式，各轴独立立即停止）
- * @note  Motor_Init 已关闭同步（motorSyncEnable(0)），
- *        axis_stop 发送 0xF5+acc=255，各电机直接执行最大减速度停止。
+ * @brief 急停三轴（同步模式，0xF7 立即停止 + 同步触发）
+ * @note  Motor_Init 已开启同步（motorSyncEnable(1)），
+ *        axis_stop 经 motorSyncTrigger 同步触发执行。
  */
 void disable_sync_stop(void)
 {
     axis_stop(X1_ADDR);
     axis_stop(X2_ADDR);
     axis_stop(Y_ADDR);
+    motorSyncTrigger(0);
     osDelay(5);
 }
 
 /**
- * @brief  XY 相对移动（阻塞式）
+ * @brief  XY 相对移动（阻塞式，按时长估算到位）
  *
- * 向指定轴发送绝对位置指令后，轮询 evtAxesDone 事件组等待到位。
- * CAN_Process_Task 负责从 motor_event_queue 消费 CAN 到位帧并设置事件标志，
- * 本函数不再直接访问队列，避免竞争。
+ * 发送 F4 相对位置指令到指定轴 → 广播同步触发 → 按时长估算等待到位 →
+ * 检测 g_axes_error 堵转标志。CAN_Process_Task 异步消费 CAN 帧并更新
+ * g_axes_done_bits / g_axes_error 全局标志。
  *
  * @param  dx     X 轴相对位移 (步数，X1+X2 双电机同步)
  * @param  dy     Y 轴相对位移 (步数，单电机)
  * @param  speed  速度 (RPM)
  * @param  acc    加速度
- * @retval  0  全部轴到位
- * @retval -1  超时 (10s)
+ * @retval  0  到位
  * @retval -2  电机异常 (堵转/限位)
- * @retval -3  UART 中断命令 (上位机 MOVE_STOP)
  */
 int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
 {
@@ -203,83 +197,46 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         return 0;
     }
 
-    /* 通过事件组等待到位，CAN_Process_Task 负责消费队列并设置标志 */
-    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
+    /* 重置到位标志，供 CAN_Process_Task 更新 */
+    g_axes_done_bits = 0;
+    g_axes_error = false;
 
     if (dx != 0) {
-        positionMode3Run(X1_ADDR, speed, acc, target_x);
+        positionMode2Run(X1_ADDR, speed, acc, dx);
         osDelay(2);
-        positionMode3Run(X2_ADDR, speed, acc, target_x);
+        positionMode2Run(X2_ADDR, speed, acc, dx);
         osDelay(2);
     }
     if (dy != 0) {
-        positionMode3Run(Y_ADDR,  speed, acc, target_y);
+        positionMode2Run(Y_ADDR,  speed, acc, dy);
         osDelay(2);
     }
 
-    uint32_t done_mask = 0;
-    if (dx != 0) done_mask |= (EVENT_X1_DONE | EVENT_X2_DONE);
-    if (dy != 0) done_mask |= EVENT_Y_DONE;
+    /* 广播同步触发: X1/X2/Y 同时执行 */
+    motorSyncTrigger(0);
 
-    UART_ClearData(UART_CH1);
-
-    const uint32_t poll_ms = 100;
-    const uint32_t total_timeout = 10000;
-    uint32_t start_tick = osKernelGetTickCount();
-
-    while ((osKernelGetTickCount() - start_tick) < pdMS_TO_TICKS(total_timeout)) {
-        /* 直接读事件组当前值，不阻塞不修改 */
-        uint32_t flags = osEventFlagsGet(evtAxesDone);
-
-        if (flags & EVENT_ANY_ERROR) {
-#ifdef DEBUG_MOVE
-            PrintDebug("[MOVE] ERROR flag set (0x%lX)\r\n", flags);
-#endif
-            axis_stop(X1_ADDR);
-            axis_stop(X2_ADDR);
-            axis_stop(Y_ADDR);
-            osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-            g_motor_error_detail = MOTOR_ERR_LIMIT;
-            Coord_Invalidate();  /* 堵转/限位: 座标不可信 */
-            return -2;
-        }
-
-        if ((flags & done_mask) == done_mask) {
-#ifdef DEBUG_MOVE
-            PrintDebug("[MOVE] all done: flags=0x%lX\r\n", flags);
-#endif
-            Coord_UpdateXY(target_x, target_y);  /* 到位: 座标可信 */
-            osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-            return 0;
-        }
-
-        /* 检查 UART 中断命令 */
-        UART_Driver_Process();
-        {
-            const uint8_t *rx = NULL; uint16_t rx_len = 0;
-            if (UART_PeekData(UART_CH1, &rx, &rx_len)) {
-                axis_stop(X1_ADDR);
-                axis_stop(X2_ADDR);
-                axis_stop(Y_ADDR);
-                osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-                s_cmd_interrupted = true;
-                Coord_Invalidate();  /* 中断停止: 停在哪不知道 */
-                return -3;
-            }
-        }
-
-        osDelay(poll_ms);
+    /* 按时长估算到位 = max(|dx|,|dy|) / (speed × PULSES_PER_REV / 60000) + 安全余量 */
+    {
+        float max_steps = fmaxf(fabsf((float)dx), fabsf((float)dy));
+        float steps_per_ms = (float)speed * MKS_PULSES_PER_REV / 60000.0f;
+        uint32_t move_ms = (uint32_t)(max_steps / steps_per_ms) + 80;
+        if (move_ms < 50)  move_ms = 50;
+        if (move_ms > 5000) move_ms = 5000;
+        osDelay(move_ms);
     }
 
-    axis_stop(X1_ADDR);
-    axis_stop(X2_ADDR);
-    axis_stop(Y_ADDR);
-    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
-    g_motor_error_detail = MOTOR_ERR_TIMEOUT;
-    Coord_Invalidate();  /* 超时: 可能停在半路 */
-    return -1;
+    /* 检查运动期间是否发生堵转/限位 */
+    if (g_axes_error) {
+        axis_stop(X1_ADDR);
+        axis_stop(X2_ADDR);
+        axis_stop(Y_ADDR);
+        g_motor_error_detail = MOTOR_ERR_LIMIT;
+        Coord_Invalidate();
+        return -2;
+    }
 
-}
+    Coord_UpdateXY(target_x, target_y);
+    return 0;}
 
 /**
  * @brief 阻塞等待指定电机进入"运行完成"状态 (0x02)      已被事件组代替，暂无用
@@ -316,22 +273,20 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
  */
 static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
 {
-    osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR);
+    g_axes_done_bits = 0;
+    g_axes_error = false;
     send_axis_abs(X1_ADDR, x_abs, speed, acc);
     send_axis_abs(X2_ADDR, x_abs, speed, acc);
     send_axis_abs(Y_ADDR,  y_abs, speed, acc);
     motorSyncTrigger(0);
 
-    uint32_t flags = osEventFlagsWait(evtAxesDone,
-                                       EVENT_ALL_AXES | EVENT_ANY_ERROR,
-                                       osFlagsWaitAny, ACK_TIMEOUT_MS);
-    if (flags & EVENT_ANY_ERROR) {
-        return -2;   // 表示发生错误
+    uint32_t waited = 0;
+    while (waited < ACK_TIMEOUT_MS) {
+        osDelay(10); waited += 10;
+        if (g_axes_error)                        return -2;
+        if ((g_axes_done_bits & EVENT_ALL_AXES) == EVENT_ALL_AXES) return 0;
     }
-    if ((flags & EVENT_ALL_AXES) == EVENT_ALL_AXES) {
-        return 0;
-    }
-    return -1;   // 超时
+    return -1;
 }
 
 void nozzle_on(void) {
@@ -389,14 +344,7 @@ int safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc
     int32_t dx = target_x - c0.x;
     int32_t dy = target_y - c0.y;
     int ret = move_xy_relative(dx, dy, speed, acc);
-    if (ret == -1) {
-        /* 超时：可能 CAN 丢帧，重试一次 */
-        PrintDebug("[MOVE] timeout, retry once\r\n");
-        osDelay(50);
-        ret = move_xy_relative(dx, dy, speed, acc);
-    }
     if (ret == -2) g_motor_error = true;   /* 限位/堵转，不可恢复 */
-    if (ret == -1) g_motor_error = true;   /* 两次超时，升级为错误 */
     return ret;
 }
 
@@ -461,27 +409,27 @@ int r_axis_rotate(float angle, float speed_rpm) {
 
     /* 使能 TMC2209 驱动 */
     TMC_SetEnable(true);
-    TIM2_Delay_ms(TMC_ENABLE_DELAY_MS);
+    vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
 
     if (usteps <= ramp_usteps * 2) {
         /* 小角度：降速保证足够运行时间，避免一步跳全速丢步 */
         int32_t low = (int32_t)(usteps * 1000.0f / (R_ACCEL_DELAY * 2));
         TMC_SetSpeed(dir ? -low : low);
-        TIM2_Delay_ms(R_ACCEL_DELAY * 2);
+        vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY * 2));
     } else {
         /* 正常角度：半速斜坡 → 全速恒速 */
         TMC_SetSpeed(dir ? -(int32_t)ramp_spd : (int32_t)ramp_spd);
-        TIM2_Delay_ms(R_ACCEL_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY));
 
         uint32_t remain = usteps - ramp_usteps;
         uint32_t run_ms = (uint32_t)(remain * 1000.0f / full_spd);
         TMC_SetSpeed(dir ? -(int32_t)full_spd : (int32_t)full_spd);
-        TIM2_Delay_ms(run_ms);
+        vTaskDelay(pdMS_TO_TICKS(run_ms));
     }
 
     /* 停止 */
     TMC_SetSpeed(0);
-    TIM2_Delay_ms(R_ACCEL_DELAY);
+    vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY));
 
     /* 关闭 TMC2209 驱动 */
     TMC_SetEnable(false);
@@ -514,20 +462,26 @@ void MotionTask_Func(void *argument)
 
             case MOTION_CMD_MOVE_TO:
 
-                osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES);  // 清空事件组
+                g_axes_done_bits = 0;
+                g_axes_error = false;
                 positionMode3Run(X1_ADDR, cmd.speed, cmd.acc, cmd.target_x);
                 positionMode3Run(X2_ADDR, cmd.speed, cmd.acc, cmd.target_x);
                 positionMode3Run(Y_ADDR, cmd.speed, cmd.acc, cmd.target_y);
                 motorSyncTrigger(0);
 
-                uint32_t flags = osEventFlagsWait(evtAxesDone, EVENT_ALL_AXES | EVENT_ANY_ERROR,
-                                   osFlagsWaitAny, 10000);
+                uint32_t waited = 0;
+                uint32_t flags = 0;
+                while (waited < ACK_TIMEOUT_MS) {
+                    osDelay(10); waited += 10;
+                    if (g_axes_error) { flags = EVENT_ANY_ERROR; break; }
+                    if ((g_axes_done_bits & EVENT_ALL_AXES) == EVENT_ALL_AXES) { flags = EVENT_ALL_AXES; break; }
+                }
 
                 if (flags & EVENT_ANY_ERROR) {
                     // 急停处理
-                    send_axis_stop(X1_ADDR, 0);
-                    send_axis_stop(X2_ADDR, 0);
-                    send_axis_stop(Y_ADDR, 0);
+                    send_axis_stop(X1_ADDR);
+                    send_axis_stop(X2_ADDR);
+                    send_axis_stop(Y_ADDR);
                     PrintDebug("Emergency stop! \r\n");
                     Coord_Invalidate();
                 } else if ((flags & EVENT_ALL_AXES) == EVENT_ALL_AXES) {
@@ -535,9 +489,9 @@ void MotionTask_Func(void *argument)
                     Coord_UpdateXY(cmd.target_x, cmd.target_y);
                 }else {
                     // 超时处理
-                    send_axis_stop(X1_ADDR, 0);
-                    send_axis_stop(X2_ADDR, 0);
-                    send_axis_stop(Y_ADDR, 0);
+                    send_axis_stop(X1_ADDR);
+                    send_axis_stop(X2_ADDR);
+                    send_axis_stop(Y_ADDR);
                     PrintDebug("Move timeout! \r\n");
                     Coord_Invalidate();
                 }
@@ -552,9 +506,9 @@ void MotionTask_Func(void *argument)
 
             case MOTION_CMD_STOP:
                 // 所有轴急停 (立即停止)
-                send_axis_stop(X1_ADDR, 0);
-                send_axis_stop(X2_ADDR, 0);
-                send_axis_stop(Y_ADDR, 0);
+                send_axis_stop(X1_ADDR);
+                send_axis_stop(X2_ADDR);
+                send_axis_stop(Y_ADDR);
                 Coord_Invalidate();
                 break;
 
@@ -601,24 +555,13 @@ void CAN_Process_Task(void *argument) {
     while (1) {
         // 阻塞等待队列数据
         if (osMessageQueueGet(motor_event_queue, &pkt, NULL, osWaitForever) == osOK) {
-            // 检查是否是位置运动完成
-            if (pkt.FuncCode == 0xF5 && pkt.Status == 0x02) {
-                static uint32_t s_done_cnt = 0;
-                s_done_cnt++;
-#ifdef DEBUG_CAN_PROC
-                PrintDebug("[CAN_PROC] done #%lu: ID=%d FC=0x%02X ST=0x%02X\r\n",
-                           s_done_cnt, pkt.ID, pkt.FuncCode, pkt.Status);
-#endif
-                if (pkt.ID == 1) osEventFlagsSet(evtAxesDone, EVENT_X1_DONE);
-                else if (pkt.ID == 2) osEventFlagsSet(evtAxesDone, EVENT_X2_DONE);
-                else if (pkt.ID == 3) osEventFlagsSet(evtAxesDone, EVENT_Y_DONE);
+            if ((pkt.FuncCode == 0xF4 || pkt.FuncCode == 0xF5) && pkt.Status == 0x02) {
+                if (pkt.ID == 1)      g_axes_done_bits |= EVENT_X1_DONE;
+                else if (pkt.ID == 2) g_axes_done_bits |= EVENT_X2_DONE;
+                else if (pkt.ID == 3) g_axes_done_bits |= EVENT_Y_DONE;
             }
-            // 如果状态为 0x03（限位停止），设置错误位
-            else if (pkt.FuncCode == 0xF5 && pkt.Status == 0x03) {
-#ifdef DEBUG_CAN_PROC
-                PrintDebug("[CAN_PROC] ERROR: ID=%d FC=0x%02X ST=0x03\r\n", pkt.ID, pkt.FuncCode);
-#endif
-                osEventFlagsSet(evtAxesDone, EVENT_ANY_ERROR);  // 立即通知
+            else if ((pkt.FuncCode == 0xF4 || pkt.FuncCode == 0xF5) && pkt.Status == 0x03) {
+                g_axes_error = true;
             }
         }
     }

@@ -24,7 +24,7 @@ extern "C" {
 
 /* 电流参数 */
 #define TMC2209_MOTOR_HOLD_CURRENT    200   // mA
-#define TMC2209_MOTOR_RUN_CURRENT     800   // mA
+#define TMC2209_MOTOR_RUN_CURRENT     1200  // mA
 
 /* ========== 寄存器地址 ========== */
 typedef enum {
@@ -40,6 +40,7 @@ typedef enum {
     TMC_REG_TPOWERDOWN    = 0x11,
     TMC_REG_TSTEP         = 0x12,
     TMC_REG_TPWMTHRS      = 0x13,
+    TMC_REG_RAMPMODE      = 0x20,
     TMC_REG_VACTUAL       = 0x22,
     TMC_REG_SGTHRS        = 0x40,
     TMC_REG_SG_RESULT     = 0x41,
@@ -64,6 +65,9 @@ typedef enum {
 #define GCONF_PDN_DISABLE      (1<<6)
 #define GCONF_MSTEP_REG_SELECT (1<<7)
 #define GCONF_MULTISTEP_FILT   (1<<8)
+
+/* RAMPMODE */
+#define RAMPMODE_VELOCITY_HOLD  2
 
 /* CHOPCONF */
 #define CHOPCONF_DISS2VS       (1<<31)

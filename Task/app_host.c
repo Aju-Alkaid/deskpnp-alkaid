@@ -1,4 +1,4 @@
-﻿/* ================================================================
+/* ================================================================
  *  app_host.c
  *  分区: §1常量 §2CSV §3辅助 §4调试命令 §5PnP step §6主循环
  * ================================================================ */
@@ -29,11 +29,7 @@ extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 #define JOG_SPEED        300            /* 连续移动速度 (RPM) */
 #define JOG_ACC          25             /* 连续移动加速度 */
 #define JOG_MMS_TO_RPM  12.0f   /* mm/s → RPM: STEPS_PER_MM/16384*60 */
-#define PNP_SPEED        300   /* 通用速度 (RPM) */
-#define PNP_ACC          25    /* 通用加速度 */
 #define PNP_SPEED_FAST   300   /* 长途移动 */
-#define PNP_SPEED_FINE   100   /* 视觉迭代微调 */
-#define PNP_ACC_FINE     10    /* 微调加速度 */
 #define PICK_DELAY_MS    300
 #define PLACE_DELAY_MS   300
 #define PUMP_BLOW_MS    1000          /* 关气泵后电磁阀吹气时长(ms) */
@@ -64,6 +60,10 @@ static uint16_t     g_mark_count = 0;
 
 /* 标定数据 (Flash 持久化) */
 CalibrationData_t g_calib;
+
+/* SET_CAM_OFFSET 两步标定中间态 */
+static int32_t g_cam_ref_x = 0, g_cam_ref_y = 0;
+static bool    g_cam_ref_valid = false;
 
 /* JOG 状态 */
 static bool g_during_cmd = false;  /* 正在执行命令时置位，用于屏蔽回显 */
@@ -329,8 +329,8 @@ static void download_done(void) {
 
         /* 计算 P2 网格扫描参数 */
         int32_t scan_step = (int32_t)(P2_SCAN_STEP_MM * STEPS_PER_MM);
-        int32_t area_w = g_calib.pcb_area_x_max - g_calib.pcb_area_x_min;
-        int32_t area_h = g_calib.pcb_area_y_max - g_calib.pcb_area_y_min;
+        int32_t area_w = g_calib.heat_platform_x_max - g_calib.heat_platform_x_min;
+        int32_t area_h = g_calib.heat_platform_y_max - g_calib.heat_platform_y_min;
         if (area_w > 0 && area_h > 0) {
             g_scan_cols = (area_w + scan_step - 1) / scan_step;
             g_scan_rows = (area_h + scan_step - 1) / scan_step;
@@ -339,7 +339,7 @@ static void download_done(void) {
             g_scan_cur    = 0;
             g_scan_timeout = 0;
             g_mark_scanning = true;
-            safe_move_to(g_calib.pcb_area_x_min, g_calib.pcb_area_y_min,
+            safe_move_to(g_calib.heat_platform_x_min, g_calib.heat_platform_y_min,
                          PNP_SPEED, PNP_ACC);
             PrintDebug("[HOST] P2 scan: %ldx%ld grid, step=%ld steps\r\n",
                        (long)g_scan_cols, (long)g_scan_rows, (long)scan_step);
@@ -375,26 +375,26 @@ static bool handle_calib_cmd(HostParsed_t *cmd) {
     case HCMD_SET_SCATTER_AREA:
         g_calib.scatter_x_steps = Coord_Get().x;
         g_calib.scatter_y_steps = Coord_Get().y;
-        PrintDebug("[HOST] SET_SCATTER_AREA: (%ld,%ld)\r\n", (long)Coord_Get().x, (long)Coord_Get().y);
+        PrintDebug("[HOST] SET_SCATTER_AREA: (%ld,%ld)\r\n", (long)(-(int32_t)Coord_Get().y), (long)Coord_Get().x);
         return true;
     case HCMD_SET_SCATTER_SIZE:
         g_calib.scatter_size_steps = (int32_t)(cmd->param * STEPS_PER_MM);
         PrintDebug("[HOST] SET_SCATTER_SIZE: %.1fmm -> %ld steps\r\n", cmd->param, (long)g_calib.scatter_size_steps);
         return true;
-    case HCMD_SET_PCB_AREA_MIN:
-        g_calib.pcb_area_x_min = Coord_Get().x;
-        g_calib.pcb_area_y_min = Coord_Get().y;
-        PrintDebug("[HOST] SET_PCB_AREA_MIN: (%ld,%ld)\r\n", (long)Coord_Get().x, (long)Coord_Get().y);
+    case HCMD_SET_HEATER_PLATFORM_MIN:
+        g_calib.heat_platform_x_min = Coord_Get().x;
+        g_calib.heat_platform_y_min = Coord_Get().y;
+        PrintDebug("[HOST] SET_HEATER_PLATFORM_MIN: (%ld,%ld)\r\n", (long)(-(int32_t)Coord_Get().y), (long)Coord_Get().x);
         return true;
-    case HCMD_SET_PCB_AREA_MAX:
-        g_calib.pcb_area_x_max = Coord_Get().x;
-        g_calib.pcb_area_y_max = Coord_Get().y;
-        PrintDebug("[HOST] SET_PCB_AREA_MAX: (%ld,%ld)\r\n", (long)Coord_Get().x, (long)Coord_Get().y);
+    case HCMD_SET_HEATER_PLATFORM_MAX:
+        g_calib.heat_platform_x_max = Coord_Get().x;
+        g_calib.heat_platform_y_max = Coord_Get().y;
+        PrintDebug("[HOST] SET_HEATER_PLATFORM_MAX: (%ld,%ld)\r\n", (long)(-(int32_t)Coord_Get().y), (long)Coord_Get().x);
         return true;
     case HCMD_SET_BOTTOM_CAM:
         g_calib.bottom_cam_x_steps = Coord_Get().x;
         g_calib.bottom_cam_y_steps = Coord_Get().y;
-        PrintDebug("[HOST] SET_BOTTOM_CAM: (%ld,%ld)\r\n", (long)Coord_Get().x, (long)Coord_Get().y);
+        PrintDebug("[HOST] SET_BOTTOM_CAM: (%ld,%ld)\r\n", (long)(-(int32_t)Coord_Get().y), (long)Coord_Get().x);
         return true;
     case HCMD_SET_Z_SAFE:
         { float ang = Servo_GetAngle(Z_SERVO_CH); if (ang >= 0.0f) g_calib.z_safe_angle = ang;
@@ -412,9 +412,45 @@ static bool handle_calib_cmd(HostParsed_t *cmd) {
         r_axis_set_zero();
         PrintDebug("[HOST] SET_R_ZERO: R axis zeroed\r\n");
         return true;
+    case HCMD_SET_CAM_OFFSET:
+        if (!g_cam_ref_valid) {
+            g_cam_ref_x = Coord_Get().x;
+            g_cam_ref_y = Coord_Get().y;
+            g_cam_ref_valid = true;
+            PrintDebug("[HOST] SET_CAM_OFFSET step1: nozzle at (%ld,%ld). Move camera to same mark, repeat.\r\n",
+                       (long)g_cam_ref_x, (long)g_cam_ref_y);
+        } else {
+            g_calib.cam_to_nozzle_dx_steps = Coord_Get().x - g_cam_ref_x;
+            g_calib.cam_to_nozzle_dy_steps = Coord_Get().y - g_cam_ref_y;
+            g_cam_ref_valid = false;
+            PrintDebug("[HOST] SET_CAM_OFFSET: offset=(%ld,%ld) steps\r\n",
+                       (long)g_calib.cam_to_nozzle_dx_steps, (long)g_calib.cam_to_nozzle_dy_steps);
+        }
+        return true;
     case HCMD_SAVE_CALIB:
         if (Calib_Save(&g_calib) == 0) { PrintDebug("[HOST] SAVE_CALIB: saved.\r\n"); host_send("CALIB_SAVED"); }
         else { PrintDebug("[HOST] SAVE_CALIB: FAILED!\r\n"); host_send("CALIB_SAVE_FAILED"); }
+        return true;
+    case HCMD_RESTORE_CALIB:
+        g_calib.scatter_x_steps = 58880;
+        g_calib.scatter_y_steps = -25600;
+        g_calib.scatter_size_steps = 37888;
+        g_calib.heat_platform_x_min = 25600;
+        g_calib.heat_platform_y_min = -82432;
+        g_calib.heat_platform_x_max = 71680;
+        g_calib.heat_platform_y_max = -131072;
+        g_calib.bottom_cam_x_steps = -103;
+        g_calib.bottom_cam_y_steps = -25650;
+        g_calib.cam_to_nozzle_dx_steps = -5991;
+        g_calib.cam_to_nozzle_dy_steps = -24988;
+        g_calib.z_safe_angle = 74.9f;
+        g_calib.z_pick_angle = 115.9f;
+        g_calib.z_place_angle = 115.9f;
+        g_calib.cam_p1_val_to_steps = 0.0f;
+        g_calib.cam_p3_val_to_steps = 0.0f;
+        scatter_init_cells();
+        if (Calib_Save(&g_calib) == 0) { PrintDebug("[HOST] RESTORE_CALIB: saved.\r\n"); host_send("CALIB_RESTORED"); }
+        else { PrintDebug("[HOST] RESTORE_CALIB: FAILED!\r\n"); host_send("RESTORE_FAILED"); }
         return true;
     default: return false;
     }
@@ -455,19 +491,23 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         int32_t dy = tbl[idx].sy * steps_mm;
         int ret = safe_move_to(Coord_Get().x + dx, Coord_Get().y + dy, DEBUG_SPEED, DEBUG_ACC);
         g_jog_active = false;
+        /* 坐标显示转换：电机坐标系→上位机坐标系
+           host_x = -motor_y (Y电机+ = 左 = host X-), host_y = +motor_x (X电机+ = 上 = host Y+) */
         if (ret < 0) {
             PrintDebug("[HOST] %s %.1fmm INTERRUPTED(ret=%d) pos=(%ld,%ld)\r\n",
-                       tbl[idx].name, cmd->param, ret, Coord_Get().x, Coord_Get().y);
+                       tbl[idx].name, cmd->param, ret, (long)(-(int32_t)Coord_Get().y), (long)Coord_Get().x);
         } else {
             PrintDebug("[HOST] %s %.1fmm -> (%ld,%ld)\r\n",
-                       tbl[idx].name, cmd->param, Coord_Get().x, Coord_Get().y);
+                       tbl[idx].name, cmd->param, (long)(-(int32_t)Coord_Get().y), (long)Coord_Get().x);
         }
         break;
     }
 
     case HCMD_MOVE_UP_START:
-        if (g_jog_active) { disable_sync_stop(); Coord_Invalidate(); }
+        if (g_jog_active) disable_sync_stop();
         g_jog_active = true;
+        z_safe();
+        osDelay(100);
         positionMode3Run(X1_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         positionMode3Run(X2_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         motorSyncTrigger(0);
@@ -475,8 +515,10 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         break;
 
     case HCMD_MOVE_DOWN_START:
-        if (g_jog_active) { disable_sync_stop(); Coord_Invalidate(); }
+        if (g_jog_active) disable_sync_stop();
         g_jog_active = true;
+        z_safe();
+        osDelay(100);
         positionMode3Run(X1_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         positionMode3Run(X2_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         motorSyncTrigger(0);
@@ -484,16 +526,20 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         break;
 
     case HCMD_MOVE_LEFT_START:
-        if (g_jog_active) { disable_sync_stop(); Coord_Invalidate(); }
+        if (g_jog_active) disable_sync_stop();
         g_jog_active = true;
+        z_safe();
+        osDelay(100);
         positionMode3Run(Y_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         motorSyncTrigger(0);
         PrintDebug("[HOST] JOG LEFT %.1f\r\n", cmd->param);
         break;
 
     case HCMD_MOVE_RIGHT_START:
-        if (g_jog_active) { disable_sync_stop(); Coord_Invalidate(); }
+        if (g_jog_active) disable_sync_stop();
         g_jog_active = true;
+        z_safe();
+        osDelay(100);
         positionMode3Run(Y_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         motorSyncTrigger(0);
         PrintDebug("[HOST] JOG RIGHT %.1f\r\n", cmd->param);
@@ -501,18 +547,19 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
 
     case HCMD_MOVE_STOP:
         disable_sync_stop();
-        Coord_Invalidate();
         g_jog_active = false;
         PrintDebug("[HOST] STOP\r\n");
         break;
 
     case HCMD_MOVE_TO: {
-        int32_t tx = (int32_t)(cmd->param  * STEPS_PER_MM);
-        int32_t ty = (int32_t)(cmd->param2 * STEPS_PER_MM);
+        int32_t tx = (int32_t)(cmd->param2 * STEPS_PER_MM);
+        int32_t ty = (int32_t)(-cmd->param * STEPS_PER_MM);
         if (g_jog_active) { disable_sync_stop(); g_jog_active = false; }
         safe_move_to(tx, ty, DEBUG_SPEED, DEBUG_ACC);
+        /* 坐标显示转换：电机坐标系→上位机坐标系
+           host_x = -motor_y, host_y = +motor_x */
         PrintDebug("[HOST] MOVE_TO (%.1f,%.1f)→(%ld,%ld)\r\n",
-                   cmd->param, cmd->param2, Coord_Get().x, Coord_Get().y);
+                   cmd->param, cmd->param2, (long)(-(int32_t)Coord_Get().y), (long)Coord_Get().x);
         break;
     }
 
@@ -528,7 +575,6 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         osDelay(100);
         PrintDebug("[HOST] SET_ORIGIN\r\n");
         if (g_state == HOST_HOME) {
-            UART_SendString(UART_CH1, "DEBUG_MODE\n");
             g_state = HOST_DEBUG;
             PrintDebug("[HOST] Home done, entering DEBUG mode.\r\n");
         }
@@ -562,11 +608,8 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         break;
 
     case HCMD_PUMP_OFF:
-        Pump_Off();                         /* 关气泵 */
-        Valve_On();                         /* 开电磁阀吹气 (PA6=HIGH) */
-        osDelay(PUMP_BLOW_MS);              /* 吹气 1s */
-        Valve_Off();                        /* 关电磁阀 (PA6=LOW) */
-        PrintDebug("[HOST] PUMP_OFF done\r\n");
+        Pump_Off();
+        PrintDebug("[HOST] PUMP_OFF\r\n");
         break;
 
     case HCMD_HEAT_ON:
@@ -632,6 +675,22 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         host_send("ABORT_OK");
         break;
 
+    case HCMD_HOME:
+        if (g_jog_active) { disable_sync_stop(); g_jog_active = false; }
+        safe_move_to(0, 0, DEBUG_SPEED, DEBUG_ACC);
+        PrintDebug("[HOST] HOME -> (0,0)\r\n");
+        break;
+
+    case HCMD_VALVE_ON:
+        Valve_On();
+        PrintDebug("[HOST] VALVE_ON\r\n");
+        break;
+
+    case HCMD_VALVE_OFF:
+        Valve_Off();
+        PrintDebug("[HOST] VALVE_OFF\r\n");
+        break;
+
     default:
         break;
     }
@@ -678,11 +737,11 @@ static void mark_align_step(void) {
             int32_t step = (int32_t)(P2_SCAN_STEP_MM * STEPS_PER_MM);
             int32_t tx, ty;
             if (row & 1) {
-                tx = g_calib.pcb_area_x_max - col * step;
+                tx = g_calib.heat_platform_x_max - col * step;
             } else {
-                tx = g_calib.pcb_area_x_min + col * step;
+                tx = g_calib.heat_platform_x_min + col * step;
             }
-            ty = g_calib.pcb_area_y_min + row * step;
+            ty = g_calib.heat_platform_y_min + row * step;
             safe_move_to(tx, ty, PNP_SPEED, PNP_ACC);
             Vision_Start(VCMD_P2, 0);
             Vision_Go();
@@ -885,8 +944,8 @@ static void find_comp_step(void) {
         /* P1 Phase1 或 Phase2: 收到偏移数据 */
         /* TODO: 需根据上相机实际 FOV 校准像素→步数比例 */
         Component_t *c = &g_components[g_comp_index];
-        int32_t dx_s = -(int32_t)(r->dy * (STEPS_PER_MM / 1000.0f));  // cam Y → X1+X2
-        int32_t dy_s = -(int32_t)(r->dx * (STEPS_PER_MM / 1000.0f));  // cam X → Y 电机
+        int32_t dx_s = -(int32_t)(r->dy * g_calib.cam_p1_val_to_steps);  // cam Y → X1+X2
+        int32_t dy_s = -(int32_t)(r->dx * g_calib.cam_p1_val_to_steps);  // cam X → Y 电机
 
         /* Phase1 独有：记录角度和类别 */
         if (r->angle_x100 != 0 || r->class_name[0] != '\0') {
@@ -908,11 +967,20 @@ static void find_comp_step(void) {
     }
 
     case VISION_DONE:
-        /* P1 完成 → R 轴矫正 → 吸取 */
+        /* P1 完成 → R 轴矫正 → 摄像头à吸嘴偏置补偿 → 吸取 */
         g_p1_retry_count = 0;
         g_p1_scan_pos = 0;
         g_consecutive_failures = 0;
         host_correct_r_from_vision(r, "P1");
+        r_axis_set_zero();
+        /* 偏置补偿: 摄像头对准了元件，吸嘴还偏着 */
+        if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
+            safe_move_to(Coord_Get().x + g_calib.cam_to_nozzle_dx_steps,
+                         Coord_Get().y + g_calib.cam_to_nozzle_dy_steps,
+                         PNP_SPEED_FINE, PNP_ACC_FINE);
+            PrintDebug("[HOST] Cam->Nozzle offset: (%ld,%ld) steps\r\n",
+                       (long)g_calib.cam_to_nozzle_dx_steps, (long)g_calib.cam_to_nozzle_dy_steps);
+        }
         PrintDebug("[HOST] Comp %u aligned. Picking...\r\n",
                    g_components[g_comp_index].id);
         g_state = HOST_PICK;
@@ -1000,8 +1068,8 @@ static void offset_check_step(void) {
 
     case VISION_GOT_POS: {
         /* TODO: 需根据下相机实际 FOV 校准像素→步数比例 */
-        int32_t dx_s = (int32_t)(r->dy * (STEPS_PER_MM / 1000.0f));   // cam Y → X1+X2，不取反
-        int32_t dy_s = -(int32_t)(r->dx * (STEPS_PER_MM / 1000.0f));  // cam X → Y 电机，取反
+        int32_t dx_s = (int32_t)(r->dy * g_calib.cam_p3_val_to_steps);   // cam Y → X1+X2，不取反
+        int32_t dy_s = -(int32_t)(r->dx * g_calib.cam_p3_val_to_steps);  // cam X → Y 电机，取反
         if (dx_s != 0 || dy_s != 0) {
             safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
             g_p3_offset_x += dx_s;
@@ -1015,6 +1083,7 @@ static void offset_check_step(void) {
         /* P3 完成 → 二次 R 轴矫正 → 计算 PCB 坐标 */
         g_p3_nozzle_retry = 0;
         host_correct_r_from_vision(r, "P3");
+        r_axis_set_zero();
         PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
         g_state = HOST_MOVE_TO_PCB;
         break;
@@ -1096,6 +1165,9 @@ static void move_to_pcb_step(void) {
         machine_x = cx + (int32_t)(g_mark_avg_dx / 10000.0f * STEPS_PER_MM);
         machine_y = cy + (int32_t)(g_mark_avg_dy / 10000.0f * STEPS_PER_MM);
     }
+    /* 摄像头à吸嘴偏置补偿: PCB 坐标系基于摄像头建系，需偏移到吸嘴位置 */
+    machine_x += g_calib.cam_to_nozzle_dx_steps;
+    machine_y += g_calib.cam_to_nozzle_dy_steps;
     PrintDebug("[HOST] MOVE_TO_PCB comp %u -> machine(%ld,%ld)\r\n", c->id, (long)machine_x, (long)machine_y);
     r_axis_rotate(c->target_angle, R_SPEED_RPM);
     safe_move_to(machine_x, machine_y, PNP_SPEED_FAST, PNP_ACC);
@@ -1218,13 +1290,22 @@ void Host_Task(void *argument) {
         PrintDebug("[HOST] Flash read failed, using defaults.\r\n");
     }
     scatter_init_cells();
-    PrintDebug("[HOST] Calib: scatter=(%ld,%ld) botcam=(%ld,%ld)\r\n",
-               (long)g_calib.scatter_x_steps, (long)g_calib.scatter_y_steps,
+    PrintDebug("[HOST] Calib: z_safe=%.1f z_pick=%.1f z_place=%.1f\r\n",
+               (double)g_calib.z_safe_angle, (double)g_calib.z_pick_angle, (double)g_calib.z_place_angle);
+    PrintDebug("[HOST] Calib: scatter=(%ld,%ld) size=%ld\r\n",
+               (long)g_calib.scatter_x_steps, (long)g_calib.scatter_y_steps, (long)g_calib.scatter_size_steps);
+    PrintDebug("[HOST] Calib: heat=(%ld,%ld)-(%ld,%ld) botcam=(%ld,%ld)\r\n",
+               (long)g_calib.heat_platform_x_min, (long)g_calib.heat_platform_y_min,
+               (long)g_calib.heat_platform_x_max, (long)g_calib.heat_platform_y_max,
                (long)g_calib.bottom_cam_x_steps, (long)g_calib.bottom_cam_y_steps);
-
+    PrintDebug("[HOST] Calib: nozzle_off=(%ld,%ld) cam_p1=%.3f cam_p3=%.3f\r\n",
+               (long)g_calib.cam_to_nozzle_dx_steps, (long)g_calib.cam_to_nozzle_dy_steps,
+               (double)g_calib.cam_p1_val_to_steps, (double)g_calib.cam_p3_val_to_steps);
     PrintDebug("[HOST] Task started. Waiting for SET_ORIGIN...\r\n");
 
-
+    /* 主动通知上位机进入调试模式，解除按钮死锁 */
+    UART_SendString(UART_CH1, "DEBUG_MODE\n");
+    g_state = HOST_DEBUG;
 
     /* ===== 主循环 ===== */
     for (;;) {

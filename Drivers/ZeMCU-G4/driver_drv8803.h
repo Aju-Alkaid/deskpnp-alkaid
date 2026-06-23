@@ -93,4 +93,14 @@ static inline void Valve_On(void) {
 static inline void Valve_Off(void) {
     DRV8803_SetOutput(&Port_24VO1, false);
 }
+
+/** @brief 下位相机补光灯开启（12VO2/PE12） */
+static inline void LowerCam_Light_On(void) {
+    DRV8803_SetOutput(&Port_12VO2, true);
+}
+
+/** @brief 下位相机补光灯关闭（12VO2/PE12） */
+static inline void LowerCam_Light_Off(void) {
+    DRV8803_SetOutput(&Port_12VO2, false);
+}
 #endif /* __DRV8803_DUAL_H */

@@ -34,17 +34,23 @@ typedef enum {
     /* 标定命令 */
     HCMD_SET_SCATTER_AREA,    // 记录散料区原点
     HCMD_SET_SCATTER_SIZE,    // 散料区边长 <mm>
-    HCMD_SET_PCB_AREA_MIN,    // 记录 PCB 左下角
-    HCMD_SET_PCB_AREA_MAX,    // 记录 PCB 右上角
+    HCMD_SET_HEATER_PLATFORM_MIN,    // 记录加热台左下角
+    HCMD_SET_HEATER_PLATFORM_MAX,    // 记录加热台右上角
     HCMD_SET_BOTTOM_CAM,      // 记录下相机位置
     HCMD_SET_Z_SAFE,          // 记录安全高度
     HCMD_SET_Z_PICK,          // 记录吸取高度
     HCMD_SET_Z_PLACE,         // 记录贴装高度
     HCMD_SET_R_ZERO,          // R 轴当前位置 = 0deg
+    HCMD_SET_CAM_OFFSET,     // 上摄像头à吸嘴偏置标定 (两步)
     HCMD_SAVE_CALIB,          // 保存标定值到 Flash
+    HCMD_RESTORE_CALIB,       // 恢复标定值（调试用）
     HCMD_RESUME,              // 从暂停/WAIT_REFILL/ERROR 恢复
     HCMD_ABORT,               // 中止当前流程 -> HOST_IDLE
     HCMD_AUTO_HEAT,           // AUTO_HEAT ON/OFF — 自动回流焊开关
+
+    HCMD_HOME,                // 回到原点
+    HCMD_VALVE_ON,            // 开启电磁阀
+    HCMD_VALVE_OFF,           // 关闭电磁阀
 
     /* 未知命令 */
     HCMD_UNKNOWN

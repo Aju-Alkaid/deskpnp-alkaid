@@ -97,11 +97,11 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
         if (space) *param = (float)strtof(space + 1, NULL);
         return HCMD_SET_SCATTER_SIZE;
     }
-    if (MATCH("SET_PCB_AREA_MIN")) {
-        return HCMD_SET_PCB_AREA_MIN;
+    if (MATCH("SET_HEATER_PLATFORM_MIN")) {
+        return HCMD_SET_HEATER_PLATFORM_MIN;
     }
-    if (MATCH("SET_PCB_AREA_MAX")) {
-        return HCMD_SET_PCB_AREA_MAX;
+    if (MATCH("SET_HEATER_PLATFORM_MAX")) {
+        return HCMD_SET_HEATER_PLATFORM_MAX;
     }
     if (MATCH("SET_BOTTOM_CAM")) {
         return HCMD_SET_BOTTOM_CAM;
@@ -118,8 +118,14 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("SET_R_ZERO")) {
         return HCMD_SET_R_ZERO;
     }
+    if (MATCH("SET_CAM_OFFSET")) {
+        return HCMD_SET_CAM_OFFSET;
+    }
     if (MATCH("SAVE_CALIB")) {
         return HCMD_SAVE_CALIB;
+    }
+    if (MATCH("RESTORE_CALIB")) {
+        return HCMD_RESTORE_CALIB;
     }
     if (MATCH("RESUME")) {
         return HCMD_RESUME;
@@ -129,6 +135,15 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     }
     if (MATCH("AUTO_HEAT")) {
         return HCMD_AUTO_HEAT;
+    }
+    if (MATCH("HOME")) {
+        return HCMD_HOME;
+    }
+    if (MATCH("VALVE_ON")) {
+        return HCMD_VALVE_ON;
+    }
+    if (MATCH("VALVE_OFF")) {
+        return HCMD_VALVE_OFF;
     }
     #undef MATCH#undef MATCH
     return HCMD_UNKNOWN;

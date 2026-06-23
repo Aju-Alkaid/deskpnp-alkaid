@@ -65,6 +65,7 @@
 | 温度传感器 | PF9 / PA3, DS18B20 |
 | 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM) |
 | 吸嘴气泵 | PE11 (12VO1, DRV8803 U12 OUT1 开关) |
+| 下相机补光灯 | PE12 (12VO2, DRV8803 U12 OUT2 开关) |
 | 电磁阀 | PA6 (24VO1, DRV8803 U13 OUT5, PA6=HIGH时导通 — 标准DRV8803: IN=HIGH→OUT=LOW) |
 | BOOT0 | PB8, 启动选择 |
 | LCD_LED | PD8, LCD 背光 |
@@ -129,6 +130,9 @@ pnp_1/
   - `PUMP_OFF` — 关闭气泵 + 电磁阀吹气 1s 后关阀
   - HEAT_ON / HEAT_OFF — 加热台启动/停止
   - EXIT_DEBUG_MODE — 退出调试模式
+  - HOME — 回零（移动至原点）
+  - VALVE_ON — 开电磁阀
+  - VALVE_OFF — 关电磁阀
   - RESUME — 从 WAIT_REFILL / ERROR 恢复
   - ABORT — 中止当前 PnP 流程，回 HOST_DEBUG
   - **标定命令：** SET_SCATTER_AREA / SET_SCATTER_SIZE <mm> / SET_PCB_AREA_MIN / SET_PCB_AREA_MAX / SET_BOTTOM_CAM / SET_Z_SAFE / SET_Z_PICK / SET_Z_PLACE / SET_R_ZERO / SAVE_CALIB
@@ -230,17 +234,21 @@ pnp_1/
 - **数据长度限制：** ≤7 字节有效数据 + 1 字节 CRC = 最多8字节
 - **电机 ID：** X1=0x01, X2=0x02, Y=0x03, 广播=0x00
 - **主要功能码：**
-  - `0xF5` 坐标绝对运动（速度=2B+加速度=1B+坐标=3B，共7字节+CRC）
+  - `0xF4` 位置模式2 — 相对运动（速度=2B+加速度=1B+相对坐标=3B，共7字节+CRC）
+  - `0xF5` 位置模式3 — 绝对运动（帧格式同 0xF4，坐标为绝对位置）
+  - `0xF6` 速度模式 — 连续运行（方向/速度=2B+加速度=1B，共4字节+CRC）
   - `0xF3` 使能/去使能
+  - `0xF7` 立即停止（不受同步模式影响）
   - `0x82` 设置工作模式（SR_vFOC=0x05）
   - `0x92` 设为零点
-  - `0x4A` 同步标志开关
-  - `0x4B` 同步执行触发
-  - `0x95` 设置到位阈值
+  - `0x4A` 开启同步标志（须逐电机发送）
+  - `0x4B` 同步执行触发（**必须发广播地址 0x00**，逐电机发会导致双 X 轴分步堵转）
+  - `0x95` 设置到位阈值（默认 200 步，已改为 50 步，见 §27.2）
 - **状态码（电机→G4）：**
-  - `0x01` 运行中
+  - `0x01` 已接收/运行中（非同步模式立即开始运动）
   - `0x02` 运行完成（到位）
-  - `0x03` 限位停止/堵转
+  - `0x03` 堵转保护触发（电机自动松轴，须发 0x3D 或按 Enter 复位）
+  - `0x05` 指令已缓存，等待同步触发（同步模式下）
 
 
 ### 4.4 G4 ↔ 加热台从机 (CAN, FDCAN1)
@@ -321,7 +329,7 @@ pnp_1/
 | 任务 | 栈大小 | 优先级 | 功能 |
 |------|--------|--------|------|
 | `Host_Task` | 1024 | Normal | ★ 主任务：上位机通信 + 调试命令 + CSV解析 + 视觉协调 + PnP流程 |
-| `CAN_Process_Task` | 512 | Normal | 从 motor_event_queue 取 CAN 报文，设事件组标志 |
+| `CAN_Process_Task` | 512 | Normal | 从 motor_event_queue 取 CAN 报文，更新 g_axes_done_bits / g_axes_error 全局标志 |
 | `vMotorTestTask` | 1024 | Normal | MKS 电机测试任务（已注释） |
 | `TouchGFX_Task` | 8192 | Normal | GUI 图形界面渲染 + VSYNC + 按键处理 |
 | `Key_Task` | 256 | Normal | 硬件按键扫描（10ms）+ 消抖 → keyEventQueue |
@@ -336,7 +344,7 @@ pnp_1/
 - `motor_event_queue` (32深度) — CAN 中断 → CAN_Process_Task / vMotorTestTask
 - `motion_cmd_queue` (20深度) — Host_Task → MotionTask_Func
 - `host_pkt_queue` (64深) — 已弃用，Host_Task 改用 UART_PeekData 直接读取
-- `evtAxesDone` 事件组 — CAN_Process_Task 通知到位
+- `evtAxesDone` 事件组 — 已弃用（保留对象但不再使用），改为 `g_axes_done_bits`/`g_axes_error` volatile 全局变量（见 §27.3）
 - `keyEventQueue` (16深) — Key_Task → KeyController → TouchGFX 按键事件
 - `dataTransferQueue` (16深) — 主系统 Task → Model::processQueue() → UI 数据同步
 - `vsync_queue` (1深) — TouchGFX 内部 (OSWrappers.cpp)，TIM7 ISR → 渲染循环
@@ -550,6 +558,91 @@ static bool host_correct_r_from_vision(const VisionResult_t *r, const char *stag
 | `app_host.h` | 移除 `R_SPEED_RPM`（已迁至 app_config.h） |
 | `app_host.c` | 新增 `host_correct_r_from_vision` 辅助函数；find_comp_step/offset_check_step VISION_DONE 调用辅助函数；find_comp_step/mark_align_step/offset_check_step VISION_GOT_POS 坐标映射修正 |
 | `app_test.c` | StartCamTestTask 初始化流程对齐；P1/P2/P3 测试流程激活；R 轴两步矫正逻辑；硬编码 0.1f/60.0f 替换为命名常量；cam_test_run 移动调用改为 safe_move_to |
+
+
+### 9.17 上位机↔电机坐标系约定 + PrintDebug 显示统一（2026-06-22）
+
+**背景：** 点动模式下 MOVE_UP 打印 `(153,0)` 而非预期的 `(0,153)`，同时 MOVE_TO (5,5) 实际走到 (-5,5)。排查发现上位机坐标系（X=水平、Y=垂直）与电机坐标系（X电机=垂直、Y电机=水平）之间存在 90° 旋转 + 水平轴符号翻转，部分代码路径未正确处理。
+
+#### 坐标系约定
+
+```
+上位机坐标系（host）：        电机坐标系（motor）：
+     Y+ (上)                      X电机+ (上)
+      ↑                            ↑
+      |                            |
+      +--→ X+ (右)                +--→ Y电机+ (左)
+
+映射关系：
+  host_x = -motor_y      （Y电机正转 = 机器向左 = 上位机 X 负方向）
+  host_y = +motor_x      （X电机正转 = 机器向上 = 上位机 Y 正方向）
+
+逆映射：
+  motor_x = +host_y
+  motor_y = -host_x
+```
+
+#### 离散移动方向验证
+
+`handle_debug_cmd` 离散移动查表存储的是**电机轴偏移量**（sx=X电机符号, sy=Y电机符号）：
+
+| 方向 | 表值 | 电机动作 | 上位机等效 | 正确？ |
+|------|------|---------|-----------|--------|
+| MOVE_UP | {+1, 0} | X电机+ | host Y+ | ✓ |
+| MOVE_DOWN | {-1, 0} | X电机- | host Y- | ✓ |
+| MOVE_LEFT | {0, +1} | Y电机+ | host X- | ✓ |
+| MOVE_RIGHT | {0, -1} | Y电机- | host X+ | ✓ |
+
+JOG 连续移动（MOVE_*_START）直接控制对应电机，方向一致。
+
+#### MOVE_TO Bug 修复
+
+[app_host.c](E:/Desktop/qiansai/pnp_1/Task/app_host.c:537) MOVE_TO 原先的映射：
+
+```c
+// 修复前：
+tx = cmd->param2 * STEPS;   // host Y → X电机 (正确)
+ty = cmd->param  * STEPS;   // host X → Y电机 (缺取反！)
+// MOVE_TO 5 5 → 实际走到 (-5, 5)
+```
+
+```c
+// 修复后：
+tx = cmd->param2 * STEPS;   // host Y → X电机 (同号)
+ty = -cmd->param * STEPS;   // host X → Y电机 (取反)
+// MOVE_TO 5 5 → 正确走到 (5, 5)
+```
+
+#### PrintDebug 显示统一
+
+将所有显示 `Coord_Get().x / .y` 的 PrintDebug 统一转换为上位机坐标系：`(-motor_y, motor_x)`。
+
+涉及位置：
+
+| 行号 | 命令/函数 | 改动 |
+|------|----------|------|
+| ~481,484 | 离散移动 (MOVE_UP/DOWN/LEFT/RIGHT) | `(x,y)` → `(-y,x)` |
+| ~541 | MOVE_TO | `(x,y)` → `(-y,x)` + ty 取反 |
+| ~382 | SET_SCATTER_AREA | `(x,y)` → `(-y,x)` |
+| ~391 | SET_HEATER_PLATFORM_MIN | `(x,y)` → `(-y,x)` |
+| ~396 | SET_HEATER_PLATFORM_MAX | `(x,y)` → `(-y,x)` |
+| ~401 | SET_BOTTOM_CAM | `(x,y)` → `(-y,x)` |
+
+#### 标定数据存储说明
+
+标定 SET 命令（SET_SCATTER_AREA、SET_BOTTOM_CAM 等）**存入 Flash 的是电机坐标**（`Coord_Get().x/y` 原始值）。后续 PnP 流程从 Flash 读出后直接传给 `safe_move_to`，后者也接受电机坐标。全过程无坐标系转换，存取闭环正确。PrintDebug 仅显示层转换，不影响存储值。
+
+#### 摄像头→电机映射（不受影响）
+
+P1/P2/P3 视觉 step 函数使用独立的摄像头→电机映射（§9.14, §9.16），与本次修改的 `handle_debug_cmd` 和 MOVE_TO 路径物理隔离，互不干扰。
+
+#### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `app_host.c` | `handle_debug_cmd`：离散移动 PrintDebug 坐标转换 + MOVE_TO ty 取反 + MOVE_TO PrintDebug 坐标转换 |
+| `app_host.c` | `handle_calib_cmd`：四个标定 SET 命令 PrintDebug 坐标转换 |
+| `AGENTS.md` | §9.17 新增，§27.8 坐标映射条目修正 |
 
 
 ### 9.9 TMC2209 使能/关闭设计（2026-06-11~12）
@@ -1723,7 +1816,7 @@ ENN=HIGH 时 LDO 关断，数字逻辑掉电，UART 不工作，所有配置写�
 
 | 参数 | 最终值 | 说明 |
 |------|--------|------|
-| 运行电流 | 1000mA (TMC2209_MOTOR_RUN_CURRENT) | 原 800mA 扭矩不足 |
+| 运行电流 | 1200mA (TMC2209_MOTOR_RUN_CURRENT) | 原 800mA 扭矩不足 |
 | 斩波模式 | spreadCycle (GCONF_EN_SPREADCYCLE) | 比 StealthChop 扭矩大 |
 | 微步分辨率 | 256 (MRES=0) | 保持精度 |
 | 测试速度 | 40000 μsteps/s | ~47 RPM |
@@ -2057,7 +2150,7 @@ if ((cmd->cmd == HCMD_MOVE_UP_START   || cmd->cmd == HCMD_MOVE_DOWN_START ||
 
 - **安全高度 / P3 检测高度：** 75°（原 120°）
 - **吸取高度 / 贴装高度：** 110°（原 60° / 55°）
-- 修改位置：pp_motion.c 的 ANGLE_UP/ANGLE_DOWN 宏，pp_config.h 的 CALIB_DEFAULT_Z_* 宏
+- 修改位置：app_motion.c 的 ANGLE_UP/ANGLE_DOWN 宏，app_config.h 的 CALIB_DEFAULT_Z_* 宏
 - 注意：角度越大吸嘴越低（与早期代码方向相反）
 
 ### 22.2 安全运动封装
@@ -2065,8 +2158,8 @@ if ((cmd->cmd == HCMD_MOVE_UP_START   || cmd->cmd == HCMD_MOVE_DOWN_START ||
 - 新增 safe_move_to(target_x, target_y, speed, acc, cur_x, cur_y) — 所有 XY 运动统一入口，内部先调 z_safe() 抬 Z 到安全高度
 - 新增 z_safe() / z_pick() / z_place() — 使用 g_calib 标定值的三高度函数
 - pick_component() / place_component() 改用 z_pick()/z_place() 替代 z_down()，用 z_safe() 替代 z_up()
-- pp_host.c 中 10 处 move_xy_relative 调用全部替换为 safe_move_to
-- 新增全局 olatile bool g_motor_error，safe_move_to 检测到返回 -2（限位/堵转）时置位
+- app_host.c 中 10 处 move_xy_relative 调用全部替换为 safe_move_to
+- 新增全局 volatile bool g_motor_error，safe_move_to 检测到返回 -2（限位/堵转）时置位
 
 ### 22.3 状态机扩充
 
@@ -2795,3 +2888,306 @@ else if (retry >= 3) { 告警检查供料器 }
 ```
 
 **关键设计：** 使用 `Coord_Get()` 在 P1 执行后保存散料区位置（`scatter_pos`），err3_8 重试时移回此处重新 P1。不依赖 `g_scatter_subpos`（测试任务中该数组可能未初始化）。
+
+## 二十七、2026-06-21 会话 — 离散运动控制修复
+
+### 27.1 背景
+
+上位机离散移动命令（MOVE_UP/DOWN/LEFT/RIGHT）持续返回 `ret=-2`（堵转/限位），而连续移动（JOG）正常。经 CAN 总线帧级别调试（`driver_can.c` 临时开启 TX/RX 日志），定位到三层根因并逐一修复。
+
+### 27.2 修复 1 — positionMode1Run/2Run 帧长度错误
+
+**根因：** `CAN_Transmit_Data` 入口检查 `Length > 7` 直接拒绝（`driver_can.c:95`）。MKS 电机协议帧 ≤7 字节有效数据 + 1 字节 CRC = 8 字节 CAN 帧。
+`positionMode2Run`（0xF4 相对定位）和 `positionMode1Run`（0xFD）均传 `Length=8` 被拒，指令从未上总线。
+
+**修复：** `driver_motor.c` 两处 `CAN_Transmit_Data(..., 8)` → `CAN_Transmit_Data(..., 7)`，与 `positionMode3Run` 一致。
+
+**涉及文件：** `Drivers/ZeMCU-G4/driver_motor.c:232,255`
+
+### 27.3 修复 2 — 到位阈值导致小步长不回报完成
+
+**根因：** `motorSetArrivalThreshold` 默认 200 步（`0x00C8`）。从零点发绝对/相对 100 步移动，距离 100 < 阈值 200，MKS 电机判定"已在目标"——不动作，不发 `F4/F5 02` 完成响应。`CAN_Process_Task` 永远收不到完成标志，等待循环超时。
+
+**修复：** 到位阈值 200 → 50 步（`0x0032`），兼顾检测灵敏度与伺服稳定性。50 步 @ 100步/mm = 0.5mm，对贴片机足够精确且不会引起电机振荡。
+
+**涉及文件：** `Drivers/ZeMCU-G4/driver_motor.c:361`
+
+### 27.4 修复 3 — 同步触发从逐个电机改为广播
+
+**根因：** `move_xy_relative` 向 X1/X2 **分别**发送 `0x4B` 同步触发：
+```c
+CAN_Transmit_Data(&hfdcan1, X1_ADDR, tx, 1);  // X1 先动
+CAN_Transmit_Data(&hfdcan1, X2_ADDR, tx, 1);  // X2 后动
+```
+双 X 轴机械耦合——X1 先启动时 X2 仍锁死，X1 堵转回报 `0x03`，`CAN_Process_Task` 设 `EVENT_ANY_ERROR` → `ret=-2`。
+
+MKS 官方文档明确规定：`0x4B` 同步执行指令**必须发广播地址 `0x00`**，所有等待同步的电机同时启动。
+
+**修复：** 三条逐个触发替换为 `motorSyncTrigger(0)`（广播），与 JOG 一致。
+
+**涉及文件：** `Task/app_motion.c:218`
+
+### 27.5 修复 4 — 等待策略从事件标志改为时长估算
+
+**根因：** `osEventFlagsWait` 事件标志在调试中反复出现异常（`flags=0xE` 凭空出现，包含 `X2_DONE|Y_DONE|ANY_ERROR`）。同时在 ISR 或任务上下文中调用大量 `PrintDebug` 会阻塞 CAN 帧处理、诱发栈/数据踩踏。即使修复以上三项，MKS 电机对 `F4 02` 完成响应的回报行为因固件版本而异且不可靠。
+
+**修复方案：** 彻底绕开 RTOS 事件标志和电机完成响应依赖。
+
+**架构变更：**
+
+| 组件 | 旧（事件标志） | 新（volatile 轮询） |
+|------|--------------|-------------------|
+| `CAN_Process_Task` | `osEventFlagsSet(evtAxesDone, ...)` | 写 `g_axes_done_bits`（位 0/1/2 对应 X1/X2/Y）和 `g_axes_error` |
+| `move_xy_relative` | `osEventFlagsWait(..., 200ms)` 轮询 | `osDelay(估算时长)` + 堵转前检测 `g_axes_error` |
+| `move_to` (static) | `osEventFlagsWait(..., ACK_TIMEOUT_MS)` | 10ms 轮询 `g_axes_done_bits` / `g_axes_error` |
+| `MotionTask_Func` | 同上 | 同上 |
+| `safe_move_to` | 超时 retry 逻辑 | 移除死代码（`move_xy_relative` 不再返回 -1） |
+
+**时长估算公式：**
+```c
+max_steps = fmaxf(fabsf(dx), fabsf(dy));
+move_ms   = max_steps / (speed × MKS_PULSES_PER_REV / 60000) + 80;
+// 钳位：50ms ≤ move_ms ≤ 5000ms
+```
+
+其中 `MKS_PULSES_PER_REV = 16384.0f`（MKS SERVO42D 编码器每圈脉冲数），以命名常量定义于 `app_motion.c:49`。+80ms 为加减速安全余量。
+
+**新增全局变量：**
+```c
+volatile uint32_t g_axes_done_bits = 0;  // bit0=X1, bit1=X2, bit2=Y (EVENT_X1_DONE/EVENT_Y_DONE 宏复用)
+volatile bool     g_axes_error    = false; // F4/F5 0x03 堵转标志
+```
+
+`CAN_Process_Task` 单写，`move_xy_relative` / `move_to` 双读。单任务调用（Host_Task）场景下无竞态，无需互斥锁。
+
+**涉及文件：** `Task/app_motion.c` — `CAN_Process_Task`（~15行）、`move_xy_relative`（~50行）、`move_to`（~15行）、`safe_move_to`（-7行）、`MotionTask_Func`（~5行）
+
+### 27.6 修复 5 — 移除 UART 中断检测
+
+`move_xy_relative` 等待循环中原有 `UART_PeekData(UART_CH1)` 检查，用于在运动期间检测上位机 `MOVE_STOP`。该检测过度敏感——串口残留数据（回显、换行）均触发误判 `ret=-3`。由于 `Host_Task` 在阻塞期间本就不接收新命令且无法同时处于两个状态，此检查无实际保护价值。
+
+**修复：** 移除 UART 检查段，保持等待循环简洁。
+
+### 27.7 完整修改清单
+
+| 文件 | 行 | 修改 | 类别 |
+|------|-----|------|------|
+| `driver_motor.c` | 232 | `CAN_Transmit_Data(..., 8)` → `7` (positionMode1Run) | Bug 修复 |
+| `driver_motor.c` | 255 | `CAN_Transmit_Data(..., 8)` → `7` (positionMode2Run) | Bug 修复 |
+| `driver_motor.c` | 355-361 | 到位阈值 200→50，注释同步 | 参数优化 |
+| `app_motion.c` | 49 | 新增 `MKS_PULSES_PER_REV 16384.0f` | 常量定义 |
+| `app_motion.c` | 26-27 | 新增 `g_axes_done_bits` / `g_axes_error` | 新全局变量 |
+| `app_motion.c` | 172-183 | `move_xy_relative` 文档注释更新 | 文档 |
+| `app_motion.c` | 203-241 | `move_xy_relative` 重写：广播触发 + 时长估算 + volatile 检测 | 重构 |
+| `app_motion.c` | 278-292 | `move_to` 同步改为 volatile 轮询 + 超时常量化 | 重构 |
+| `app_motion.c` | 353 | `safe_move_to` 移除 -1 重试死代码 | 清理 |
+| `app_motion.c` | 467-479 | `MotionTask_Func` 同步改为 volatile 轮询 | 重构 |
+| `app_motion.c` | 554-567 | `CAN_Process_Task` 改为写 volatile 全局变量 | 重构 |
+
+### 27.8 设计决策记录
+
+- **不恢复事件标志：** RTOS 事件标志在 `PrintDebug` 密集场景下存在不可靠行为。`volatile uint32_t` + `volatile bool` 极简方案对单任务写入场景完全足够，零中间层、零堆分配。
+- **不等待 F4 02 完成响应：** MKS 电机对相对模式完成响应的行为因固件版本而异（某些版本不发 0x02）。时长估算与 JOG 策略一致——发完即等，不到即假定完成。
+- **到位阈值 50 而非更低：** 5 步（~0.05mm）会导致伺服闭环振荡不稳定。50 步（~0.5mm）兼顾到位确认与稳定性。
+- **移除 MOVE_STOP 检测而非保留：** 运动期间 `Host_Task` 处于阻塞态，上位机无法发送需要即时响应的命令。`MOVE_STOP` 由上位机通过 JOG 状态机自行管理（`MOVE_*_START` 的第二次点击）。
+- **坐标映射正确性：** 电机 X1/X2 控制机器垂直轴（上下），电机 Y 控制水平轴（左右）。上位机坐标系约定 X=水平、Y=垂直，与电机坐标系差 90° 旋转 + 水平轴取反：`host_x = -motor_y`，`host_y = +motor_x`。`handle_debug_cmd` 离散移动表和 JOG 方向的电机映射已确认正确，`MOVE_TO` 的 `ty` 需取反（-cmd->param）以匹配此约定。标定 SET 命令存电机坐标、读取也用电机坐标，往返闭环正确，Display 层统一转上位机坐标显示。详见 §9.17。
+
+
+## 二十八、2026-06-23 会话 — 下相机补光灯 + Flash 标定数据诊断与防御
+
+### 28.1 12VO2 下相机补光灯
+
+**硬件：** 12VO2 = PE12（DRV8803 U12 芯片 IN3）。DRV8803 逻辑 IN=HIGH → OUT=LOW，PE12 高电平时 12V 输出导通。
+
+**新增接口**（`driver_drv8803.h`）：
+```c
+#define LIGHT_LOWERCAM_PORT  (&Port_12VO2)   // 12VO2/PE12 接下位相机补光灯
+
+static inline void LowerCam_Light_On(void)  { DRV8803_SetOutput(&Port_12VO2, true); }
+static inline void LowerCam_Light_Off(void) { DRV8803_SetOutput(&Port_12VO2, false); }
+```
+
+**使用**（`app_test.c` StartCamTestTask）：在 P3 `cam_test_run(VCMD_P3, ...)` 前开灯，结束后关灯。
+err3_8 重试循环内灯保持开启，循环退出后关灯。当前 P3 块处于注释状态，补光灯调用以 `//` 注释保持一致。
+
+### 28.2 Flash 标定数据的潜在危险
+
+**问题：** `Calib_Load` 仅校验 magic + CRC32，不校验字段值的合理性。只要 magic 和 CRC 通过，
+Flash 中的任何数据（包括 110° 的安全高度、0.0 的视觉系数）都会被原样加载。
+`calib_set_defaults` 只有在 magic 不匹配或 CRC 失败时才会触发。
+
+**根因链：** 旧 Flash 数据中 `z_safe=110.0` 的场景：
+1. 某次标定时舵机在 110° 位置执行了 `SET_Z_SAFE` → `g_calib.z_safe_angle = 110.0`
+2. `SET_Z_PICK` / `SET_Z_PLACE` 从未执行，对应字段为 0.0 或旧值
+3. `SAVE_CALIB` → 整份数据（含 110.0 / 0.0 / 0.0 + 正确 CRC）写进 Flash
+4. 之后每次 `Calib_Load` magic+CRC 通过 → 照单全收
+
+**Host_Task 同样受影响：** `handle_debug_cmd` 的 JOG START 直接调用 `z_safe()`，
+离散移动走 `safe_move_to` → `z_safe()`，都使用 `g_calib.z_safe_angle`（即 Flash 值）。
+如果 Flash 里是 110°，Host_Task 点动时也会把舵机设到 110°，只是没有先设 78° 的对比，不易察觉。
+
+### 28.3 标定结构体字段与默认值
+
+| 字段 | 类型 | 默认值 | 说明 |
+|------|------|--------|------|
+| `scatter_x/y_steps` | int32_t | 0 | 散料区原点（步数） |
+| `scatter_size_steps` | int32_t | 0 | 散料区边长（步数） |
+| `heat_platform_x/y_min/max` | int32_t | 0 | 加热台平台区域（步数） |
+| `bottom_cam_x/y_steps` | int32_t | 0 | 下相机位置（步数） |
+| `cam_to_nozzle_dx/dy_steps` | int32_t | 0 | 摄像头→吸嘴偏置（步数） |
+| `z_safe_angle` | float | 78.0f | 安全高度（°） |
+| `z_pick_angle` | float | 116.0f | 吸取高度（°） |
+| `z_place_angle` | float | 116.0f | 贴装高度（°） |
+| `cam_p1_val_to_steps` | float | 3.277f | P1 上摄像头：视觉值→步数比例 |
+| `cam_p3_val_to_steps` | float | 3.277f | P3 下摄像头：视觉值→步数比例 |
+
+> **重要：** `cam_p1/p3_val_to_steps` 为 0 时视觉闭环矫正完全失效——摄像头检测到偏移后乘以 0 得 0 步，电机不补偿。
+
+### 28.4 诊断日志
+
+Host_Task 和 StartCamTestTask 均在 `Calib_Load` 后输出 4 行完整标定数据诊断日志：
+
+```
+[HOST] Calib: z_safe=77.9 z_pick=115.9 z_place=115.9
+[HOST] Calib: scatter=(58880,-25600) size=37888
+[HOST] Calib: heat=(25600,-82432)-(71680,-131072) botcam=(-103,-25650)
+[HOST] Calib: nozzle_off=(-5991,-24988) cam_p1=-0.000 cam_p3=0.000
+```
+
+零值字段 = 未标定 = 垃圾数据，非零值 = 有效。
+
+
+### 28.5 StartCamTestTask 的 Flash 数据风险
+
+**注意：StartCamTestTask 在初始化时也调用了 Calib_Load(&g_calib)（app_test.c:1097），与 Host_Task 共享同一个全局标定变量。**
+
+StartCamTestTask 有两处潜在破坏性操作：
+
+1. **Calib_Load 调用（第 1097 行）：** 如果 Flash 读取偶发错误导致 magic/CRC 校验失败，calib_set_defaults 会将 g_calib 全部重置为默认值（位置全 0，Z 轴 78.0/116.0/116.0，cam 比例 3.277/3.277）。该函数仅返回 0（不返回 -1），不会触发 "Flash read failed" 日志，**数据丢失完全静默**。
+
+2. **Z 轴高度覆写（第 1113-1115 行）：**
+   `c
+   g_calib.z_safe_angle  = 78.0f;
+   g_calib.z_pick_angle  = 116.0f;
+   g_calib.z_place_angle = 116.0f;
+   `
+   如果 Calib_Load 已静默失败并将 g_calib 重置为默认值（z_safe=78.0），这三行覆写不会改变任何值（78.0 → 78.0），**用户完全无法察觉标定数据已经丢失**。
+
+**安全特性：** StartCamTestTask 不会调用 Calib_Save，因此其对 g_calib 的修改只存在于 RAM 中，Flash 中的标定数据不会被永久破坏。正常情况下 Host_Task 和 StartCamTestTask 不应同时激活。
+
+### 28.6 Calib_Load 返回值语义
+
+| 场景 | 返回值 | g_calib 内容 | 用户可见 |
+|------|--------|-------------|---------|
+| Flash 读成功 + magic OK + CRC OK | 0 | Flash 原始数据 | 正常 |
+| Flash 读成功 + magic 不匹配 | 0 | calib_set_defaults 结果 | **无任何提示**（现已加诊断打印） |
+| Flash 读成功 + CRC 不匹配 | 0 | calib_set_defaults 结果 | **无任何提示**（现已加诊断打印） |
+| Flash 读失败（硬件错误） | -1 | calib_set_defaults 结果 | "Flash read failed, using defaults." |
+
+> 返回值 0 不代表数据正确，仅代表操作完成。**magic 和 CRC 校验失败返回 0 而非 -1，是设计缺陷**——调用方（Host_Task）通过 Calib_Load(&g_calib) != 0 判断失败，这两种静默失败情况完全无法检测。
+
+### 28.7 Calib_Load magic/CRC 失败诊断（新增，2026-06-23）
+
+在 driver_spiflash_w25q64.c 的 Calib_Load 中新增诊断打印：
+
+`c
+// magic 不匹配时
+if (calib->magic != CALIB_MAGIC) {
+    PrintDebug("[CALIB] Magic mismatch: 0x%08lX\r\n", (unsigned long)calib->magic);
+    calib_set_defaults(calib);
+    return 0;
+}
+
+// CRC 不匹配时
+if (expected != computed) {
+    PrintDebug("[CALIB] CRC mismatch: exp=0x%08lX got=0x%08lX\r\n",
+               (unsigned long)expected, (unsigned long)computed);
+    calib_set_defaults(calib);
+    return 0;
+}
+`
+
+下次启动时如果标定数据静默丢失，日志会明确显示是 magic 不匹配还是 CRC 校验失败。
+
+### 28.8 Calib_Save 写后读回验证（新增，2026-06-23）
+
+在 driver_spiflash_w25q64.c 的 Calib_Save 中，W25Q64_Write 完成后立即读回比对：
+
+`c
+/* 诊断：写后读回比对 */
+{
+    CalibrationData_t verify;
+    if (W25Q64_Read(CALIB_FLASH_ADDR, (uint8_t *)&verify, sizeof(verify)) >= 0) {
+        if (memcmp(&buf, &verify, sizeof(buf)) != 0) {
+            PrintDebug("[CALIB] WRITE VERIFY FAILED!\r\n");
+            uint8_t *a = (uint8_t *)&buf, *b = (uint8_t *)&verify;
+            for (int i = 0; i < (int)sizeof(buf); i++) {
+                if (a[i] != b[i])
+                    PrintDebug("  off=%d: wrote 0x%02X, read 0x%02X\r\n", i, a[i], b[i]);
+            }
+        } else {
+            PrintDebug("[CALIB] Write verify OK.\r\n");
+        }
+    }
+}
+`
+
+可区分两种根因：
+- WRITE VERIFY FAILED → Flash 硬件写入异常（W25Q64 损坏、SPI 时序问题）
+- Write verify OK + 下次启动 Magic/CRC 失败 → Flash 读取偶发错误
+
+### 28.9 RESTORE_CALIB 命令（新增，2026-06-23）
+
+新增 RESTORE_CALIB 上位机命令，用于紧急恢复标定数据。涉及文件：
+
+| 文件 | 改动 |
+|------|------|
+| Task/app_uart_parser.h | 新增 HCMD_RESTORE_CALIB 枚举值 |
+| Task/app_uart_parser.c | 新增 "RESTORE_CALIB" 字符串匹配 |
+| Task/app_host.c | handle_calib_cmd 新增处理分支（硬编码标定值 → scatter_init_cells → Calib_Save） |
+
+用法：上位机发送 RESTORE_CALIB（无参数，末尾带换行），固件将预置的标定数据写入 Flash。当前硬编码值：
+
+`c
+g_calib.scatter_x_steps       = 58880;
+g_calib.scatter_y_steps       = -25600;
+g_calib.scatter_size_steps    = 37888;
+g_calib.heat_platform_x_min   = 25600;
+g_calib.heat_platform_y_min   = -82432;
+g_calib.heat_platform_x_max   = 71680;
+g_calib.heat_platform_y_max   = -131072;
+g_calib.bottom_cam_x_steps    = -103;
+g_calib.bottom_cam_y_steps    = -25650;
+g_calib.cam_to_nozzle_dx_steps = -5991;
+g_calib.cam_to_nozzle_dy_steps = -24988;
+g_calib.z_safe_angle           = 77.9f;
+g_calib.z_pick_angle           = 115.9f;
+g_calib.z_place_angle          = 115.9f;
+g_calib.cam_p1_val_to_steps    = 0.0f;
+g_calib.cam_p3_val_to_steps    = 0.0f;
+`
+
+### 28.10 SPI3 Flash 访问注意事项
+
+- SPI3（W25Q64）无互斥锁保护。Host_Task 和 StartCamTestTask 均在初始化阶段调用 Calib_Load，两个任务同优先级（Normal），存在 SPI 总线竞争风险。正常使用时不应两个任务同时激活。
+- pp_logger.c（Log_Init / Log_Write）也访问 W25Q64，使用独立扇区 LOG_SECTOR_ADDR = 0x7FE000，不与标定扇区 CALIB_FLASH_ADDR = 0x7FF000 冲突。
+- SPI3 中断已使能（stm32g4xx_it.c 中 HAL_SPI_IRQHandler(&hspi3) 已注册），但 W25Q64 驱动使用阻塞/轮询模式（HAL_SPI_Transmit/Receive），不使用中断/DMA。
+
+### 28.11 涉及文件（汇总更新）
+
+| 文件 | 改动 |
+|------|------|
+| driver_drv8803.h | 新增 LowerCam_Light_On/Off 内联函数 + LIGHT_LOWERCAM_PORT 宏 |
+| Task/app_test.c | P3 补光灯调用；4 行完整标定诊断日志；Z 轴高度覆写 |
+| Task/app_host.c | 4 行完整标定诊断日志 + RESTORE_CALIB 处理分支 |
+| Task/app_uart_parser.h | 新增 HCMD_RESTORE_CALIB 枚举 |
+| Task/app_uart_parser.c | 新增 "RESTORE_CALIB" 命令匹配 |
+| driver_spiflash_w25q64.c | Calib_Save 写后读回验证；Calib_Load magic/CRC 失败诊断打印 |
+
+### 28.12 文件编辑注意事项
+
+- Node.js 的 eadFileSync 读取 UTF-8 + CRLF 文件时保留 \r\n，替换时需匹配正确的换行符。
+- 当替换文本中包含 % 字符时，PowerShell inline 
+ode -e 会解析失败，应将 JS 写入临时 .js 文件再执行。
+- git checkout 会丢弃未提交的工作区改动，执行前应确认无重要修改。git stash 可保护工作区改动。
+- **项目文件编码均为 UTF-8 + CRLF (\r\n)**。用 [System.IO.File]::ReadAllText 读、[System.IO.File]::WriteAllText 写，确保字节精确。

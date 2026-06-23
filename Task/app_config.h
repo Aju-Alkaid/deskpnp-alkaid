@@ -4,7 +4,7 @@
 #include <stdint.h>
 
 /* ---- 共享运动控制常量 ---- */
-#define STEPS_PER_MM     3276.8f
+#define STEPS_PER_MM     512.0f
 #define JOG_MAX_STEPS    8388607
 #define X1_ADDR          0x01
 #define X2_ADDR          0x02
@@ -37,15 +37,19 @@ typedef struct {
     int32_t  scatter_y_steps;     /* 散料区原点 Y (步数) */
     int32_t  scatter_size_steps;  /* 散料区边长 (步数) */
 
-    /* ---- PCB 扫描区域 ---- */
-    int32_t  pcb_area_x_min;      /* PCB 区域左下 X (步数) */
-    int32_t  pcb_area_y_min;      /* PCB 区域左下 Y (步数) */
-    int32_t  pcb_area_x_max;      /* PCB 区域右上 X (步数) */
-    int32_t  pcb_area_y_max;      /* PCB 区域右上 Y (步数) */
+    /* ---- 加热台平台区域 ---- */
+    int32_t  heat_platform_x_min;      /* 加热台左下 X (步数) */
+    int32_t  heat_platform_y_min;      /* 加热台左下 Y (步数) */
+    int32_t  heat_platform_x_max;      /* 加热台右上 X (步数) */
+    int32_t  heat_platform_y_max;      /* 加热台右上 Y (步数) */
 
     /* ---- 下相机位置 ---- */
     int32_t  bottom_cam_x_steps;  /* 下相机 X 坐标 (步数) */
     int32_t  bottom_cam_y_steps;  /* 下相机 Y 坐标 (步数) */
+
+    /* ---- 上摄像头 à 吸嘴偏置 ---- */
+    int32_t  cam_to_nozzle_dx_steps; /* 摄像头à吸嘴 X 偏置 (步数): 标定时 step2 - step1 */
+    int32_t  cam_to_nozzle_dy_steps; /* 摄像头à吸嘴 Y 偏置 (步数): 标定时 step2 - step1 */
 
     /* ---- Z 轴三高度 (舵机角度 deg) ---- */
     float    z_safe_angle;        /* 安全高度: XY 运动时保持 */
@@ -57,18 +61,18 @@ typedef struct {
     float    cam_p3_val_to_steps; /* P3 (下摄像头) 视觉值 à 步数 */
 
     /* ---- CRC32 校验 ---- */
-    uint32_t crc32;               /* CRC32 of bytes [magic .. cam_p3_val_to_steps] */
+    uint32_t crc32;               /* CRC32 of bytes [magic .. cam_to_nozzle_dy_steps] */
 } CalibrationData_t;
 
 /*
  * 默认标定值 — 首次上电 magic 不匹配时使用。
  * 所有坐标字段为 0，Z 角度使用代码中的硬编码默认值。
  */
-#define CALIB_DEFAULT_Z_SAFE      75.0f
-#define CALIB_DEFAULT_Z_PICK     110.0f
-#define CALIB_DEFAULT_Z_PLACE    110.0f
-#define CALIB_DEFAULT_CAM_P1      0.003f
-#define CALIB_DEFAULT_CAM_P3      0.001f
+#define CALIB_DEFAULT_Z_SAFE      78.0f
+#define CALIB_DEFAULT_Z_PICK     116.0f
+#define CALIB_DEFAULT_Z_PLACE    116.0f
+#define CALIB_DEFAULT_CAM_P1      3.277f
+#define CALIB_DEFAULT_CAM_P3      3.277f
 
 /* ---- 全局标定实例 (定义在 app_host.c) ---- */
 extern CalibrationData_t g_calib;

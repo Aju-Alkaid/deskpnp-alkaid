@@ -42,6 +42,7 @@ void setWorkMStep(uint8_t slaveAddr,uint8_t MStep);
 
 void setIWorkMode(uint8_t slaveAddr,uint16_t Ma);
 
+void positionMode2Run(uint8_t slaveAddr,uint16_t speed,uint8_t acc,int32_t relAxis);
 void positionMode3Run(uint8_t slaveAddr,uint16_t speed,uint16_t acc,int32_t absAxis);
 
 void motorEnable(uint8_t slaveAddr, uint8_t enable);

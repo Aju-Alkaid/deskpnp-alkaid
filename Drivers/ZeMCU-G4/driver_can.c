@@ -1,4 +1,4 @@
-﻿#include "stm32g4xx_hal.h"
+#include "stm32g4xx_hal.h"
 #include "fdcan.h"
 #include <string.h>
 #include "driver_can.h"
@@ -148,7 +148,7 @@ uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t 
 void TIM_100us_CAN_PeriodElapsedCallback()
 {
 	// 后续根据电机的具体型号改动回调函数内容
-	
+	 
 }
 
 

@@ -50,7 +50,7 @@ void Motor_Init(void) {
     osDelay(20);
 
     // 4. 开启同步标志（广播，双 X 轴必须）
-    motorSyncEnable(0);  // 关闭同步，三轴独立执行
+    motorSyncEnable(1);  // 开启同步，三轴同步执行
     osDelay(20);
 
     // 5. 标定零点：将当前所有电机位置作为绝对零点
@@ -229,7 +229,7 @@ void positionMode1Run(uint8_t slaveAddr,uint8_t dir,uint16_t speed,uint8_t acc,u
   txBuffer[5] = (pulses >> 8)&0xFF;   //脉冲数 bit15 - bit8
   txBuffer[6] = (pulses >> 0)&0xFF;   //脉冲数 bit7 - bit0
 	
-CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 8);
+CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
 }
 
 /*
@@ -252,7 +252,7 @@ void positionMode2Run(uint8_t slaveAddr,uint16_t speed,uint8_t acc,int32_t relAx
   txBuffer[5] = (relAxis >> 8)&0xFF;   //相对坐标 bit15 - bit8
   txBuffer[6] = (relAxis >> 0)&0xFF;   //相对坐标 bit7 - bit0
 	
-	CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 8);
+	CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
 }
 
 /*
@@ -352,13 +352,13 @@ void motorEnable(uint8_t slaveAddr, uint8_t enable) {
     CAN_Transmit_Data(&hfdcan1, slaveAddr, tx, 2);
 }
 
-/* 设置位置到达阈值 (0x95) 保持默认值200，保证到位反馈 */
+/* 设置位置到达阈值 (0x95) 50步，兼顾到位检测灵敏度与稳定性 */
 void motorSetArrivalThreshold(uint8_t slaveAddr) {
     uint8_t tx[8] = {0};
     tx[0] = 0x95;
     tx[1] = 0x01;        // enable = 1
-    tx[2] = 0x00;        // values 高字节，默认200 => 0x00C8
-    tx[3] = 0xC8;        // 低字节
+    tx[2] = 0x00;        // values 高字节 (0x0032 = 50)
+    tx[3] = 0x32;        // 低字节 (原默认 0x00C8 = 200)
     CAN_Transmit_Data(&hfdcan1, slaveAddr, tx, 4);
 }
 

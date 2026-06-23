@@ -13,6 +13,8 @@
 #include <math.h>   // 解决 fabsf 未声明
 #include "app_uart_parser.h"
 #include "app_vision.h"
+#include "driver_spiflash_w25q64.h"
+#include "app_host.h"
 
 // 简单的步进脉冲生成函数 (需根据你的GPIO定义修改)
 #define STEP_GPIO_PORT GPIOD
@@ -711,7 +713,6 @@ void StartHostMotionTestTask(void *argument)
     }
 }
 
-/* ================================================================
 
 /* ================================================================
  * Z轴舵机 + 吸嘴气泵 + R轴旋转 联合测试任务
@@ -928,6 +929,11 @@ void StartPickPlaceTestTask(void *argument)
 #define CAM_MOVE_SPEED        100
 #define CAM_MOVE_ACC          25
 
+/* P2 完整测试 — 与 Host_Task mark_align_step 共用常量 */
+#define P2_TEST_SCAN_STEP_MM    9.0f   /* P2 网格扫描步长 (mm) */
+#define P2_TEST_SCAN_TIMEOUT_MS 3000   /* 每格位超时 (ms) */
+#define P2_TEST_VERIFY_ERR_MM   0.3f   /* Mark3 验证允许误差 (mm) */
+
 /**
  * @brief 运行一个视觉 Process 到完成或超时
  * @param cmd        VCMD_P1 / VCMD_P2 / VCMD_P3
@@ -1066,12 +1072,228 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
     return false;
 }
 
+/* ================================================================
+ *  cam_p2_full_test_run — 阻塞式 P2 完整流程测试
+ *  复刻 Host_Task mark_align_step 的网格扫描 + 跳转 + 建系逻辑
+ * ================================================================ */
+static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count, uint32_t timeout_ms) {
+    if (mark_count < (uint32_t)P2_MARK_COUNT || marks == NULL) {
+        PrintDebug("[CAM_TEST] P2: need %d marks, got %lu\r\n", P2_MARK_COUNT, (unsigned long)mark_count);
+        return false;
+    }
+
+    /* 局部状态 (复刻 Host_Task 全局变量) */
+    int32_t  marks_actual[P2_MARK_COUNT][2] = {0};
+    int32_t  mark_offsets[P2_MARK_COUNT][2] = {0};
+    int32_t  scan_cols = 0, scan_rows = 0, scan_cur = 0;
+    bool     mark_scanning = false;
+    bool     mark_just_jumped = false;
+    int32_t  mark_count_done = 0;
+    uint32_t busy_enter_tick = 0;
+    bool     in_busy = false;
+
+    /* 计算网格扫描参数 (同 Host_Task P2 初始化) */
+    int32_t scan_step = (int32_t)(P2_TEST_SCAN_STEP_MM * STEPS_PER_MM);
+    int32_t area_w = g_calib.heat_platform_x_max - g_calib.heat_platform_x_min;
+    int32_t area_h = g_calib.heat_platform_y_max - g_calib.heat_platform_y_min;
+    if (area_w > 0 && area_h > 0) {
+        scan_cols = (area_w + scan_step - 1) / scan_step;
+        scan_rows = (area_h + scan_step - 1) / scan_step;
+        if (scan_cols < 1) scan_cols = 1;
+        if (scan_rows < 1) scan_rows = 1;
+        scan_cur = 0;
+        mark_scanning = true;
+        safe_move_to(g_calib.heat_platform_x_min, g_calib.heat_platform_y_min,
+                     PNP_SPEED, PNP_ACC);
+        PrintDebug("[CAM_TEST] P2 scan: %ldx%ld grid, step=%ld steps\r\n",
+                   (long)scan_cols, (long)scan_rows, (long)scan_step);
+    } else {
+        mark_scanning = false;
+        PrintDebug("[CAM_TEST] PCB area uncalibrated, single-spot P2.\r\n");
+    }
+
+    Vision_Start(VCMD_P2, 0);
+    Vision_Go();
+    PrintDebug("[CAM_TEST] Starting Mark alignment (P2, %lu marks)...\r\n", (unsigned long)mark_count);
+
+    VisionState_t prev = Vision_GetState();
+    uint32_t start_tick = osKernelGetTickCount();
+
+    while ((osKernelGetTickCount() - start_tick) < pdMS_TO_TICKS(timeout_ms)) {
+        UART_Driver_Process();
+
+        VisionState_t state = Vision_GetState();
+
+        /* VISION_BUSY: 按时间超时而非计数，适配阻塞轮询 */
+        if (state == VISION_BUSY) {
+            if (!in_busy) {
+                in_busy = true;
+                busy_enter_tick = osKernelGetTickCount();
+            }
+            if ((osKernelGetTickCount() - busy_enter_tick) < pdMS_TO_TICKS(P2_TEST_SCAN_TIMEOUT_MS)) {
+                vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
+            in_busy = false;
+            /* 超时: 处理扫描 */
+            if (mark_scanning) {
+                scan_cur++;
+                if (scan_cur >= scan_cols * scan_rows) {
+                    PrintDebug("[CAM_TEST] P2 scan exhausted (%ld cells), Mark0 not found.\r\n",
+                               (long)(scan_cols * scan_rows));
+                    mark_scanning = false;
+                    Vision_ForceIdle();
+                    return false;
+                }
+                /* 蛇形扫描 */
+                int32_t row = scan_cur / scan_cols;
+                int32_t col = scan_cur % scan_cols;
+                int32_t tx, ty;
+                if (row & 1) {
+                    tx = g_calib.heat_platform_x_max - col * scan_step;
+                } else {
+                    tx = g_calib.heat_platform_x_min + col * scan_step;
+                }
+                ty = g_calib.heat_platform_y_min + row * scan_step;
+                safe_move_to(tx, ty, PNP_SPEED, PNP_ACC);
+                Vision_Start(VCMD_P2, 0);
+                Vision_Go();
+                PrintDebug("[CAM_TEST] P2 scan [%ld,%ld] -> (%ld,%ld)\r\n",
+                           (long)row, (long)col, (long)tx, (long)ty);
+            } else {
+                PrintDebug("[CAM_TEST] P2 jump search timeout, mark not found.\r\n");
+                Vision_ForceIdle();
+                return false;
+            }
+            prev = state;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
+
+        if (state != prev) {
+            in_busy = false;
+            const VisionResult_t *r = Vision_GetResult();
+
+            switch (state) {
+            case VISION_GOT_STOP:
+                mark_scanning = false;
+                {
+                    int32_t idx = r->mark_index;
+                    if (idx >= 1 && idx < (int32_t)P2_MARK_COUNT && !mark_just_jumped) {
+                        /* Mark 间跳转预估 (同 Host_Task) */
+                        float tdx = marks[idx].target_x - marks[idx-1].target_x;
+                        float tdy = marks[idx].target_y - marks[idx-1].target_y;
+                        int32_t dx = (int32_t)(tdx * STEPS_PER_MM);
+                        int32_t dy = (int32_t)(tdy * STEPS_PER_MM);
+                        int32_t prev_idx = idx - 1;
+                        safe_move_to(marks_actual[prev_idx][0] + dx,
+                                     marks_actual[prev_idx][1] + dy,
+                                     PNP_SPEED, PNP_ACC);
+                        mark_just_jumped = true;
+                        PrintDebug("[CAM_TEST] P2 jump Mark%ld: theory(%.1f,%.1f)mm -> (%ld,%ld)\r\n",
+                                   (long)idx, (double)tdx, (double)tdy,
+                                   (long)Coord_Get().x, (long)Coord_Get().y);
+                    }
+                }
+                Vision_Go();
+                break;
+
+            case VISION_GOT_POS:
+                mark_just_jumped = false;
+                {
+                    int32_t idx = r->mark_index;
+                    if (idx >= 0 && idx < (int32_t)P2_MARK_COUNT) {
+                        if (r->dx != 0 || r->dy != 0) {
+                            int32_t dx_s = -(int32_t)(r->dy / 10000.0f * STEPS_PER_MM);
+                            int32_t dy_s = -(int32_t)(r->dx / 10000.0f * STEPS_PER_MM);
+                            safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s,
+                                         PNP_SPEED_FINE, PNP_ACC_FINE);
+                            PrintDebug("[CAM_TEST] Mark%ld offset: (%ld,%ld)mm10000 -> move(%ld,%ld)steps\r\n",
+                                       (long)idx, (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
+                        }
+                        marks_actual[idx][0] = Coord_Get().x;
+                        marks_actual[idx][1] = Coord_Get().y;
+                        mark_offsets[idx][0] = r->dx;
+                        mark_offsets[idx][1] = r->dy;
+                        mark_count_done = idx + 1;
+                    }
+                }
+                Vision_Go();
+                break;
+
+            case VISION_DONE:
+                mark_scanning = false;
+                /* 仿射建系 + Mark3 验证 (同 Host_Task) */
+                {
+                    int32_t a1x = marks_actual[0][0], a1y = marks_actual[0][1];
+                    int32_t a2x = marks_actual[1][0], a2y = marks_actual[1][1];
+                    int32_t a3x = marks_actual[2][0], a3y = marks_actual[2][1];
+
+                    float t1x = marks[0].target_x, t1y = marks[0].target_y;
+                    float t2x = marks[1].target_x, t2y = marks[1].target_y;
+                    float t3x = marks[2].target_x, t3y = marks[2].target_y;
+
+                    float theory_ang = atan2f(t2y - t1y, t2x - t1x);
+                    float actual_ang = atan2f((float)(a2y - a1y), (float)(a2x - a1x));
+                    float theta = actual_ang - theory_ang;
+
+                    float mt_x = (t1x + t2x) * 0.5f * STEPS_PER_MM;
+                    float mt_y = (t1y + t2y) * 0.5f * STEPS_PER_MM;
+                    int32_t ma_x = (a1x + a2x) / 2;
+                    int32_t ma_y = (a1y + a2y) / 2;
+
+                    float cos_t = cosf(theta), sin_t = sinf(theta);
+                    int32_t origin_x = ma_x - (int32_t)(mt_x * cos_t - mt_y * sin_t);
+                    int32_t origin_y = ma_y - (int32_t)(mt_x * sin_t + mt_y * cos_t);
+
+                    int32_t t3x_s = (int32_t)(t3x * STEPS_PER_MM);
+                    int32_t t3y_s = (int32_t)(t3y * STEPS_PER_MM);
+                    int32_t pred_x = (int32_t)(t3x_s * cos_t - t3y_s * sin_t) + origin_x;
+                    int32_t pred_y = (int32_t)(t3x_s * sin_t + t3y_s * cos_t) + origin_y;
+                    int32_t err_x = pred_x - a3x, err_y = pred_y - a3y;
+                    float err_mm = sqrtf((float)(err_x*err_x + err_y*err_y)) / STEPS_PER_MM;
+                    bool valid = (err_mm < P2_TEST_VERIFY_ERR_MM);
+
+                    PrintDebug("[CAM_TEST] === PCB Frame ===\r\n");
+                    PrintDebug("[CAM_TEST] origin=(%ld,%ld) theta=%.4frad(%.2fdeg)\r\n",
+                               (long)origin_x, (long)origin_y,
+                               (double)theta, (double)(theta * 57.29578f));
+                    PrintDebug("[CAM_TEST] Mark3 verify: err=%.3fmm %s\r\n",
+                               (double)err_mm, valid ? "OK" : "FAIL");
+
+                    if (mark_count_done >= 3) {
+                        int32_t avg_dx = (mark_offsets[0][0] + mark_offsets[1][0] + mark_offsets[2][0]) / 3;
+                        int32_t avg_dy = (mark_offsets[0][1] + mark_offsets[1][1] + mark_offsets[2][1]) / 3;
+                        PrintDebug("[CAM_TEST] Mark avg offset: (%ld,%ld) mm10000\r\n",
+                                   (long)avg_dx, (long)avg_dy);
+                    }
+                }
+                return true;
+
+            case VISION_ERROR:
+                mark_scanning = false;
+                PrintDebug("[CAM_TEST] Mark alignment ERROR: %s\r\n", Vision_GetError());
+                Vision_ForceIdle();
+                return false;
+
+            default:
+                break;
+            }
+            prev = state;
+        }
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+
+    PrintDebug("[CAM_TEST] P2 TIMEOUT after %lu ms\r\n", (unsigned long)timeout_ms);
+    return false;
+}
+
 /**
  * @brief 摄像头 + 电机联动测试任务
  * @note  初始化 CAN/MKS 电机 + Vision，依次执行 P1/P3/P2。
  *        根据摄像头返回的偏移实际驱动 XY 平台移动。
  */
-void StartCamTestTask(void *argument) {
+void StartCamTestTask(void *argument) {                //1093和1094两处需要删除，仅供视觉调试使用
     vTaskDelay(pdMS_TO_TICKS(500));
 
     /* ---- 0. DRV8803 + 舵机 + 电磁阀初始化 ---- */
@@ -1089,14 +1311,34 @@ void StartCamTestTask(void *argument) {
         PrintDebug("[CamTest] TMC_Init FAILED!\r\n");
     }
     TMC_SetEnable(false);          /* ENN 低有效: HIGH=关闭 */
+		
+//            LowerCam_Light_On();  /* 下相机补光灯 */
+//            Pump_On();
 
     /* 从 Flash 加载标定值 */
+    { uint8_t _dummy[4]; W25Q64_Read(0, _dummy, 4); }  /* 唤醒 W25Q64，清除热复位残留状态 */
     if (Calib_Load(&g_calib) != 0) {
         PrintDebug("[CamTest] Flash read failed, using defaults.\r\n");
     }
+    PrintDebug("[CamTest] Calib: z_safe=%.1f z_pick=%.1f z_place=%.1f\r\n",
+               (double)g_calib.z_safe_angle, (double)g_calib.z_pick_angle, (double)g_calib.z_place_angle);
+    PrintDebug("[CamTest] Calib: scatter=(%ld,%ld) size=%ld\r\n",
+               (long)g_calib.scatter_x_steps, (long)g_calib.scatter_y_steps, (long)g_calib.scatter_size_steps);
+    PrintDebug("[CamTest] Calib: heat=(%ld,%ld)-(%ld,%ld) botcam=(%ld,%ld)\r\n",
+               (long)g_calib.heat_platform_x_min, (long)g_calib.heat_platform_y_min,
+               (long)g_calib.heat_platform_x_max, (long)g_calib.heat_platform_y_max,
+               (long)g_calib.bottom_cam_x_steps, (long)g_calib.bottom_cam_y_steps);
+    PrintDebug("[CamTest] Calib: nozzle_off=(%ld,%ld) cam_p1=%.3f cam_p3=%.3f\r\n",
+               (long)g_calib.cam_to_nozzle_dx_steps, (long)g_calib.cam_to_nozzle_dy_steps,
+               (double)g_calib.cam_p1_val_to_steps, (double)g_calib.cam_p3_val_to_steps);
+
+    /* 强制覆写 Z 轴高度，不受 Flash 标定值影响 */
+    g_calib.z_safe_angle  = 75.0f;
+    g_calib.z_pick_angle  = 116.0f;
+    g_calib.z_place_angle = 116.0f;
 
     /* 舵机归安全角度 */
-    Servo_SetAngle(2, 120.0f);
+    Servo_SetAngle(2, 75.0f);
     osDelay(300);
 
 
@@ -1125,21 +1367,21 @@ void StartCamTestTask(void *argument) {
     float p1_angle = 0.0f, p3_angle = 0.0f;
 
     /* ---- P1: 散料区元件检测 + 角度记录 ---- */
-    PrintDebug("\r\n--- Test 1/3: P1 (component detect + angle) ---\r\n");
-    if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &p1_angle)) {
-        PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
-    } else {
-        PrintDebug("[CAM_TEST] P1 PASSED, angle=%.2f deg\r\n", (double)p1_angle);
-    }
+//    PrintDebug("\r\n--- Test 1/3: P1 (component detect + angle) ---\r\n");
+//    if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &p1_angle)) {
+//        PrintDebug("[CAM_TEST] P1 FAILED, continuing...\r\n");
+//    } else {
+//        PrintDebug("[CAM_TEST] P1 PASSED, angle=%.2f deg\r\n", (double)p1_angle);
+//    }
 
-    /* ---- P1 角度矫正：检测到元件偏角后立即 R 轴旋转补偿 ---- */
-    if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
-        PrintDebug("\r\n--- R axis correction (P1 angle=%.2f deg) ---\r\n", (double)p1_angle);
-        int rret = r_axis_rotate(p1_angle, R_SPEED_RPM);
-        PrintDebug("[CamTest] R axis correction %s (%.2f deg)\r\n", rret==0?"done":"skipped", (double)p1_angle);
-    } else {
-        PrintDebug("[CamTest] P1 angle small, skip R correction\r\n");
-    }
+//    /* ---- P1 角度矫正：检测到元件偏角后立即 R 轴旋转补偿 ---- */
+//    if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
+//        PrintDebug("\r\n--- R axis correction (P1 angle=%.2f deg) ---\r\n", (double)p1_angle);
+//        int rret = r_axis_rotate(p1_angle, R_SPEED_RPM);
+//        PrintDebug("[CamTest] R axis correction %s (%.2f deg)\r\n", rret==0?"done":"skipped", (double)p1_angle);
+//    } else {
+//        PrintDebug("[CamTest] P1 angle small, skip R correction\r\n");
+//    }
 
     /* ---- 吸取 + P3 验证（含 err3_8 吸嘴空取重试，最多 3 次） ---- */
     PrintDebug("\r\n--- Test 2/3: P3 (pick + verify) ---\r\n");
@@ -1160,6 +1402,7 @@ void StartCamTestTask(void *argument) {
                 }
                 if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
                     r_axis_rotate(p1_angle, R_SPEED_RPM);
+                    r_axis_set_zero();
                     PrintDebug("[CamTest] R axis re-correction done (%.2f deg)\r\n", (double)p1_angle);
                 }
             }
@@ -1175,20 +1418,21 @@ void StartCamTestTask(void *argument) {
             PrintDebug("[CamTest] Pick OK\r\n");
 
             /* 移动到下相机位置（使吸嘴进入 P3 视野） */
-            {
-                MachineCoord_t mc0 = Coord_Get();
-                int32_t dx = g_calib.bottom_cam_x_steps - mc0.x;
-                int32_t dy = g_calib.bottom_cam_y_steps - mc0.y;
-                if (dx != 0 || dy != 0) {
-                    safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps,
-                                 CAM_MOVE_SPEED, CAM_MOVE_ACC);
-                }
-                MachineCoord_t mc1 = Coord_Get();
-                PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
-                           (long)mc1.x, (long)mc1.y);
-            }
+//            {
+//                MachineCoord_t mc0 = Coord_Get();
+//                int32_t dx = g_calib.bottom_cam_x_steps - mc0.x;
+//                int32_t dy = g_calib.bottom_cam_y_steps - mc0.y;
+//                if (dx != 0 || dy != 0) {
+//                    safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps,
+//                                 CAM_MOVE_SPEED, CAM_MOVE_ACC);
+//                }
+//                MachineCoord_t mc1 = Coord_Get();
+//                PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
+//                           (long)mc1.x, (long)mc1.y);
+//            }
 
             /* P3: 下相机偏移检测，验证 P1 矫正是否到位 */
+            LowerCam_Light_On();  /* 下相机补光灯 */
             if (!cam_test_run(VCMD_P3, 0, CAM_TEST_TIMEOUT_P3, &p3_angle)) {
                 const char *err = Vision_GetError();
                 if (err[0] == 'e' && err[1] == 'r' && err[2] == 'r' &&
@@ -1207,12 +1451,14 @@ void StartCamTestTask(void *argument) {
             p3_ok = true;
             PrintDebug("[CAM_TEST] P3 PASSED, residual angle=%.2f deg\r\n", (double)p3_angle);
         }
+        LowerCam_Light_Off();  /* 关闭补光灯 */
 
         if (p3_ok) {
             /* P3 二次矫正：若 P3 仍有残余偏角，再次 R 轴旋转补偿 */
             if (fabsf(p3_angle) > R_CORRECTION_THRESHOLD_DEG) {
                 PrintDebug("\r\n--- R axis 2nd correction (P3 residual=%.2f deg) ---\r\n", (double)p3_angle);
                 int rret2 = r_axis_rotate(p3_angle, R_SPEED_RPM);
+                r_axis_set_zero();
                 PrintDebug("[CamTest] R axis 2nd correction %s (%.2f deg)\r\n",
                            rret2==0?"done":"skipped", (double)p3_angle);
             } else {
@@ -1226,14 +1472,21 @@ void StartCamTestTask(void *argument) {
         }
     }
 
-    /* ---- P2: Mark 点建系测试 ---- */
-    PrintDebug("\r\n--- Test 3/3: P2 (Mark alignment) ---\r\n");
-    if (!cam_test_run(VCMD_P2, 0, CAM_TEST_TIMEOUT_P2, NULL)) {
-        PrintDebug("[CAM_TEST] P2 FAILED\r\n");
-    } else {
-        PrintDebug("[CAM_TEST] P2 PASSED\r\n");
-    }
+    /* ---- P2: Mark 点建系测试 (完整流程，与 Host_Task mark_align_step 一致) ---- */
+//    PrintDebug("\r\n--- Test: P2 Full (Mark alignment) ---\r\n");
+//    {
+//        Component_t test_marks[3];
+//        memset(test_marks, 0, sizeof(test_marks));
+//        test_marks[0].target_x = 5.0f;   test_marks[0].target_y = 5.0f;
+//        test_marks[1].target_x = 5.0f;   test_marks[1].target_y = 20.0f;
+//        test_marks[2].target_x = 20.0f;  test_marks[2].target_y = 5.0f;
+//        if (!cam_p2_full_test_run(test_marks, 3, CAM_TEST_TIMEOUT_P2)) {
+//            PrintDebug("[CAM_TEST] P2 FULL FAILED\r\n");
+//        } else {
+//            PrintDebug("[CAM_TEST] P2 FULL PASSED\r\n");
+//        }
+//    }
 
-    PrintDebug("\r\n=== Camera + Motor Interactive Test Complete ===\r\n");
-    vTaskSuspend(NULL);
+//    PrintDebug("\r\n=== Camera + Motor Interactive Test Complete ===\r\n");
+//    vTaskSuspend(NULL);
 }

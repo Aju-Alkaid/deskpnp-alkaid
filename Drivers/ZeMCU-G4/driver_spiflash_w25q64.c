@@ -1,9 +1,10 @@
-#include "driver_spiflash_w25q64.h"
+﻿#include "driver_spiflash_w25q64.h"
 //#include "driver_lcd.h"
 #include "driver_timer.h"
 #include "stm32g4xx_hal.h"
 #include <string.h>
 #include "app_config.h"
+#include "app_test.h"
 //#include "tim.h"
 //#include "adc.h"
 
@@ -452,6 +453,23 @@ int Calib_Save(const CalibrationData_t *calib)
     ret = W25Q64_Write(CALIB_FLASH_ADDR, (uint8_t *)&buf, sizeof(buf));
     if (ret < 0) return -1;
 
+    /* 诊断：写后读回比对 */
+    {
+        CalibrationData_t verify;
+        if (W25Q64_Read(CALIB_FLASH_ADDR, (uint8_t *)&verify, sizeof(verify)) >= 0) {
+            if (memcmp(&buf, &verify, sizeof(buf)) != 0) {
+                PrintDebug("[CALIB] WRITE VERIFY FAILED!\r\n");
+                uint8_t *a = (uint8_t *)&buf, *b = (uint8_t *)&verify;
+                for (int i = 0; i < (int)sizeof(buf); i++) {
+                    if (a[i] != b[i])
+                        PrintDebug("  off=%d: wrote 0x%02X, read 0x%02X\r\n", i, a[i], b[i]);
+                }
+            } else {
+                PrintDebug("[CALIB] Write verify OK.\r\n");
+            }
+        }
+    }
+
     return 0;
 }
 
@@ -473,6 +491,7 @@ int Calib_Load(CalibrationData_t *calib)
 
     /* 校验 magic */
     if (calib->magic != CALIB_MAGIC) {
+        PrintDebug("[CALIB] Magic mismatch: 0x%08lX\r\n", (unsigned long)calib->magic);
         calib_set_defaults(calib);
         return 0;
     }
@@ -482,6 +501,8 @@ int Calib_Load(CalibrationData_t *calib)
     uint32_t computed = calib_crc32((const uint8_t *)calib,
                                     offsetof(CalibrationData_t, crc32));
     if (expected != computed) {
+        PrintDebug("[CALIB] CRC mismatch: exp=0x%08lX got=0x%08lX\r\n",
+                   (unsigned long)expected, (unsigned long)computed);
         calib_set_defaults(calib);
         return 0;
     }

@@ -1,4 +1,4 @@
-﻿#ifndef __APP_HOST_H
+#ifndef __APP_HOST_H
 #define __APP_HOST_H
 
 #include <stdint.h>
@@ -12,6 +12,12 @@
 /* 单板最大元件数 */
 #define MAX_COMPONENTS  128
 #define MAX_MARKS       8     /* Mark 点最大数量（规范为 5） */
+
+/* PnP 运动速度/加速度常量 */
+#define PNP_SPEED        300   /* 通用速度 (RPM) */
+#define PNP_ACC          25    /* 通用加速度 */
+#define PNP_SPEED_FINE   100   /* 视觉迭代微调 */
+#define PNP_ACC_FINE     10    /* 微调加速度 */
 
 /* 下载超时(ms) */
 #define DOWNLOAD_TIMEOUT_MS  500

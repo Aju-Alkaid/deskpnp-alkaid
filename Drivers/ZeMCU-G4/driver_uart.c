@@ -1,4 +1,4 @@
-﻿#include "driver_uart.h"
+#include "driver_uart.h"
 #include "dma.h"
 #include "usart.h"
 #include "tmc_protocol.h" // 寮曞叆 TMC 鍗忚澶存枃浠?
@@ -505,6 +505,7 @@ void UART_Error_Handler(UART_HandleTypeDef *huart)
 
 /**
  * @brief DMA 传输完成回调函数
+ */
 
 /**
  * @brief DMA TX 传输完成回调

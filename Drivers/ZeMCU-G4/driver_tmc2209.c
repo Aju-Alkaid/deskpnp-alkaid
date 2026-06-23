@@ -241,8 +241,14 @@ void TMC_SetChopperMode(bool use_spreadcycle) {
 }
 
 void TMC_SetSpeed(int32_t velocity) {
-    float v_freq = (float)velocity;
+    /* 根据方向切换 RAMPMODE：正→1，负→2，确保双向可控 */
+    uint8_t rampmode = (velocity >= 0) ? 1 : 2;
+    TMC_WriteReg(TMC_REG_RAMPMODE, rampmode);
+    vTaskDelay(pdMS_TO_TICKS(1));
+
+    float v_freq = (float)(velocity >= 0 ? velocity : -velocity);
     int32_t vactual = (int32_t)(v_freq * 16777216.0f / (float)TMC2209_F_CLK);
+    if (velocity < 0) vactual = -vactual;
     if (vactual > 8388607) vactual = 8388607;
     if (vactual < -8388607) vactual = -8388607;
     TMC_Error_t err = TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)vactual);
@@ -360,6 +366,10 @@ bool TMC_Init(void) {
 
     /* 6. 等待稳定 */
     vTaskDelay(pdMS_TO_TICKS(500));
+
+    /* 7. RAMPMODE：VACTUAL 直接控速模式（TMC_SetSpeed 按方向动态切换） */
+    if (TMC_WriteReg(TMC_REG_RAMPMODE, 1) != TMC_ERR_NONE)
+        PrintDebug("[TMC] RAMPMODE write FAILED\r\n");
 
     TMC_SetEnable(false);   /* 初始化完成后关闭驱动，用到时再开 */
     return true;
