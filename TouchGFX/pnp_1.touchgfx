@@ -23,17 +23,29 @@
             "Name": "HOME",
             "X": 60,
             "Width": 66,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_G70R",
             "TextRotation": "0",
             "AutoSize": true
           },
           {
             "Type": "TextArea",
+            "Name": "MotorSpeed",
+            "X": 60,
+            "Y": 265,
+            "Width": 241,
+            "Height": 28,
+            "TextId": "__SingleUse_2QJ5",
+            "TextRotation": "0",
+            "AutoSize": true,
+            "Wildcard1": {}
+          },
+          {
+            "Type": "TextArea",
             "Name": "temperature",
             "X": 265,
             "Width": 135,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_SYMX",
             "TextRotation": "0",
             "AutoSize": true,
@@ -46,8 +58,8 @@
           {
             "Type": "CustomContainerInstance",
             "Name": "Progress1",
-            "X": 153,
-            "Y": 76,
+            "X": 140,
+            "Y": 40,
             "Width": 180,
             "Height": 180,
             "CustomContainerDefinitionName": "circleProgress"
@@ -60,14 +72,16 @@
             "CustomContainerDefinitionName": "PageTable"
           },
           {
-            "Type": "Button",
-            "Name": "open",
-            "X": 6,
-            "Y": 256,
-            "Width": 44,
-            "Height": 44,
-            "Pressed": "simple_left.png",
-            "Released": "simple_right.png"
+            "Type": "TextArea",
+            "Name": "progress",
+            "X": 60,
+            "Y": 237,
+            "Width": 180,
+            "Height": 28,
+            "TextId": "__SingleUse_TDMH",
+            "TextRotation": "0",
+            "AutoSize": true,
+            "Wildcard1": {}
           }
         ],
         "Interactions": [
@@ -142,16 +156,6 @@
             "Width": 153,
             "Height": 300,
             "CustomContainerDefinitionName": "PageTable"
-          },
-          {
-            "Type": "Button",
-            "Name": "open",
-            "X": 6,
-            "Y": 256,
-            "Width": 44,
-            "Height": 44,
-            "Pressed": "simple_left.png",
-            "Released": "simple_right.png"
           },
           {
             "Type": "TextArea",
@@ -249,16 +253,6 @@
             "Width": 153,
             "Height": 300,
             "CustomContainerDefinitionName": "PageTable"
-          },
-          {
-            "Type": "Button",
-            "Name": "open",
-            "X": 6,
-            "Y": 256,
-            "Width": 44,
-            "Height": 44,
-            "Pressed": "simple_left.png",
-            "Released": "simple_right.png"
           }
         ],
         "Interactions": []
@@ -284,8 +278,8 @@
             "Type": "TextArea",
             "Name": "caution",
             "X": 77,
-            "Width": 307,
-            "Height": 168,
+            "Width": 305,
+            "Height": 186,
             "TextId": "__SingleUse_3GH9",
             "TextRotation": "0",
             "AutoSize": true
@@ -298,22 +292,12 @@
             "CustomContainerDefinitionName": "PageTable"
           },
           {
-            "Type": "Button",
-            "Name": "open",
-            "X": 6,
-            "Y": 256,
-            "Width": 44,
-            "Height": 44,
-            "Pressed": "simple_left.png",
-            "Released": "simple_right.png"
-          },
-          {
             "Type": "TextArea",
             "Name": "Reseting",
             "X": 77,
             "Y": 56,
             "Width": 103,
-            "Height": 28,
+            "Height": 31,
             "Visible": false,
             "TextId": "__SingleUse_FQ8H",
             "TextRotation": "0",
@@ -325,7 +309,7 @@
             "X": 77,
             "Y": 56,
             "Width": 176,
-            "Height": 84,
+            "Height": 93,
             "Visible": false,
             "TextId": "__SingleUse_2LX0",
             "TextRotation": "0",
@@ -353,87 +337,6 @@
     ],
     "CustomContainerDefinitions": [
       {
-        "Name": "detail",
-        "Y": 51,
-        "Width": 97,
-        "Height": 300,
-        "Components": [
-          {
-            "Type": "Box",
-            "Name": "box1",
-            "Width": 97,
-            "Height": 300,
-            "Color": {
-              "Red": 255,
-              "Green": 255,
-              "Blue": 255
-            }
-          },
-          {
-            "Type": "Line",
-            "Name": "line1",
-            "X": 94,
-            "Width": 3,
-            "Height": 300,
-            "EndY": 300.0,
-            "LineWidth": 10.0,
-            "LineEndingStyle": "Square"
-          },
-          {
-            "Type": "TextArea",
-            "Name": "home",
-            "Y": 14,
-            "Width": 60,
-            "Height": 32,
-            "TextId": "__SingleUse_QTOZ",
-            "TextRotation": "0",
-            "AutoSize": true
-          },
-          {
-            "Type": "TextArea",
-            "Name": "download",
-            "Y": 64,
-            "Width": 76,
-            "Height": 32,
-            "TextId": "__SingleUse_XWGZ",
-            "TextRotation": "0",
-            "AutoSize": true
-          },
-          {
-            "Type": "TextArea",
-            "Name": "reset",
-            "Y": 164,
-            "Width": 64,
-            "Height": 32,
-            "TextId": "__SingleUse_13NH",
-            "TextRotation": "0",
-            "AutoSize": true
-          },
-          {
-            "Type": "TextArea",
-            "Name": "message",
-            "Y": 114,
-            "Width": 33,
-            "Height": 32,
-            "TextId": "__SingleUse_SXYA",
-            "TextRotation": "0",
-            "AutoSize": true
-          }
-        ],
-        "Interactions": [
-          {
-            "InteractionName": "Interaction1",
-            "Trigger": {
-              "Type": "TriggerNone"
-            },
-            "Action": {
-              "Type": "ActionCustom",
-              "FunctionName": "function1"
-            }
-          }
-        ]
-      },
-      {
         "Name": "PageTable",
         "X": -50,
         "Y": 50,
@@ -460,15 +363,6 @@
             "EndY": 300.0,
             "LineWidth": 10.0,
             "LineEndingStyle": "Square"
-          },
-          {
-            "Type": "CustomContainerInstance",
-            "Name": "detail1",
-            "X": 56,
-            "Width": 97,
-            "Height": 300,
-            "Visible": false,
-            "CustomContainerDefinitionName": "detail"
           },
           {
             "Type": "Image",

@@ -4,21 +4,14 @@
     <Language Id="GB" />
   </Languages>
   <Texts>
-    <TextGroup Id="Group1">
-      <Text Id="__SingleUse_QTOZ" Alignment="Left" TypographyId="normal_handwrite">
-        <Translation Language="GB">home</Translation>
-      </Text>
-      <Text Id="__SingleUse_XWGZ" Alignment="Left" TypographyId="normal_handwrite">
-        <Translation Language="GB">import</Translation>
-      </Text>
-      <Text Id="__SingleUse_13NH" Alignment="Left" TypographyId="normal_handwrite">
-        <Translation Language="GB">reset</Translation>
-      </Text>
-      <Text Id="__SingleUse_SXYA" Alignment="Left" TypographyId="normal_handwrite">
-        <Translation Language="GB">log</Translation>
-      </Text>
-    </TextGroup>
+    <TextGroup Id="Group1" />
     <TextGroup Id="Unsorted">
+      <Text Id="__SingleUse_TDMH" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Progress &lt;value&gt;</Translation>
+      </Text>
+      <Text Id="__SingleUse_2QJ5" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">MOTOR Speed &lt;value&gt;</Translation>
+      </Text>
       <Text Id="__SingleUse_2LX0" Alignment="Left" TypographyId="regular">
         <Translation Language="GB">Reset done&#10;   up   -&gt; HOME&#10;down -&gt; IMPORT</Translation>
       </Text>

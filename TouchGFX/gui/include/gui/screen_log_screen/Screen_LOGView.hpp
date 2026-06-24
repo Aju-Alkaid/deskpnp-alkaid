@@ -14,13 +14,26 @@ public:
     virtual void handleTickEvent();
     virtual void tearDownScreen();
     virtual void LogAddStr(const char* str);
+    bool isUserScrolledUp() const;
+    bool isNearBottom() const;
+    void scrollToBottom(bool force = false);
+    void trimOldestLines(uint16_t maxLines);
+    uint16_t countLines() const;
 
     virtual void handleKeyEvent(uint8_t key);
+    virtual void handleSystemLog(uint8_t code, uint8_t param);
 
 protected:
+    static const uint16_t LOG_MAX_LINES = 100;
+    static const uint16_t LOG_LINE_RESERVE = 8;
     static const uint16_t LOG_BUF_SIZE = 2048;
     touchgfx::Unicode::UnicodeChar logBuffer[LOG_BUF_SIZE];
     uint16_t logBufferUsed;
+    bool m_autoFollow;
+    int16_t m_lastScrollY;
 };
 
 #endif // SCREEN_LOGVIEW_HPP
+
+
+

@@ -1,4 +1,4 @@
-#include <gui/model/Model.hpp>
+﻿#include <gui/model/Model.hpp>
 #include <gui/model/ModelListener.hpp>
 #include <string.h>
 
@@ -8,25 +8,25 @@ Model::Model() : modelListener(0)
 
 void Model::tick()
 {
-    processQueue();  // 每帧处理 System→GUI 通知
+    processQueue();  // 姣忓抚澶勭悊 System鈫扜UI 閫氱煡
 }
 
-// ======================== System → GUI 通知处理 ========================
+// ======================== System 鈫?GUI 閫氱煡澶勭悊 ========================
 void Model::processQueue(void)
 {
-    // ---- 方向1: GUI→System 命令分发 ----
+    // ---- 鏂瑰悜1: GUI鈫扴ystem 鍛戒护鍒嗗彂 ----
     if (guiCmdQueue != NULL) {
         DT_Msg_t cmd;
         while (osMessageQueueGet(guiCmdQueue, &cmd, NULL, 0) == osOK) {
-            DT_Dispatch(&cmd);  // 路由表分发到对应 handler/queue
+            DT_Dispatch(&cmd);  // 璺敱琛ㄥ垎鍙戝埌瀵瑰簲 handler/queue
         }
     }
 
-    // ---- 方向2: System→GUI 通知处理 ----
+    // ---- 鏂瑰悜2: System鈫扜UI 閫氱煡澶勭悊 ----
     if (dataTransferQueue == NULL || modelListener == NULL) return;
 
     DT_Msg_t msg;
-    // 循环取出所有待处理消息（非阻塞）
+    // 寰幆鍙栧嚭鎵€鏈夊緟澶勭悊娑堟伅锛堥潪闃诲锛?
     while (osMessageQueueGet(dataTransferQueue, &msg, NULL, 0) == osOK) {
         switch (msg.type) {
             case DT_SMT_STATUS:
@@ -48,44 +48,51 @@ void Model::processQueue(void)
             case DT_CUSTOM_MSG:
                 modelListener->onNotifyCustom(msg.data.raw[0], msg.data.raw[1]);
                 break;
+            case DT_MOTOR_SPEED:
+                if (modelListener) modelListener->onNotifyMotorSpeed(msg.data.motor_speed);
+                break;
+            case DT_LOG_TEXT:
+                if (modelListener) modelListener->onNotifyLogText(msg.data.tag.code, msg.data.tag.param);
+                break;
             default:
-                // 未识别的消息类型 — 可在此添加日志
+                // 鏈瘑鍒殑娑堟伅绫诲瀷 鈥?鍙湪姝ゆ坊鍔犳棩蹇?
                 break;
         }
     }
 }
 
-// ======================== GUI → System 命令发送 ========================
-// Presenter 调用此方法，将用户操作转换为系统命令
+// ======================== GUI 鈫?System 鍛戒护鍙戦€?========================
+// Presenter 璋冪敤姝ゆ柟娉曪紝灏嗙敤鎴锋搷浣滆浆鎹负绯荤粺鍛戒护
 //
-// 使用示例（在 Presenter 中）：
-//   model->sendCommand(DT_CMD_MOTOR_MOVE, 1000, 2000);  // 移动到(10.00mm, 20.00mm)
-//   model->sendCommand(DT_CMD_HEATER_SET, 1800);          // 设置温度 180.0℃
-//   model->sendCommand(DT_CMD_SMT_START);                  // 启动贴片
+// 浣跨敤绀轰緥锛堝湪 Presenter 涓級锛?
+//   model->sendCommand(DT_CMD_MOTOR_MOVE, 1000, 2000);  // 绉诲姩鍒?10.00mm, 20.00mm)
+//   model->sendCommand(DT_CMD_HEATER_SET, 1800);          // 璁剧疆娓╁害 180.0鈩?
+//   model->sendCommand(DT_CMD_SMT_START);                  // 鍚姩璐寸墖
 void Model::sendCommand(DT_MsgType_t type, int32_t p1, int32_t p2)
 {
     DT_Msg_t cmd;
     memset(&cmd, 0, sizeof(cmd));
     cmd.type = type;
 
-    // 根据命令类型填充参数
+    // 鏍规嵁鍛戒护绫诲瀷濉厖鍙傛暟
     switch (type) {
         case DT_CMD_MOTOR_MOVE:
-            cmd.data.move.x = p1;   // x 坐标 (mm*100)
-            cmd.data.move.y = p2;   // y 坐标 (mm*100)
-            cmd.data.move.r = 0;    // r 角度（暂不支持）
+            cmd.data.move.x = p1;   // x 鍧愭爣 (mm*100)
+            cmd.data.move.y = p2;   // y 鍧愭爣 (mm*100)
+            cmd.data.move.r = 0;    // r 瑙掑害锛堟殏涓嶆敮鎸侊級
             break;
         case DT_CMD_HEATER_SET:
-            cmd.data.temp = (uint16_t)p1;  // 目标温度 (0.1℃)
+            cmd.data.temp = (uint16_t)p1;  // 鐩爣娓╁害 (0.1鈩?
             break;
         case DT_CMD_CUSTOM:
             cmd.data.raw[0] = (uint8_t)p1;
             cmd.data.raw[1] = (uint8_t)p2;
             break;
-        // 无参数命令：SMT_START, SMT_PAUSE, MOTOR_STOP, MOTOR_HOME, SYSTEM_RESET
+        // 鏃犲弬鏁板懡浠わ細SMT_START, SMT_PAUSE, MOTOR_STOP, MOTOR_HOME, SYSTEM_RESET
         default:
             break;
     }
 
-    DT_SendCommand(&cmd);  // 放入 guiCmdQueue
+    DT_SendCommand(&cmd);  // 鏀惧叆 guiCmdQueue
 }
+

@@ -1,4 +1,4 @@
-#ifndef SCREEN_HOMEPRESENTER_HPP
+﻿#ifndef SCREEN_HOMEPRESENTER_HPP
 #define SCREEN_HOMEPRESENTER_HPP
 
 #include <gui/model/ModelListener.hpp>
@@ -28,6 +28,8 @@ public:
     virtual ~Screen_HOMEPresenter() {}
     Model * getModel();
     virtual void onKeyPressed(uint8_t keyId);
+    virtual void onNotifySMTProgress(uint8_t current, uint8_t total) override;
+    virtual void onNotifyMotorSpeed(uint16_t speed) override;
 private:
     Screen_HOMEPresenter();
 
@@ -35,3 +37,4 @@ private:
 };
 
 #endif // SCREEN_HOMEPRESENTER_HPP
+

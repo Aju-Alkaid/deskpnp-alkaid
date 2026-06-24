@@ -5,7 +5,6 @@
 #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
 #include <touchgfx/Color.hpp>
 #include <texts/TextKeysAndLanguages.hpp>
-#include <images/BitmapDatabase.hpp>
 
 Screen_RESETViewBase::Screen_RESETViewBase()
 {
@@ -27,10 +26,6 @@ Screen_RESETViewBase::Screen_RESETViewBase()
 
     pageTable.setXY(0, 0);
     add(pageTable);
-
-    open.setXY(6, 256);
-    open.setBitmaps(touchgfx::Bitmap(BITMAP_SIMPLE_RIGHT_ID), touchgfx::Bitmap(BITMAP_SIMPLE_LEFT_ID));
-    add(open);
 
     Reseting.setXY(77, 56);
     Reseting.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));

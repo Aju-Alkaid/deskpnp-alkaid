@@ -3186,7 +3186,8 @@ g_calib.cam_p3_val_to_steps    = 0.0f;
 
 ### 28.12 文件编辑注意事项
 
-- Node.js 的 eadFileSync 读取 UTF-8 + CRLF 文件时保留 \r\n，替换时需匹配正确的换行符。
+- Node.js 的 
+eadFileSync 读取 UTF-8 + CRLF 文件时保留 \r\n，替换时需匹配正确的换行符。
 - 当替换文本中包含 % 字符时，PowerShell inline 
 ode -e 会解析失败，应将 JS 写入临时 .js 文件再执行。
 - git checkout 会丢弃未提交的工作区改动，执行前应确认无重要修改。git stash 可保护工作区改动。

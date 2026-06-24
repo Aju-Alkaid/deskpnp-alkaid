@@ -1,4 +1,4 @@
-#ifndef SCREEN_LOGPRESENTER_HPP
+﻿#ifndef SCREEN_LOGPRESENTER_HPP
 #define SCREEN_LOGPRESENTER_HPP
 
 #include <gui/model/ModelListener.hpp>
@@ -28,6 +28,7 @@ public:
     virtual ~Screen_LOGPresenter() {}
     Model * getModel();
     virtual void onKeyPressed(uint8_t keyId);
+    virtual void onNotifyLogText(uint8_t code, uint8_t param) override;
 
 private:
     Screen_LOGPresenter();
@@ -36,3 +37,4 @@ private:
 };
 
 #endif // SCREEN_LOGPRESENTER_HPP
+

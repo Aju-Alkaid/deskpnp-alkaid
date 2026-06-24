@@ -1,4 +1,4 @@
-#include <gui/screen_home_screen/Screen_HOMEView.hpp>
+﻿#include <gui/screen_home_screen/Screen_HOMEView.hpp>
 #include <gui/screen_home_screen/Screen_HOMEPresenter.hpp>
 
 Screen_HOMEPresenter::Screen_HOMEPresenter(Screen_HOMEView& v)
@@ -24,6 +24,17 @@ Model * Screen_HOMEPresenter::getModel()
 
 void Screen_HOMEPresenter::onKeyPressed(uint8_t keyId)
 {
-    // 调用View的更新函数，而非直接操作UI
+    // 璋冪敤View鐨勬洿鏂板嚱鏁帮紝鑰岄潪鐩存帴鎿嶄綔UI
     view.handleKeyEvent(keyId);
 }
+
+void Screen_HOMEPresenter::onNotifySMTProgress(uint8_t current, uint8_t total)
+{
+    view.handleSMTProgress(current, total);
+}
+
+void Screen_HOMEPresenter::onNotifyMotorSpeed(uint16_t speed)
+{
+    view.handleMotorSpeed(speed);
+}
+

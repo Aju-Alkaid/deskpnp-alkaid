@@ -5,7 +5,6 @@
 #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
 #include <touchgfx/Color.hpp>
 #include <texts/TextKeysAndLanguages.hpp>
-#include <images/BitmapDatabase.hpp>
 
 Screen_LOGViewBase::Screen_LOGViewBase()
 {
@@ -39,10 +38,6 @@ Screen_LOGViewBase::Screen_LOGViewBase()
 
     pageTable.setXY(0, 0);
     add(pageTable);
-
-    open.setXY(6, 256);
-    open.setBitmaps(touchgfx::Bitmap(BITMAP_SIMPLE_RIGHT_ID), touchgfx::Bitmap(BITMAP_SIMPLE_LEFT_ID));
-    add(open);
 }
 
 Screen_LOGViewBase::~Screen_LOGViewBase()

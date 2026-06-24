@@ -9,7 +9,6 @@
 #include <touchgfx/widgets/Box.hpp>
 #include <touchgfx/widgets/canvas/Line.hpp>
 #include <touchgfx/widgets/canvas/PainterBW.hpp>
-#include <gui/containers/detail.hpp>
 #include <touchgfx/widgets/Image.hpp>
 
 class PageTableBase : public touchgfx::Container
@@ -30,7 +29,6 @@ protected:
     touchgfx::Box box1;
     touchgfx::Line line1_1;
     touchgfx::PainterBW line1_1Painter;
-    detail detail1;
     touchgfx::Image refre;
     touchgfx::Image home;
     touchgfx::Image import;

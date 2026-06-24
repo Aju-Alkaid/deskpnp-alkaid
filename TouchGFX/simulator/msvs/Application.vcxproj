@@ -20,8 +20,6 @@
     <ClCompile Include="..\..\gui\src\common\FrontendApplication.cpp"/>
     <ClCompile Include="..\..\generated\gui_generated\src\common\FrontendApplicationBase.cpp"/>
     <ClCompile Include="..\..\gui\src\model\Model.cpp"/>
-    <ClCompile Include="..\..\gui\src\containers\detail.cpp"/>
-    <ClCompile Include="..\..\generated\gui_generated\src\containers\detailBase.cpp"/>
     <ClCompile Include="..\..\generated\simulator\src\video\SoftwareMJPEGDecoder.cpp"/>
     <ClCompile Include="..\..\gui\src\containers\PageTable.cpp"/>
     <ClCompile Include="..\..\generated\gui_generated\src\containers\PageTableBase.cpp"/>
@@ -40,8 +38,6 @@
     <ClCompile Include="..\..\gui\src\screen_reset_screen\Screen_RESETPresenter.cpp"/>
     <ClCompile Include="..\..\gui\src\screen_reset_screen\Screen_RESETView.cpp"/>
     <ClCompile Include="..\..\generated\gui_generated\src\screen_reset_screen\Screen_RESETViewBase.cpp"/>
-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREPresenter.cpp"/>
-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREView.cpp"/>
   </ItemGroup>
   <ItemGroup>
     <None Include="$(ApplicationRoot)\assets\texts\texts.xlsx"/>
@@ -189,8 +185,6 @@
     <ClInclude Include="..\..\gui\include\gui\model\Model.hpp"/>
     <ClInclude Include="..\..\gui\include\gui\model\ModelListener.hpp"/>
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\common\SimConstants.hpp"/>
-    <ClInclude Include="..\..\gui\include\gui\containers\detail.hpp"/>
-    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\containers\detailBase.hpp"/>
     <ClInclude Include="..\..\gui\include\gui\screen_log_screen\Screen_LOGPresenter.hpp"/>
     <ClInclude Include="..\..\gui\include\gui\screen_home_screen\Screen_HOMEPresenter.hpp"/>
     <ClInclude Include="..\..\generated\simulator\include\simulator\video\DirectFrameBufferVideoController.hpp"/>
@@ -211,8 +205,6 @@
     <ClInclude Include="..\..\gui\include\gui\screen_reset_screen\Screen_RESETPresenter.hpp"/>
     <ClInclude Include="..\..\gui\include\gui\screen_reset_screen\Screen_RESETView.hpp"/>
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_reset_screen\Screen_RESETViewBase.hpp"/>
-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREPresenter.hpp"/>
-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREView.hpp"/>
   </ItemGroup>
   <ItemGroup>
     <ResourceCompile Include="$(ApplicationRoot)\generated\simulator\touchgfx.rc"/>

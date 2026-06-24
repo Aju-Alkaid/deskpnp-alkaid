@@ -7,6 +7,8 @@
 
 Screen_LOGView::Screen_LOGView()
     : logBufferUsed(0)
+    , m_autoFollow(true)
+    , m_lastScrollY(0)
 {
     logBuffer[0] = 0;
 }
@@ -20,6 +22,10 @@ void Screen_LOGView::setupScreen()
 
     // 将日志缓冲区绑定到 textArea1 的 wildcard
     textArea1.setWildcard(logBuffer);
+
+    // 初始跟随最新日志
+    m_autoFollow = true;
+    m_lastScrollY = 0;
 
     // 写入模拟日志
     LogAddStr("=== PnP System Boot ===");
@@ -35,7 +41,18 @@ void Screen_LOGView::setupScreen()
 
 void Screen_LOGView::handleTickEvent()
 {
+    // 检测用户是否手动上滑，若是则暂停自动跟随
+    const int16_t currentY = scrollableContainer1.getScrollY();
+    const int16_t maxY = scrollableContainer1.getMaxScrollY();
+    const int16_t delta = currentY - m_lastScrollY;
 
+    if (delta < -4) {
+        m_autoFollow = false;
+    } else if (maxY >= 0 && currentY >= maxY - 4) {
+        m_autoFollow = true;
+    }
+
+    m_lastScrollY = currentY;
 }
 
 void Screen_LOGView::tearDownScreen()
@@ -49,9 +66,75 @@ void Screen_LOGView::handleKeyEvent(uint8_t key)
     pageTable.handleKey(key);
 }
 
+void Screen_LOGView::handleSystemLog(uint8_t code, uint8_t param)
+{
+    char line[48];
+    touchgfx::Unicode::snprintf(line, sizeof(line), "%u:%u", code, param);
+    LogAddStr(line);
+}
+
+bool Screen_LOGView::isUserScrolledUp() const
+{
+    return !m_autoFollow;
+}
+
+bool Screen_LOGView::isNearBottom() const
+{
+    return m_autoFollow;
+}
+
+void Screen_LOGView::scrollToBottom(bool force)
+{
+    if (force || m_autoFollow || isNearBottom()) {
+        scrollableContainer1.invalidate();
+        scrollableContainer1.doScroll(0, 9999);
+        m_autoFollow = true;
+    }
+}
+
+uint16_t Screen_LOGView::countLines() const
+{
+    uint16_t count = 0;
+    for (uint16_t i = 0; i < logBufferUsed; ++i) {
+        if (logBuffer[i] == '\n') {
+            count++;
+        }
+    }
+    return count;
+}
+
+void Screen_LOGView::trimOldestLines(uint16_t maxLines)
+{
+    uint16_t lines = countLines();
+    while (lines > maxLines) {
+        uint16_t removePos = 0;
+        while (removePos < logBufferUsed && logBuffer[removePos] != '\n') {
+            removePos++;
+        }
+        if (removePos < logBufferUsed) {
+            removePos++; // 包含换行符
+        }
+
+        const uint16_t remain = logBufferUsed - removePos;
+        if (remain > 0) {
+            memmove(&logBuffer[0], &logBuffer[removePos], remain * sizeof(logBuffer[0]));
+        }
+        logBufferUsed = remain;
+        logBuffer[logBufferUsed] = 0;
+        lines--;
+    }
+}
+
 void Screen_LOGView::LogAddStr(const char* str)
 {
+    if (str == NULL || str[0] == '\0') {
+        return;
+    }
+
     uint16_t strLen = (uint16_t)strlen(str);
+
+    // 预裁剪：保留 8 行余量，避免每条新日志都触发裁剪
+    trimOldestLines(LOG_MAX_LINES + LOG_LINE_RESERVE);
 
     // 检查缓冲区空间: 新字符串 + 换行符 + 终止符
     if (logBufferUsed + strLen + 2 > LOG_BUF_SIZE)
@@ -77,7 +160,8 @@ void Screen_LOGView::LogAddStr(const char* str)
     }
 
     textArea1.invalidate();
-
-    // 滚动到底部 (doScroll 会自动 clamp 到有效范围)
-    scrollableContainer1.doScroll(0, 9999);
+    scrollToBottom(false);
 }
+
+
+

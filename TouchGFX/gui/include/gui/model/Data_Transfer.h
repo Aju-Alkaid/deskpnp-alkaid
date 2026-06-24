@@ -26,6 +26,13 @@
 extern "C" {
 #endif
 
+#ifndef DT_LOG_LINE_MAX_CHARS
+#define DT_LOG_LINE_MAX_CHARS 160
+#endif
+#ifndef DT_LOG_QUEUE_DEPTH
+#define DT_LOG_QUEUE_DEPTH 16
+#endif
+
 // ======================== 消息类型枚举 ========================
 // 命名约定：DT_xxx = System→GUI 通知, DT_CMD_xxx = GUI→System 命令
 typedef enum {
@@ -36,6 +43,8 @@ typedef enum {
     DT_SMT_PROGRESS     = 0x03, // 贴片进度变更
     DT_MOTOR_RESET_DONE = 0x04, // 电机复位完成
     DT_CUSTOM_MSG       = 0x05, // 自定义消息（备用）
+    DT_MOTOR_SPEED      = 0x06, // 电机默认速度变更（低频）
+    DT_LOG_TEXT          = 0x07, // 系统日志文本（短文本，GUI格式化）
 
     // ---- GUI → System 命令（0x10~0x2F）----
     DT_CMD_MOTOR_MOVE   = 0x10, // 电机移动到目标坐标
@@ -62,6 +71,10 @@ typedef struct {
         uint8_t  status;
         // 原始数据（通用通道）
         uint8_t  raw[8];
+        // 短日志标签（兼容旧 custom 用法，不承载长字符串）
+        struct { uint8_t code; uint8_t param; } tag;
+        // 电机速度（mm/s 或内部单位，保持整数，避免浮点传队列）
+        uint16_t motor_speed;
     } data;
 } DT_Msg_t;
 
@@ -102,6 +115,8 @@ void DT_NotifyDownloadStatus(uint8_t status);
 void DT_NotifySMTProgress(uint8_t current, uint8_t total);
 void DT_NotifyMotorResetDone(void);
 void DT_NotifyCustom(uint8_t code, uint8_t param);
+void DT_NotifyMotorSpeed(uint16_t speed);
+void DT_NotifyLogText(uint8_t code, uint8_t param);
 
 // ======================== GUI → System 命令 API ========================
 // 由 Model::sendCommand() 调用，通常不需要手动调用
@@ -116,3 +131,6 @@ void DT_Dispatch(const DT_Msg_t *cmd);
 #endif
 
 #endif
+
+
+

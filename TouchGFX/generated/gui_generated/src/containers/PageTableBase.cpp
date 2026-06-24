@@ -22,10 +22,6 @@ PageTableBase::PageTableBase()
     line1_1.setLineEndingStyle(touchgfx::Line::SQUARE_CAP_ENDING);
     add(line1_1);
 
-    detail1.setXY(56, 0);
-    detail1.setVisible(false);
-    add(detail1);
-
     refre.setXY(6, 156);
     refre.setBitmap(touchgfx::Bitmap(BITMAP_REFRE_ID));
     add(refre);
@@ -70,5 +66,5 @@ PageTableBase::~PageTableBase()
 
 void PageTableBase::initialize()
 {
-    detail1.initialize();
+
 }
