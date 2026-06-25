@@ -43,6 +43,7 @@ typedef enum {
  *  Process2 internal sub-states
  * ================================================================ */
 typedef enum {
+    P2_WAIT_RDY,    /* waiting for "rdy" after "p2" */
     P2_IDLE,
     P2_WAIT_GO,
     P2_SEARCHING,
@@ -70,7 +71,7 @@ static uint8_t       g_frame_idx    = 0;
 static uint8_t       g_frame_buf[FRAME_PAYLOAD_MAX + 1];
 
 /* ---- 对外状态 ---- */
-static VisionState_t g_state        = VISION_IDLE;
+static volatile VisionState_t g_state = VISION_IDLE;  /* ISR写入，必须volatile */
 static VisionCmd_t   g_active_cmd   = VCMD_P1;
 
 /* ---- Process1 子状态 ---- */
@@ -86,6 +87,7 @@ static int           g_p2_mark_idx  = 0;    /* 当前 Mark 序号 (0-based) */
 static P3_State_t    g_p3_sub       = P3_PHASE1;
 static int           g_p3_iter      = 0;
 static int           g_p3_retry_cnt = 0;
+static int           g_p2_iter      = 0;  /* P2 aligning 迭代计数 */
 
 /* ---- 字段收集状态 ---- */
 static bool          g_collecting       = false;
@@ -105,6 +107,10 @@ static uint32_t g_vision_start_tick = 0;
 /* ---- 结果与错误 ---- */
 static VisionResult_t g_result;
 static char           g_error_code[8];
+static volatile uint32_t g_p2_align_rx_cnt = 0;  /* ISR-safe: P2 aligning 收帧计数 */
+static volatile int      g_p2_got_pos_from_isr = 0;  /* ISR set GOT_POS flag */
+static volatile uint32_t g_p2_total_rx = 0;           /* ISR-safe: P2 任意帧总计数 */
+static volatile uint32_t g_p2_stp_ignored = 0;       /* ISR-safe: P2 stp 被忽略次数 */
 
 /* ---- P0 handshake state ---- */
 static bool          g_p0_done      = false;
@@ -141,7 +147,12 @@ static void send_frame(const char *str) {
     buf[1] = len;
     if (len > 0) memcpy(buf + 2, str, len);
     buf[2 + len] = FRAME_TAIL;
-    HAL_UART_Transmit(&huart2, buf, (uint16_t)(len + 3), 100);
+    if (HAL_UART_Transmit(&huart2, buf, (uint16_t)(len + 3), 100) != HAL_OK) {
+        PrintDebug("[VISION] send_frame FAILED: '%s'\r\n", str);
+    } else if (str[0] == 'g' && str[1] == 'o' && str[2] == '\0') {
+        PrintDebug("[VISION] send_frame OK: 'go' sent, RX_DMA active=%d\r\n",
+                   (int)(READ_BIT(huart2.Instance->CR1, USART_CR1_RE) ? 1 : 0));
+    }
 }
 
 /* 重置所有内部状态 */
@@ -157,6 +168,9 @@ static void reset_all(void) {
     g_p3_sub       = P3_PHASE1;
     g_p3_iter      = 0;
     g_p3_retry_cnt = 0;
+    g_p2_iter      = 0;
+    g_p2_total_rx  = 0;
+    g_p2_stp_ignored = 0;
     g_collecting    = false;
     g_collect_cnt   = 0;
     g_collect_auto_end = false;
@@ -308,6 +322,7 @@ static void process_p1_frame(const char *str) {
  *  Process2 frame dispatch (ISR context)
  * ================================================================ */
 static void process_p2_frame(const char *str) {
+    g_p2_total_rx++;  /* 统计 P2 收到的任意帧 */
     /* ---- 错误帧 ---- */
     if (str[0] == 'e' && str[1] == 'r' && str[2] == 'r') {
         g_collecting = false;
@@ -316,13 +331,24 @@ static void process_p2_frame(const char *str) {
         return;
     }
 
+    /* ---- "rdy" — Cam ready after "p2" ---- */
+    if (str[0] == 'r' && str[1] == 'd' && str[2] == 'y' && str[3] == '\0') {
+        if (g_p2_sub == P2_WAIT_RDY) {
+            g_state = VISION_RDY;
+        }
+        return;
+    }
+
     /* ---- "stp" — Mark 已锁定 ---- */
     if (str[0] == 's' && str[1] == 't' && str[2] == 'p' && str[3] == '\0') {
-        g_collecting = false;
-        if (g_p2_sub == P2_SEARCHING) {
+        if (g_p2_sub == P2_SEARCHING || g_p2_sub == P2_WAIT_RDY) {
+            g_collecting = false;
             g_result.mark_index = g_p2_mark_idx;
             g_result.mark_count = P2_MARK_COUNT;
             g_state = VISION_GOT_STOP;
+            g_p2_sub = P2_SEARCHING;
+        } else {
+            g_p2_stp_ignored++;  /* stp 在非搜索状态下被忽略 */
         }
         return;
     }
@@ -348,15 +374,17 @@ static void process_p2_frame(const char *str) {
 
     /* ---- "pos" — 开始 Mark 偏移数据 ---- */
     if (str[0] == 'p' && str[1] == 'o' && str[2] == 's' && str[3] == '\0') {
-        if (g_p2_sub == P2_POS_DETECT) collect_begin(2, false);
+        if (g_p2_sub == P2_POS_DETECT || g_p2_sub == P2_ALIGNING) collect_begin(2, false);
         return;
     }
+
+    if (g_p2_sub == P2_ALIGNING) g_p2_align_rx_cnt++;
 
     /* ---- "end" — Mark 偏移数据结束 ---- */
     if (str[0] == 'e' && str[1] == 'n' && str[2] == 'd' && str[3] == '\0') {
         if (!g_collecting) return;
         g_collecting = false;
-        if (g_p2_sub == P2_POS_DETECT) {
+        if (g_p2_sub == P2_POS_DETECT || g_p2_sub == P2_ALIGNING) {
             g_result.dx         = g_tmp_dx;
             g_result.dy         = g_tmp_dy;
             g_result.mark_index = g_p2_mark_idx;
@@ -486,6 +514,10 @@ static void process_frame(const char *str) {
         if (str[0] == 'r' && str[1] == 'd' && str[2] == 'y' && str[3] == '\0') {
             g_p0_done = true;
         }
+        if (str[0] == 'e' && str[1] == 'r' && str[2] == 'r' && str[3] == '0' && str[4] == '\0') {
+            g_state = VISION_ERROR;
+            save_error(str);
+        }
         /* err0: Cam timed out, host should retry */
         return;
     }
@@ -568,6 +600,11 @@ bool Vision_Handshake(uint32_t timeout_ms) {
             return true;
         }
 
+        if (g_state == VISION_ERROR) {
+            PrintDebug("[VISION] P0 handshake: err0 received, abort.\r\n");
+            return false;
+        }
+
         vTaskDelay(pdMS_TO_TICKS(5));
     }
 
@@ -591,9 +628,9 @@ void Vision_Start(VisionCmd_t cmd, int class_id) {
         break;
 
     case VCMD_P2:
-        g_p2_sub      = P2_IDLE;
+        g_p2_sub      = P2_WAIT_RDY;
         g_p2_mark_idx = 0;
-        g_state       = VISION_IDLE;
+        g_state       = VISION_BUSY;
         send_frame("p2");
         PrintDebug("[VISION] -> Cam: p2 (P2 start, %d marks)\r\n", P2_MARK_COUNT);
         break;
@@ -620,6 +657,15 @@ void Vision_Go(void) {
         g_p2_sub = P2_SEARCHING;
         g_state  = VISION_BUSY;
         PrintDebug("[VISION] -> Cam: go (P2 search mark %d)\r\n", g_p2_mark_idx);
+        return;
+    }
+
+    /* P2: rdy received, send go to start search */
+    if (g_state == VISION_RDY && g_p2_sub == P2_WAIT_RDY) {
+        send_frame("go");
+        g_p2_sub = P2_SEARCHING;
+        g_state  = VISION_BUSY;
+        PrintDebug("[VISION] -> Cam: go (P2 start search, rdy received)\r\n");
         return;
     }
 
@@ -660,7 +706,12 @@ void Vision_Go(void) {
         } else if (g_p2_sub == P2_POS_DETECT) {
             /* pos → go: 进入迭代归零 */
             g_p2_sub = P2_ALIGNING;
-            PrintDebug("[VISION] -> Cam: go (P2 aligning mark %d)\r\n", g_p2_mark_idx);
+            g_p2_iter = 0;
+            PrintDebug("[VISION] -> Cam: go (P2 aligning mark %d), waiting...\r\n", g_p2_mark_idx);
+        } else if (g_p2_sub == P2_ALIGNING) {
+            /* 迭代对齐: 发 go 继续迭代, 最多5轮 */
+            g_p2_iter++;
+            PrintDebug("[VISION] -> Cam: go (P2 align iter %d, mark %d)\r\n", g_p2_iter, g_p2_mark_idx);
         }
     }
     else if (g_active_cmd == VCMD_P3) {
@@ -727,6 +778,10 @@ void CamUart_RecvCallback(uint8_t *data, int len) {
     for (int i = 0; i < len; i++) {
         feed_byte(data[i]);
     }
+    /* ISR 路径尾: 若刚转为 GOT_POS 则标记 */
+    if (g_active_cmd == VCMD_P2 && g_p2_sub == P2_ALIGNING && g_state == VISION_GOT_POS) {
+        g_p2_got_pos_from_isr = 1;
+    }
 }
 
 bool Vision_IsTimedOut(void) {
@@ -736,4 +791,18 @@ bool Vision_IsTimedOut(void) {
 void Vision_ForceIdle(void) {
     PrintDebug("[VISION] Force idle due to timeout\r\n");
     reset_all();
+}
+
+uint32_t Vision_GetAlignRxCount(void) { return g_p2_align_rx_cnt; }
+int Vision_GetGotPosFromISR(void) { return g_p2_got_pos_from_isr; }
+uint32_t Vision_GetP2TotalRxCount(void) { return g_p2_total_rx; }
+uint32_t Vision_GetP2StpIgnoredCount(void) { return g_p2_stp_ignored; }
+
+void Vision_BackToSearch(void) {
+    if (g_active_cmd == VCMD_P2) {
+        g_p2_sub = P2_SEARCHING;
+        g_state = VISION_BUSY;
+        g_collecting = false;
+        PrintDebug("[VISION] Back to search mode (no p2 sent)\r\n");
+    }
 }

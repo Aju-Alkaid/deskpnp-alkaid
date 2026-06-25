@@ -35,7 +35,7 @@ extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 #define PUMP_BLOW_MS    1000          /* 关气泵后电磁阀吹气时长(ms) */
 
 #define MARK_VERIFY_ERR_MM  0.3f   /* Mark3 验证允许误差 (mm) */
-#define P2_SCAN_STEP_MM      9.0f   /* P2 网格扫描步长 (mm) */
+#define P2_SCAN_STEP_MM      5.0f   /* P2 网格扫描步长 (mm) */
 #define P2_SCAN_TIMEOUT       300   /* 每格位超时 (~3s, 主循环10ms/轮) */
 #define Z_SERVO_CH       2            /* 舵机通道号 */
 
@@ -331,6 +331,8 @@ static void download_done(void) {
         int32_t scan_step = (int32_t)(P2_SCAN_STEP_MM * STEPS_PER_MM);
         int32_t area_w = g_calib.heat_platform_x_max - g_calib.heat_platform_x_min;
         int32_t area_h = g_calib.heat_platform_y_max - g_calib.heat_platform_y_min;
+        if (area_w < 0) area_w = -area_w;
+        if (area_h < 0) area_h = -area_h;
         if (area_w > 0 && area_h > 0) {
             g_scan_cols = (area_w + scan_step - 1) / scan_step;
             g_scan_rows = (area_h + scan_step - 1) / scan_step;
@@ -339,7 +341,8 @@ static void download_done(void) {
             g_scan_cur    = 0;
             g_scan_timeout = 0;
             g_mark_scanning = true;
-            safe_move_to(g_calib.heat_platform_x_min, g_calib.heat_platform_y_min,
+            safe_move_to(g_calib.heat_platform_x_min + g_calib.cam_to_nozzle_dx_steps,
+                         g_calib.heat_platform_y_min + g_calib.cam_to_nozzle_dy_steps,
                          PNP_SPEED, PNP_ACC);
             PrintDebug("[HOST] P2 scan: %ldx%ld grid, step=%ld steps\r\n",
                        (long)g_scan_cols, (long)g_scan_rows, (long)scan_step);
@@ -715,6 +718,12 @@ static void mark_align_step(void) {
 
     switch (vs) {
 
+    case VISION_RDY:
+        /* Cam responded rdy after p2, send go */
+        g_scan_timeout = 0;
+        Vision_Go();
+        break;
+
     /* ---- 网格扫描 / 跳转搜索超时 ---- */
     case VISION_BUSY:
         g_scan_timeout++;
@@ -731,27 +740,27 @@ static void mark_align_step(void) {
                 g_state = HOST_ERROR;
                 break;
             }
-            /* 蛇形扫描: 偶数行左→右，奇数行右→左 */
+            /* 竖向蛇形扫描: row慢(左右步进) col快(上下扫描) */
             int32_t row = g_scan_cur / g_scan_cols;
             int32_t col = g_scan_cur % g_scan_cols;
             int32_t step = (int32_t)(P2_SCAN_STEP_MM * STEPS_PER_MM);
+            int32_t x_dir = (g_calib.heat_platform_x_max >= g_calib.heat_platform_x_min) ? 1 : -1;
+            int32_t y_dir = (g_calib.heat_platform_y_max >= g_calib.heat_platform_y_min) ? 1 : -1;
             int32_t tx, ty;
             if (row & 1) {
-                tx = g_calib.heat_platform_x_max - col * step;
+                tx = g_calib.heat_platform_x_max - x_dir * col * step;
             } else {
-                tx = g_calib.heat_platform_x_min + col * step;
+                tx = g_calib.heat_platform_x_min + x_dir * col * step;
             }
-            ty = g_calib.heat_platform_y_min + row * step;
-            safe_move_to(tx, ty, PNP_SPEED, PNP_ACC);
-            Vision_Start(VCMD_P2, 0);
-            Vision_Go();
-            PrintDebug("[HOST] P2 scan [%ld,%ld] → (%ld,%ld)\r\n",
+            ty = g_calib.heat_platform_y_min + y_dir * row * step;
+            safe_move_to(tx + g_calib.cam_to_nozzle_dx_steps,
+                         ty + g_calib.cam_to_nozzle_dy_steps,
+                         PNP_SPEED, PNP_ACC);
+            PrintDebug("[HOST] P2 scan [%ld,%ld] \u2192 (%ld,%ld)\r\n",
                        (long)row, (long)col, (long)tx, (long)ty);
         } else {
-            /* 跳转后搜索超时: Mark 不在预估位置 */
-            PrintDebug("[HOST] P2 jump search timeout, mark not found.\r\n");
-            Vision_ForceIdle();
-            g_state = HOST_ERROR;
+            /* Mark已锁定(aligning/pos-detect)超时: 重置超时继续等Cam */
+            g_scan_timeout = 0;
         }
         break;
 
@@ -782,14 +791,15 @@ static void mark_align_step(void) {
 
     /* ---- 收到偏移 → 移动并对齐 (保持不变) ---- */
     case VISION_GOT_POS: {
+        g_mark_scanning = false;       /* 收到 pos 数据，停止网格扫描 */
         g_mark_just_jumped = false;   /* 进入对齐阶段，清除跳转标志 */
         int32_t idx = r->mark_index;
         if (idx >= 0 && idx < P2_MARK_COUNT) {
             if (r->dx != 0 || r->dy != 0) {
-                int32_t dx_s = -(int32_t)(r->dy / 10000.0f * STEPS_PER_MM);  // cam Y → X1+X2
-                int32_t dy_s = -(int32_t)(r->dx / 10000.0f * STEPS_PER_MM);  // cam X → Y 电机
-                safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED_FINE, PNP_ACC_FINE);
-                PrintDebug("[HOST] Mark%ld offset: (%ld,%ld)mm10000 → move(%ld,%ld)steps\r\n",
+                int32_t dx_s = -(int32_t)(r->dy / 1000.0f * STEPS_PER_MM);  // cam Y → X1+X2
+                int32_t dy_s = -(int32_t)(r->dx / 1000.0f * STEPS_PER_MM);  // cam X → Y 电机
+                safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, 100, 25);
+                PrintDebug("[HOST] Mark%ld offset: (%ld,%ld)px → move(%ld,%ld)steps\r\n",
                            (long)idx, (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
             }
             g_marks_actual[idx][0] = Coord_Get().x;
@@ -869,10 +879,16 @@ static void mark_align_step(void) {
     }
 
     case VISION_ERROR:
-        g_mark_scanning = false;
         PrintDebug("[HOST] Mark alignment ERROR: %s\r\n", Vision_GetError());
-        Vision_ForceIdle();
-        g_state = HOST_ERROR;
+        if (g_scan_cur < g_scan_cols * g_scan_rows - 1) {
+            g_mark_scanning = true;
+            Vision_BackToSearch();
+            PrintDebug("[HOST] P2 error, resuming scan from cell %ld\r\n", (long)g_scan_cur);
+        } else {
+            g_mark_scanning = false;
+            Vision_ForceIdle();
+            g_state = HOST_ERROR;
+        }
         break;
 
     default:
@@ -1162,8 +1178,8 @@ static void move_to_pcb_step(void) {
         machine_x = (int32_t)(cx * cos_t - cy * sin_t) + g_pcb_frame.origin_x_steps + g_p3_offset_x;
         machine_y = (int32_t)(cx * sin_t + cy * cos_t) + g_pcb_frame.origin_y_steps + g_p3_offset_y;
     } else {
-        machine_x = cx + (int32_t)(g_mark_avg_dx / 10000.0f * STEPS_PER_MM);
-        machine_y = cy + (int32_t)(g_mark_avg_dy / 10000.0f * STEPS_PER_MM);
+        machine_x = cx + (int32_t)(g_mark_avg_dx / 1000.0f * STEPS_PER_MM);
+        machine_y = cy + (int32_t)(g_mark_avg_dy / 1000.0f * STEPS_PER_MM);
     }
     /* 摄像头à吸嘴偏置补偿: PCB 坐标系基于摄像头建系，需偏移到吸嘴位置 */
     machine_x += g_calib.cam_to_nozzle_dx_steps;

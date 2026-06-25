@@ -3170,7 +3170,7 @@ g_calib.cam_p3_val_to_steps    = 0.0f;
 ### 28.10 SPI3 Flash 访问注意事项
 
 - SPI3（W25Q64）无互斥锁保护。Host_Task 和 StartCamTestTask 均在初始化阶段调用 Calib_Load，两个任务同优先级（Normal），存在 SPI 总线竞争风险。正常使用时不应两个任务同时激活。
-- pp_logger.c（Log_Init / Log_Write）也访问 W25Q64，使用独立扇区 LOG_SECTOR_ADDR = 0x7FE000，不与标定扇区 CALIB_FLASH_ADDR = 0x7FF000 冲突。
+- app_logger.c（Log_Init / Log_Write）也访问 W25Q64，使用独立扇区 LOG_SECTOR_ADDR = 0x7FE000，不与标定扇区 CALIB_FLASH_ADDR = 0x7FF000 冲突。
 - SPI3 中断已使能（stm32g4xx_it.c 中 HAL_SPI_IRQHandler(&hspi3) 已注册），但 W25Q64 驱动使用阻塞/轮询模式（HAL_SPI_Transmit/Receive），不使用中断/DMA。
 
 ### 28.11 涉及文件（汇总更新）
@@ -3186,8 +3186,124 @@ g_calib.cam_p3_val_to_steps    = 0.0f;
 
 ### 28.12 文件编辑注意事项
 
-- Node.js 的 eadFileSync 读取 UTF-8 + CRLF 文件时保留 \r\n，替换时需匹配正确的换行符。
+- Node.js 的 
+eadFileSync 读取 UTF-8 + CRLF 文件时保留 \r\n，替换时需匹配正确的换行符。
 - 当替换文本中包含 % 字符时，PowerShell inline 
 ode -e 会解析失败，应将 JS 写入临时 .js 文件再执行。
 - git checkout 会丢弃未提交的工作区改动，执行前应确认无重要修改。git stash 可保护工作区改动。
 - **项目文件编码均为 UTF-8 + CRLF (\r\n)**。用 [System.IO.File]::ReadAllText 读、[System.IO.File]::WriteAllText 写，确保字节精确。
+## 二十九、2026-06-24 会话 — TMC2209 R 轴旋转修复
+
+### 29.1 问题背景
+
+StartCamTestTask 中 P3 视觉检测完成后，r_axis_rotate 被调用但 R 轴电机不旋转。
+Host_Task 中同样的 SET_R_AXIS 命令能让电机正常旋转。两个任务调用的是同一个 r_axis_rotate 函数。
+
+### 29.2 根因 1：RAMPMODE 方向锁（仅允许负向速度）
+
+**文件：** driver_tmc2209.h
+
+RAMPMODE_VELOCITY_HOLD 宏定义为 2，注释误导性地写"velocity hold"，实际含义是 **Velocity mode, negative only**（TMC2209 RAMPMODE 寄存器 bit0-1：0=positioning, 1=positive only, 2=negative only, 3=hold）。
+
+TMC_Init() 写入 RAMPMODE=2 后，TMC2209 永远只接受负向 VACTUAL。角度为正时（相机检测到正偏角），TMC_SetSpeed 写入正 VACTUAL → TMC2209 忽略 → 电机不转。角度为负时反而能转。
+
+**修复：** TMC_SetSpeed 中根据 velocity 符号动态切换 RAMPMODE：
+```c
+uint8_t rampmode = (velocity >= 0) ? 1 : 2;  // 正→1，负→2
+TMC_WriteReg(TMC_REG_RAMPMODE, rampmode);
+```
+
+### 29.3 根因 2：TMC2209 要求写 RAMPMODE 前 VACTUAL=0
+
+**文件：** driver_tmc2209.c — TMC_SetSpeed()
+
+**根因：** TMC2209 数据手册明确要求 "Write RAMPMODE while VACTUAL=0"。原代码先写 RAMPMODE 再写 VACTUAL，TMC2209 内部状态机判定当前在运动状态而拒绝 RAMPMODE 写入 → RAMPMODE 卡在 0（positioning 模式）→ VACTUAL 在 positioning 模式下为只读 → 所有调速写入被静默忽略。
+
+**诊断验证：** 在 TMC_SetSpeed 中加入 RAMPMODE 回读：
+```
+[TMC] RAMPMODE: wr=1 rd=0 MISMATCH   ← 写入 1 但寄存器仍为 0
+```
+证实 RAMPMODE 写入完全不生效。
+
+**修复：** 改为正确的写入顺序：
+```c
+TMC_WriteReg(TMC_REG_VACTUAL, 0);       // 1. 先确保速度为 0
+vTaskDelay(pdMS_TO_TICKS(2));
+TMC_WriteReg(TMC_REG_RAMPMODE, rampmode); // 2. 再切换模式
+vTaskDelay(pdMS_TO_TICKS(2));
+TMC_WriteReg(TMC_REG_VACTUAL, vactual);   // 3. 最后设目标速度
+```
+
+### 29.4 根因 3：诊断回读代码的延迟扰乱了运动时序
+
+**文件：** driver_tmc2209.c, app_motion.c
+
+**根因：** 在排查过程中加入了大量回读验证代码（读 IOIN、GSTAT、RAMPMODE、VACTUAL），每次读操作包括 4 字节读请求 + 等待应答 + 逐字节回声处理，耗时约 15-30ms。在大角度路径中（usteps > 2560），ramp 阶段与 full-speed 阶段之间两次 TMC_SetSpeed 调用叠加了约 60ms 的诊断延迟，导致 ramp 阶段的 vTaskDelay(50ms) 等实际运动时间被严重压缩，电机来不及启动就被下一轮 VACTUAL=0 关闭。
+
+**关键证据：** Host_Task 的 SET_R_AXIS 同样调用 r_axis_rotate，日志中同样显示 RAMPMODE MISMATCH（回读本身不可靠，见 §29.5），但电机能转。区别仅在于 StartCamTestTask 多了一大段诊断回读代码。
+
+**修复：** 剥离所有回读验证，TMC_SetSpeed 精简为最小编写开销（~6ms/次）：
+```c
+void TMC_SetSpeed(int32_t velocity) {
+    TMC_WriteReg(TMC_REG_VACTUAL, 0);
+    vTaskDelay(pdMS_TO_TICKS(2));
+    uint8_t rampmode = (velocity >= 0) ? 1 : 2;
+    TMC_WriteReg(TMC_REG_RAMPMODE, rampmode);
+    vTaskDelay(pdMS_TO_TICKS(2));
+    if (velocity == 0) return;
+    // ... 计算 vactual ...
+    TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)vactual);
+}
+```
+
+### 29.5 TMC2209 UART 回读不可靠问题
+
+**现象：** 对 TMC2209 的寄存器回读经常收到 7 字节（丢失 CRC 字节）或 CRC 不匹配。规律是：上电后前 1-3 次读通信正常（8 字节 + 正确 CRC），之后退化到 7 字节 / CRC 错误。尽管回读数据不对，但 **寄存器写入本身是生效的**（证据：Host_Task 中电机能正常旋转，尽管日志同样显示 MISMATCH）。
+
+**结论：** TMC2209 的 UART 回读不可作为寄存器写入是否成功的可靠判断依据。开发调试时可临时使用回读辅助排查，但生产代码中不应依赖回读验证。应通过实际物理效果（电机是否旋转）来验证。
+
+**注意：** 此现象与 §16.2 问题 4/5 中记录的"7 字节应答格式 + 非标准 CRC"可能为同一根因——回读退化，而非 TMC2209 本身的格式差异。
+
+### 29.6 r_axis_rotate 语义约定
+
+**文件：** app_motion.c
+
+r_axis_rotate(float angle, float speed_rpm) 的 angle 参数含义是 **绝对目标角度**（机器坐标系中的 R 轴位置），而非相对偏移：
+```c
+int r_axis_rotate(float angle, float speed_rpm) {
+    float delta = angle - c0.r;   // 计算从当前 R 坐标到目标的差值
+    // ... 旋转 delta ...
+    Coord_UpdateR(angle);         // 更新 R 坐标为绝对目标值
+}
+```
+
+**调用约定：** 在 Host_Task 和 StartCamTestTask 中，P1/P3 视觉矫正后调用 r_axis_rotate(offset_angle, R_SPEED_RPM) 时，offset_angle 是相机的相对偏角。首次调用时 c0.r == 0，delta == offset_angle，碰巧正确。但矫正后必须调用 r_axis_set_zero() 重置 R 坐标为 0，确保后续矫正不受累计偏移影响。
+
+Host_Task 中的正确模式：
+```c
+host_correct_r_from_vision(r, "P1");  // 内部调用 r_axis_rotate
+r_axis_set_zero();                     // 重置 R 坐标
+```
+
+StartCamTestTask 中已通过本次会话补上 r_axis_set_zero() 调用。
+
+### 29.7 vacuum_ok 永远返回 true
+
+**文件：** app_motion.c
+
+```c
+__weak bool vacuum_ok(void) {
+    return true;   // 无硬件真空传感器，永远返回 true
+}
+```
+
+pick_component() 依赖 vacuum_ok() 判断吸取是否成功，但因无实际传感器，该函数永远返回 true。这意味着即使吸嘴上没有元件，pick_component() 也会报告成功，P3 下相机检测到空吸嘴后返回 err3_8。在有真空传感器的硬件上应覆盖此弱函数。
+
+### 29.8 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| driver_tmc2209.c | TMC_SetSpeed 重写：VACTUAL=0 → RAMPMODE → VACTUAL=目标 的正确顺序；剥离回读诊断 |
+| driver_tmc2209.h | RAMPMODE_VELOCITY_HOLD 宏已不再使用（TMC_SetSpeed 内部用字面量 1/2） |
+| app_motion.c | r_axis_rotate 剥离 IOIN/GSTAT 诊断读；保留 delta 一行打印 |
+| app_test.c | P3 矫正后新增 r_axis_set_zero()；P1 retry 矫正后新增 r_axis_set_zero() |

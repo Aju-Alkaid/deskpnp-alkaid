@@ -122,6 +122,8 @@ void motorSyncTrigger(uint8_t slaveAddr) {
     // 根据你的代码风格，可能需要设置 CAN_ID = 0 (广播)
     uint16_t broadcastId = 0; 
     CAN_Transmit_Data(&hfdcan1, broadcastId, txBuffer, 1); // 长度为1
+	extern void PrintDebug(const char* fmt, ...);
+	PrintDebug("[MOTOR] syncTrigger broadcast\r\n");
 }
 
 
@@ -229,7 +231,9 @@ void positionMode1Run(uint8_t slaveAddr,uint8_t dir,uint16_t speed,uint8_t acc,u
   txBuffer[5] = (pulses >> 8)&0xFF;   //脉冲数 bit15 - bit8
   txBuffer[6] = (pulses >> 0)&0xFF;   //脉冲数 bit7 - bit0
 	
-CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
+extern void PrintDebug(const char* fmt, ...);
+	PrintDebug("[MOTOR] pos2run id=%d spd=%d rel=%ld\r\n", (int)slaveAddr, (int)speed, (long)pulses);
+	CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
 }
 
 /*
@@ -252,6 +256,8 @@ void positionMode2Run(uint8_t slaveAddr,uint16_t speed,uint8_t acc,int32_t relAx
   txBuffer[5] = (relAxis >> 8)&0xFF;   //相对坐标 bit15 - bit8
   txBuffer[6] = (relAxis >> 0)&0xFF;   //相对坐标 bit7 - bit0
 	
+	extern void PrintDebug(const char* fmt, ...);
+	PrintDebug("[MOTOR] pos2run id=%d spd=%d rel=%ld\r\n", (int)slaveAddr, (int)speed, (long)relAxis);
 	CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
 }
 
@@ -275,7 +281,9 @@ void positionMode3Run(uint8_t slaveAddr,uint16_t speed,uint16_t acc,int32_t absA
     txBuffer[5] = (absAxis >> 8)&0xFF;   //绝对坐标 bit15 - bit8
     txBuffer[6] = (absAxis >> 0)&0xFF;   //绝对坐标 bit7 - bit0
     // txBuffer[7] 会被 CAN_Transmit_Data 自动填充 CRC	
-    CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
+    extern void PrintDebug(const char* fmt, ...);
+	PrintDebug("[MOTOR] pos2run id=%d spd=%d rel=%ld\r\n", (int)slaveAddr, (int)speed, (long)absAxis);
+	CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
 }
 
 

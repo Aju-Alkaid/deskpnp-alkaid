@@ -920,7 +920,7 @@ void StartPickPlaceTestTask(void *argument)
  *   形成完整的位置反馈闭环。
  * ================================================================ */
 #define CAM_TEST_TIMEOUT_P1   60000   /* P1 超时 ms */
-#define CAM_TEST_TIMEOUT_P2   60000   /* P2 超时 ms (3个Mark) */
+#define CAM_TEST_TIMEOUT_P2   120000  /* P2 超时 ms (3个Mark) */
 #define CAM_TEST_TIMEOUT_P3   60000   /* P3 超时 ms */
 
 /* 偏移→步数换算系数 (需根据相机 FOV 实测标定！) */
@@ -930,7 +930,7 @@ void StartPickPlaceTestTask(void *argument)
 #define CAM_MOVE_ACC          25
 
 /* P2 完整测试 — 与 Host_Task mark_align_step 共用常量 */
-#define P2_TEST_SCAN_STEP_MM    9.0f   /* P2 网格扫描步长 (mm) */
+#define P2_TEST_SCAN_STEP_MM    5.0f   /* P2 网格扫描步长 (mm) */
 #define P2_TEST_SCAN_TIMEOUT_MS 3000   /* 每格位超时 (ms) */
 #define P2_TEST_VERIFY_ERR_MM   0.3f   /* Mark3 验证允许误差 (mm) */
 
@@ -946,15 +946,6 @@ void StartPickPlaceTestTask(void *argument)
 static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
                          float *out_angle_deg) {
     Vision_Start(cmd, class_id);
-
-    /* P2 启动后状态是 IDLE，需要主动发 "go" */
-    if (cmd == VCMD_P2) {
-        osDelay(200);
-        if (Vision_GetState() == VISION_IDLE) {
-            Vision_Go();
-            PrintDebug("[CAM_TEST] P2 initial go sent.\r\n");
-        }
-    }
 
     VisionState_t prev = Vision_GetState();
     uint32_t start_tick = osKernelGetTickCount();
@@ -972,6 +963,11 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
                 PrintDebug("[CAM_TEST]   -> category reply sent\r\n");
                 break;
 
+            case VISION_RDY:
+                Vision_Go();
+                PrintDebug("[CAM_TEST]   -> rdy received, sent go\r\n");
+                break;
+
             case VISION_GOT_STOP:
                 Vision_Go();
                 PrintDebug("[CAM_TEST]   -> sent go\r\n");
@@ -982,9 +978,9 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
                 int32_t dx_s = 0, dy_s = 0;
 
                 if (cmd == VCMD_P2) {
-                    dx_s = -(int32_t)(r->dy * CAM_MM10000_TO_STEPS);  // cam Y → X1+X2（物理 Y）
-                    dy_s = -(int32_t)(r->dx * CAM_MM10000_TO_STEPS);  // cam X → Y 电机（物理 X）
-                    PrintDebug("[CAM_TEST]   Mark%d/%d: dx=%ld dy=%ld mm10000 -> move(%ld,%ld)\r\n",
+                    dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);  // cam Y → X1+X2（物理 Y）
+                    dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  // cam X → Y 电机（物理 X）
+                    PrintDebug("[CAM_TEST]   Mark%d/%d: dx=%ld dy=%ld px -> move(%ld,%ld)\r\n",
                                (int)r->mark_index, (int)r->mark_count,
                                (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
                 } else if (cmd == VCMD_P3) {
@@ -1026,6 +1022,7 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
             case VISION_GOT_ERR_RETRY:
                 PrintDebug("[CAM_TEST]   err3_3 retry, resending go...\r\n");
                 Vision_Go();
+                vTaskDelay(pdMS_TO_TICKS(50));  /* 确保 go 帧完整发送，摄像头有时间处理 */
                 break;
 
             case VISION_DONE: {
@@ -1052,7 +1049,9 @@ static bool cam_test_run(VisionCmd_t cmd, int class_id, uint32_t timeout_ms,
             default:
                 break;
             }
-            prev = state;
+            /* Vision_Go 总是将状态转到 VISION_BUSY，用 BUSY 作为 prev
+               避免 ISR 在 delay 期间已将状态切回的竞态 */
+            prev = VISION_BUSY;
         }
 
         /* 周期性打印 CAN IRQ 计数，确认中断是否触发 */
@@ -1089,6 +1088,7 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
     bool     mark_scanning = false;
     bool     mark_just_jumped = false;
     int32_t  mark_count_done = 0;
+    int32_t  align_busy_cycles = 0;  /* P2 aligning 阶段 VISION_BUSY 超时次数 */
     uint32_t busy_enter_tick = 0;
     bool     in_busy = false;
 
@@ -1096,6 +1096,8 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
     int32_t scan_step = (int32_t)(P2_TEST_SCAN_STEP_MM * STEPS_PER_MM);
     int32_t area_w = g_calib.heat_platform_x_max - g_calib.heat_platform_x_min;
     int32_t area_h = g_calib.heat_platform_y_max - g_calib.heat_platform_y_min;
+    if (area_w < 0) area_w = -area_w;
+    if (area_h < 0) area_h = -area_h;
     if (area_w > 0 && area_h > 0) {
         scan_cols = (area_w + scan_step - 1) / scan_step;
         scan_rows = (area_h + scan_step - 1) / scan_step;
@@ -1103,7 +1105,8 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
         if (scan_rows < 1) scan_rows = 1;
         scan_cur = 0;
         mark_scanning = true;
-        safe_move_to(g_calib.heat_platform_x_min, g_calib.heat_platform_y_min,
+        safe_move_to(g_calib.heat_platform_x_min + g_calib.cam_to_nozzle_dx_steps,
+                     g_calib.heat_platform_y_min + g_calib.cam_to_nozzle_dy_steps,
                      PNP_SPEED, PNP_ACC);
         PrintDebug("[CAM_TEST] P2 scan: %ldx%ld grid, step=%ld steps\r\n",
                    (long)scan_cols, (long)scan_rows, (long)scan_step);
@@ -1123,6 +1126,14 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
         UART_Driver_Process();
 
         VisionState_t state = Vision_GetState();
+
+        if (state == VISION_RDY) {
+            in_busy = false;
+            Vision_Go();
+            prev = state;
+            vTaskDelay(pdMS_TO_TICKS(20));
+            continue;
+        }
 
         /* VISION_BUSY: 按时间超时而非计数，适配阻塞轮询 */
         if (state == VISION_BUSY) {
@@ -1145,25 +1156,33 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
                     Vision_ForceIdle();
                     return false;
                 }
-                /* 蛇形扫描 */
+                /* 竖向蛇形扫描: row慢(左右步进) col快(上下扫描) */
                 int32_t row = scan_cur / scan_cols;
                 int32_t col = scan_cur % scan_cols;
+                int32_t x_dir = (g_calib.heat_platform_x_max >= g_calib.heat_platform_x_min) ? 1 : -1;
+                int32_t y_dir = (g_calib.heat_platform_y_max >= g_calib.heat_platform_y_min) ? 1 : -1;
                 int32_t tx, ty;
                 if (row & 1) {
-                    tx = g_calib.heat_platform_x_max - col * scan_step;
+                    tx = g_calib.heat_platform_x_max - x_dir * col * scan_step;
                 } else {
-                    tx = g_calib.heat_platform_x_min + col * scan_step;
+                    tx = g_calib.heat_platform_x_min + x_dir * col * scan_step;
                 }
-                ty = g_calib.heat_platform_y_min + row * scan_step;
-                safe_move_to(tx, ty, PNP_SPEED, PNP_ACC);
-                Vision_Start(VCMD_P2, 0);
-                Vision_Go();
+                ty = g_calib.heat_platform_y_min + y_dir * row * scan_step;
+                safe_move_to(tx + g_calib.cam_to_nozzle_dx_steps,
+                             ty + g_calib.cam_to_nozzle_dy_steps,
+                             PNP_SPEED, PNP_ACC);
                 PrintDebug("[CAM_TEST] P2 scan [%ld,%ld] -> (%ld,%ld)\r\n",
                            (long)row, (long)col, (long)tx, (long)ty);
             } else {
-                PrintDebug("[CAM_TEST] P2 jump search timeout, mark not found.\r\n");
-                Vision_ForceIdle();
-                return false;
+                /* Mark已锁定(aligning/pos-detect)超时: 重置超时继续等Cam */
+                align_busy_cycles++;
+                if (align_busy_cycles == 1 || (align_busy_cycles % 10) == 0) {
+                    PrintDebug("[CAM_TEST] P2 align-wait: cycles=%ld total_rx=%lu align_rx=%lu stp_ign=%lu\r\n",
+                               (long)align_busy_cycles, (unsigned long)Vision_GetP2TotalRxCount(),
+                               (unsigned long)Vision_GetAlignRxCount(),
+                               (unsigned long)Vision_GetP2StpIgnoredCount());
+                }
+                busy_enter_tick = osKernelGetTickCount();
             }
             prev = state;
             vTaskDelay(pdMS_TO_TICKS(20));
@@ -1175,6 +1194,11 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
             const VisionResult_t *r = Vision_GetResult();
 
             switch (state) {
+            case VISION_RDY:
+                Vision_Go();
+                PrintDebug("[CAM_TEST]   -> rdy received, sent go\r\n");
+                break;
+
             case VISION_GOT_STOP:
                 mark_scanning = false;
                 {
@@ -1199,17 +1223,22 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
                 break;
 
             case VISION_GOT_POS:
+                PrintDebug("[CAM_TEST] GOT_POS entered, align_rx_cnt=%lu\r\n", (unsigned long)Vision_GetAlignRxCount());
+                mark_scanning = false;
                 mark_just_jumped = false;
                 {
                     int32_t idx = r->mark_index;
                     if (idx >= 0 && idx < (int32_t)P2_MARK_COUNT) {
                         if (r->dx != 0 || r->dy != 0) {
-                            int32_t dx_s = -(int32_t)(r->dy / 10000.0f * STEPS_PER_MM);
-                            int32_t dy_s = -(int32_t)(r->dx / 10000.0f * STEPS_PER_MM);
-                            safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s,
-                                         PNP_SPEED_FINE, PNP_ACC_FINE);
-                            PrintDebug("[CAM_TEST] Mark%ld offset: (%ld,%ld)mm10000 -> move(%ld,%ld)steps\r\n",
-                                       (long)idx, (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
+                            int32_t dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);
+                            int32_t dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);
+                            MachineCoord_t mc_before = Coord_Get();
+                            int ret = safe_move_to(mc_before.x + dx_s, mc_before.y + dy_s,
+                                                    CAM_MOVE_SPEED, CAM_MOVE_ACC);
+                            MachineCoord_t mc_after = Coord_Get();
+                            PrintDebug("[CAM_TEST] Mark%ld offset: (%ld,%ld)px move(%ld,%ld)steps ret=%d before=(%ld,%ld) after=(%ld,%ld)\r\n",
+                                       (long)idx, (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s, ret,
+                                       (long)mc_before.x, (long)mc_before.y, (long)mc_after.x, (long)mc_after.y);
                         }
                         marks_actual[idx][0] = Coord_Get().x;
                         marks_actual[idx][1] = Coord_Get().y;
@@ -1219,6 +1248,7 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
                     }
                 }
                 Vision_Go();
+                vTaskDelay(pdMS_TO_TICKS(50));  /* 确保 go 帧完整发送，摄像头有时间处理 */
                 break;
 
             case VISION_DONE:
@@ -1264,27 +1294,39 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
                     if (mark_count_done >= 3) {
                         int32_t avg_dx = (mark_offsets[0][0] + mark_offsets[1][0] + mark_offsets[2][0]) / 3;
                         int32_t avg_dy = (mark_offsets[0][1] + mark_offsets[1][1] + mark_offsets[2][1]) / 3;
-                        PrintDebug("[CAM_TEST] Mark avg offset: (%ld,%ld) mm10000\r\n",
+                        PrintDebug("[CAM_TEST] Mark avg offset: (%ld,%ld) px\r\n",
                                    (long)avg_dx, (long)avg_dy);
                     }
                 }
                 return true;
 
             case VISION_ERROR:
-                mark_scanning = false;
                 PrintDebug("[CAM_TEST] Mark alignment ERROR: %s\r\n", Vision_GetError());
-                Vision_ForceIdle();
-                return false;
+                if (scan_cur < scan_cols * scan_rows - 1) {
+                    mark_scanning = true;
+                    Vision_BackToSearch();
+                    PrintDebug("[CAM_TEST] P2 error, resuming scan from cell %ld\r\n", (long)scan_cur);
+                } else {
+                    mark_scanning = false;
+                    Vision_ForceIdle();
+                    return false;
+                }
+                break;
 
             default:
                 break;
             }
-            prev = state;
+            /* Vision_Go 总是将状态转到 VISION_BUSY，用 BUSY 作为 prev
+               避免 ISR 在 delay 期间已将状态切回的竞态 */
+            prev = VISION_BUSY;
         }
         vTaskDelay(pdMS_TO_TICKS(20));
     }
 
-    PrintDebug("[CAM_TEST] P2 TIMEOUT after %lu ms\r\n", (unsigned long)timeout_ms);
+    PrintDebug("[CAM_TEST] P2 TIMEOUT after %lu ms, total_rx=%lu align_rx=%lu stp_ign=%lu\r\n",               (unsigned long)timeout_ms,
+               (unsigned long)Vision_GetP2TotalRxCount(),
+               (unsigned long)Vision_GetAlignRxCount(),
+               (unsigned long)Vision_GetP2StpIgnoredCount());
     return false;
 }
 
@@ -1374,7 +1416,7 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
 //        PrintDebug("[CAM_TEST] P1 PASSED, angle=%.2f deg\r\n", (double)p1_angle);
 //    }
 
-//    /* ---- P1 角度矫正：检测到元件偏角后立即 R 轴旋转补偿 ---- */
+    /* ---- P1 角度矫正：检测到元件偏角后立即 R 轴旋转补偿 ---- */
 //    if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
 //        PrintDebug("\r\n--- R axis correction (P1 angle=%.2f deg) ---\r\n", (double)p1_angle);
 //        int rret = r_axis_rotate(p1_angle, R_SPEED_RPM);
@@ -1383,110 +1425,110 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
 //        PrintDebug("[CamTest] P1 angle small, skip R correction\r\n");
 //    }
 
-    /* ---- 吸取 + P3 验证（含 err3_8 吸嘴空取重试，最多 3 次） ---- */
-    PrintDebug("\r\n--- Test 2/3: P3 (pick + verify) ---\r\n");
-    {
-        int nozzle_retry = 0;
-        bool p3_ok = false;
-        /* 保存当前散料区位置，err3_8 重试时移回此处 */
-        MachineCoord_t scatter_pos = Coord_Get();
+//    /* ---- 吸取 + P3 验证（含 err3_8 吸嘴空取重试，最多 3 次） ---- */
+//    PrintDebug("\r\n--- Test 2/3: P3 (pick + verify) ---\r\n");
+//    {
+//        int nozzle_retry = 0;
+//        bool p3_ok = false;
+//        /* 保存当前散料区位置，err3_8 重试时移回此处 */
+//        MachineCoord_t scatter_pos = Coord_Get();
 
-        while (nozzle_retry < 3 && !p3_ok) {
-            if (nozzle_retry > 0) {
-                /* 重试：移回散料区 → 重新 P1 找取 → R 矫正 */
-                PrintDebug("[CAM_TEST] err3_8 retry %d/3: re-running P1...\r\n", nozzle_retry);
-                safe_move_to(scatter_pos.x, scatter_pos.y, CAM_MOVE_SPEED, CAM_MOVE_ACC);
-                if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &p1_angle)) {
-                    PrintDebug("[CAM_TEST] P1 retry FAILED, aborting P3\r\n");
-                    break;
-                }
-                if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
-                    r_axis_rotate(p1_angle, R_SPEED_RPM);
-                    r_axis_set_zero();
-                    PrintDebug("[CamTest] R axis re-correction done (%.2f deg)\r\n", (double)p1_angle);
-                }
-            }
-
-            /* 吸取元件 */
-            PrintDebug("[CamTest] Pick component...\r\n");
-            Pump_On();
-            if (!pick_component()) {
-                PrintDebug("[CamTest] Pick FAILED!\r\n");
-                Pump_Off();
-                break;
-            }
-            PrintDebug("[CamTest] Pick OK\r\n");
-
-            /* 移动到下相机位置（使吸嘴进入 P3 视野） */
-//            {
-//                MachineCoord_t mc0 = Coord_Get();
-//                int32_t dx = g_calib.bottom_cam_x_steps - mc0.x;
-//                int32_t dy = g_calib.bottom_cam_y_steps - mc0.y;
-//                if (dx != 0 || dy != 0) {
-//                    safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps,
-//                                 CAM_MOVE_SPEED, CAM_MOVE_ACC);
+//        while (nozzle_retry < 3 && !p3_ok) {
+//            if (nozzle_retry > 0) {
+//                /* 重试：移回散料区 → 重新 P1 找取 → R 矫正 */
+//                PrintDebug("[CAM_TEST] err3_8 retry %d/3: re-running P1...\r\n", nozzle_retry);
+//                safe_move_to(scatter_pos.x, scatter_pos.y, CAM_MOVE_SPEED, CAM_MOVE_ACC);
+//                if (!cam_test_run(VCMD_P1, 0, CAM_TEST_TIMEOUT_P1, &p1_angle)) {
+//                    PrintDebug("[CAM_TEST] P1 retry FAILED, aborting P3\r\n");
+//                    break;
 //                }
-//                MachineCoord_t mc1 = Coord_Get();
-//                PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
-//                           (long)mc1.x, (long)mc1.y);
+//                if (fabsf(p1_angle) > R_CORRECTION_THRESHOLD_DEG) {
+//                    r_axis_rotate(p1_angle, R_SPEED_RPM);
+//                    r_axis_set_zero();
+//                    PrintDebug("[CamTest] R axis re-correction done (%.2f deg)\r\n", (double)p1_angle);
+//                }
 //            }
 
-            /* P3: 下相机偏移检测，验证 P1 矫正是否到位 */
-            LowerCam_Light_On();  /* 下相机补光灯 */
-            if (!cam_test_run(VCMD_P3, 0, CAM_TEST_TIMEOUT_P3, &p3_angle)) {
-                const char *err = Vision_GetError();
-                if (err[0] == 'e' && err[1] == 'r' && err[2] == 'r' &&
-                    err[3] == '3' && err[4] == '_' && err[5] == '8' && err[6] == '\0') {
-                    nozzle_retry++;
-                    PrintDebug("[CAM_TEST] P3 nozzle empty, retry %d/3\r\n", nozzle_retry);
-                    /* 释放（实际无元件可放）+ 吹气清理吸嘴 */
-                    Pump_Off();
-                    Valve_On(); osDelay(200); Valve_Off();
-                    continue;
-                }
-                PrintDebug("[CAM_TEST] P3 FAILED: %s\r\n", err);
-                break;
-            }
+//            /* 吸取元件 */
+//            PrintDebug("[CamTest] Pick component...\r\n");
+//            Pump_On();
+//            if (!pick_component()) {
+//                PrintDebug("[CamTest] Pick FAILED!\r\n");
+//                Pump_Off();
+//                break;
+//            }
+//            PrintDebug("[CamTest] Pick OK\r\n");
 
-            p3_ok = true;
-            PrintDebug("[CAM_TEST] P3 PASSED, residual angle=%.2f deg\r\n", (double)p3_angle);
-        }
-        LowerCam_Light_Off();  /* 关闭补光灯 */
+//            /* 移动到下相机位置（使吸嘴进入 P3 视野） */
+////            {
+////                MachineCoord_t mc0 = Coord_Get();
+////                int32_t dx = g_calib.bottom_cam_x_steps - mc0.x;
+////                int32_t dy = g_calib.bottom_cam_y_steps - mc0.y;
+////                if (dx != 0 || dy != 0) {
+////                    safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps,
+////                                 CAM_MOVE_SPEED, CAM_MOVE_ACC);
+////                }
+////                MachineCoord_t mc1 = Coord_Get();
+////                PrintDebug("[CamTest] Moved to bottom cam (%ld,%ld)\r\n",
+////                           (long)mc1.x, (long)mc1.y);
+////            }
 
-        if (p3_ok) {
-            /* P3 二次矫正：若 P3 仍有残余偏角，再次 R 轴旋转补偿 */
-            if (fabsf(p3_angle) > R_CORRECTION_THRESHOLD_DEG) {
-                PrintDebug("\r\n--- R axis 2nd correction (P3 residual=%.2f deg) ---\r\n", (double)p3_angle);
-                int rret2 = r_axis_rotate(p3_angle, R_SPEED_RPM);
-                r_axis_set_zero();
-                PrintDebug("[CamTest] R axis 2nd correction %s (%.2f deg)\r\n",
-                           rret2==0?"done":"skipped", (double)p3_angle);
-            } else {
-                PrintDebug("[CamTest] P3 residual small, no 2nd correction needed\r\n");
-            }
-            /* 释放元件 */
-            Pump_Off();
-            Valve_On(); osDelay(200); Valve_Off();
-        } else if (nozzle_retry >= 3) {
-            PrintDebug("[CAM_TEST] P3 nozzle empty x3, check feeder!\r\n");
-        }
-    }
+//            /* P3: 下相机偏移检测，验证 P1 矫正是否到位 */
+//            LowerCam_Light_On();  /* 下相机补光灯 */
+//            if (!cam_test_run(VCMD_P3, 0, CAM_TEST_TIMEOUT_P3, &p3_angle)) {
+//                const char *err = Vision_GetError();
+//                if (err[0] == 'e' && err[1] == 'r' && err[2] == 'r' &&
+//                    err[3] == '3' && err[4] == '_' && err[5] == '8' && err[6] == '\0') {
+//                    nozzle_retry++;
+//                    PrintDebug("[CAM_TEST] P3 nozzle empty, retry %d/3\r\n", nozzle_retry);
+//                    /* 释放（实际无元件可放）+ 吹气清理吸嘴 */
+//                    Pump_Off();
+//                    Valve_On(); osDelay(200); Valve_Off();
+//                    continue;
+//                }
+//                PrintDebug("[CAM_TEST] P3 FAILED: %s\r\n", err);
+//                break;
+//            }
 
-    /* ---- P2: Mark 点建系测试 (完整流程，与 Host_Task mark_align_step 一致) ---- */
-//    PrintDebug("\r\n--- Test: P2 Full (Mark alignment) ---\r\n");
-//    {
-//        Component_t test_marks[3];
-//        memset(test_marks, 0, sizeof(test_marks));
-//        test_marks[0].target_x = 5.0f;   test_marks[0].target_y = 5.0f;
-//        test_marks[1].target_x = 5.0f;   test_marks[1].target_y = 20.0f;
-//        test_marks[2].target_x = 20.0f;  test_marks[2].target_y = 5.0f;
-//        if (!cam_p2_full_test_run(test_marks, 3, CAM_TEST_TIMEOUT_P2)) {
-//            PrintDebug("[CAM_TEST] P2 FULL FAILED\r\n");
-//        } else {
-//            PrintDebug("[CAM_TEST] P2 FULL PASSED\r\n");
+//            p3_ok = true;
+//            PrintDebug("[CAM_TEST] P3 PASSED, residual angle=%.2f deg\r\n", (double)p3_angle);
+//        }
+//        LowerCam_Light_Off();  /* 关闭补光灯 */
+
+//        if (p3_ok) {
+//            /* P3 二次矫正：若 P3 仍有残余偏角，再次 R 轴旋转补偿 */
+//            if (fabsf(p3_angle) > R_CORRECTION_THRESHOLD_DEG) {
+//                PrintDebug("\r\n--- R axis 2nd correction (P3 residual=%.2f deg) ---\r\n", (double)p3_angle);
+//                int rret2 = r_axis_rotate(p3_angle, R_SPEED_RPM);
+//                r_axis_set_zero();
+//                PrintDebug("[CamTest] R axis 2nd correction %s (%.2f deg)\r\n",
+//                           rret2==0?"done":"skipped", (double)p3_angle);
+//            } else {
+//                PrintDebug("[CamTest] P3 residual small, no 2nd correction needed\r\n");
+//            }
+//            /* 释放元件 */
+//            Pump_Off();
+//            Valve_On(); osDelay(200); Valve_Off();
+//        } else if (nozzle_retry >= 3) {
+//            PrintDebug("[CAM_TEST] P3 nozzle empty x3, check feeder!\r\n");
 //        }
 //    }
 
-//    PrintDebug("\r\n=== Camera + Motor Interactive Test Complete ===\r\n");
-//    vTaskSuspend(NULL);
+    /* ---- P2: Mark 点建系测试 (完整流程，与 Host_Task mark_align_step 一致) ---- */
+    PrintDebug("\r\n--- Test: P2 Full (Mark alignment) ---\r\n");
+    {
+        Component_t test_marks[3];
+        memset(test_marks, 0, sizeof(test_marks));
+        test_marks[0].target_x = 5.0f;   test_marks[0].target_y = 5.0f;
+        test_marks[1].target_x = 5.0f;   test_marks[1].target_y = 20.0f;
+        test_marks[2].target_x = 20.0f;  test_marks[2].target_y = 5.0f;
+        if (!cam_p2_full_test_run(test_marks, 3, CAM_TEST_TIMEOUT_P2)) {
+            PrintDebug("[CAM_TEST] P2 FULL FAILED\r\n");
+        } else {
+            PrintDebug("[CAM_TEST] P2 FULL PASSED\r\n");
+        }
+    }
+
+    PrintDebug("\r\n=== Camera + Motor Interactive Test Complete ===\r\n");
+    vTaskSuspend(NULL);
 }
