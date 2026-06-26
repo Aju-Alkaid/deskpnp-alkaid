@@ -15,6 +15,7 @@
 typedef enum {
     VISION_IDLE = 0,     
     VISION_BUSY,         
+    VISION_RDY,          /* Cam responded rdy, host should send go */
     VISION_GOT_STOP,     
     VISION_GOT_POS,      
     VISION_DONE,         
@@ -82,5 +83,12 @@ void CamUart_RecvCallback(uint8_t *data, int len);
 /* Timeout protection (30s default) */
 bool Vision_IsTimedOut(void);
 void Vision_ForceIdle(void);
+
+/* Transition back to search mode without sending commands (pos-detect timeout recovery) */
+void Vision_BackToSearch(void);
+uint32_t Vision_GetAlignRxCount(void);
+int Vision_GetGotPosFromISR(void);
+uint32_t Vision_GetP2TotalRxCount(void);
+uint32_t Vision_GetP2StpIgnoredCount(void);
 
 #endif

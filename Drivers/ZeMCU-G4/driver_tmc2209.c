@@ -241,22 +241,23 @@ void TMC_SetChopperMode(bool use_spreadcycle) {
 }
 
 void TMC_SetSpeed(int32_t velocity) {
-    /* 根据方向切换 RAMPMODE：正→1，负→2，确保双向可控 */
+    /* 写 RAMPMODE 前先确保 VACTUAL=0 */
+    TMC_WriteReg(TMC_REG_VACTUAL, 0);
+    vTaskDelay(pdMS_TO_TICKS(2));
+
     uint8_t rampmode = (velocity >= 0) ? 1 : 2;
     TMC_WriteReg(TMC_REG_RAMPMODE, rampmode);
-    vTaskDelay(pdMS_TO_TICKS(1));
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    if (velocity == 0) return;
 
     float v_freq = (float)(velocity >= 0 ? velocity : -velocity);
     int32_t vactual = (int32_t)(v_freq * 16777216.0f / (float)TMC2209_F_CLK);
     if (velocity < 0) vactual = -vactual;
     if (vactual > 8388607) vactual = 8388607;
     if (vactual < -8388607) vactual = -8388607;
-    TMC_Error_t err = TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)vactual);
-    if (err != TMC_ERR_NONE)
-        PrintDebug("[TMC] VACTUAL write FAILED: err=%d\r\n", err);
-}
-
-TMC_Error_t TMC_GetStatus(uint8_t *status) {
+    TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)vactual);
+}TMC_Error_t TMC_GetStatus(uint8_t *status) {
     uint32_t gstat;
     TMC_Error_t ret = TMC_ReadReg(TMC_REG_GSTAT, &gstat);
     if (ret == TMC_ERR_NONE) *status = (uint8_t)(gstat & 0xFF);

@@ -410,6 +410,7 @@ int r_axis_rotate(float angle, float speed_rpm) {
     /* 使能 TMC2209 驱动 */
     TMC_SetEnable(true);
     vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
+    PrintDebug("[R] delta=%.2f deg usteps=%ld dir=%d\r\n", (double)delta, (long)usteps, (int)dir);
 
     if (usteps <= ramp_usteps * 2) {
         /* 小角度：降速保证足够运行时间，避免一步跳全速丢步 */

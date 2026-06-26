@@ -149,7 +149,7 @@ const osThreadAttr_t espTask_attributes = {
 
 const osThreadAttr_t camTestTask_attributes = {
     .name = "CamTest",
-    .stack_size = 2048,
+    .stack_size = 4096,
     .priority = osPriorityNormal,
 };
 /* USER CODE END Variables */
