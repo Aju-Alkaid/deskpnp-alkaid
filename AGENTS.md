@@ -63,7 +63,7 @@
 | TMC2209 | UART3 通信, PD15(TMC1_EN) / PD14(TMC2_EN 预留) |
 | 加热台 | CAN ID 0x04(命令) / 0x05(状态), FDCAN1 1Mbps, 共享电机 CAN 总线 |
 | 温度传感器 | PF9 / PA3, DS18B20 |
-| 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM) |
+| 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM, 角度越大吸嘴越低) |
 | 吸嘴气泵 | PE11 (12VO1, DRV8803 U12 OUT1 开关) |
 | 下相机补光灯 | PE12 (12VO2, DRV8803 U12 OUT2 开关) |
 | 电磁阀 | PA6 (24VO1, DRV8803 U13 OUT5, PA6=HIGH时导通 — 标准DRV8803: IN=HIGH→OUT=LOW) |
@@ -84,7 +84,7 @@ pnp_1/
 │       ├── driver_can.c/h       # FDCAN 收发 + 滤波器 + CRC_SUM8 + 中断
 │       ├── driver_motor.c/h     # MKS 伺服电机 CAN 控制（0xF5/0xF3/0x82/0x92/0x4A/0x4B 等）
 │       ├── driver_tmc2209.c/h   # TMC2209 UART 寄存器读写 (R轴)
-│       ├── driver_servo.c/h     # MG995 舵机 PWM 控制（TIM5_CH3 / PE8）
+│       ├── driver_servo.c/h     # MG995 舵机 PWM 控制（TIM2_CH3 / PB10）
 │       ├── driver_drv8803.c/h   # DRV8803 双芯片 8通道驱动（12V+24V）
 │       ├── driver_heater.c/h    # 加热台 CAN 通信 (CAN ID 0x04/0x05, 自有 CRC 协议, 见 §4.4)
 │       ├── driver_timer.c/h     # 定时器工具
@@ -124,7 +124,7 @@ pnp_1/
   - `MOVE_STOP` — 停止连续移动
   - `MOVE_TO <x> <y>` — 运动至绝对坐标 (mm)
   - `SET_ORIGIN` — 当前位置设为零点（HOST_HOME 状态下触发进入 HOST_DEBUG）
-  - `SET_SERVO <角度>` — Z 轴舵机 (0~180°)
+  - `SET_SERVO <角度>` — Z 轴舵机 (0~180°, 角度越大吸嘴越低)
   - `SET_R_AXIS <角度>` — R 轴旋转 (0~360°)
   - `PUMP_ON` — 开启气泵
   - `PUMP_OFF` — 关闭气泵 + 电磁阀吹气 1s 后关阀
@@ -196,7 +196,7 @@ pnp_1/
   | 2 | Host→Cam | `go` | 开始搜索（多态命令） |
   | 3 | Cam→Host | `stp` | Mark 锁定（10帧稳定，漂移<1.5px） |
   | 4 | Host→Cam | `go` | 确认停机 → 精确测位 |
-  | 5 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 偏移 **mm×10000** |
+  | 5 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 偏移 **像素** |
   | 6 | Host→Cam | `go` | 移动完成 → 迭代归零 |
   | 7 | Cam→Host | `ok` | 连续30帧对齐（|offset|≤0.3px） |
   | — | — | — | 非末 Mark 的 ok → 自动切 P2_WAIT_GO，等 Host 发 go 搜索下一个 |
@@ -223,7 +223,7 @@ pnp_1/
   |----------|--------|------|
   | P1 Phase1 | `pos` N:dx N:dy N:{id} `end` | 像素×6.0 |
   | P1 Phase2 | `pos` N:dx N:dy `end` | 像素×6.0 |
-  | P2 | `pos` N:dx N:dy `end` | mm×10000 |
+  | P2 | `pos` N:dx N:dy `end` | 像素 |
   | P3 Phase1 | `pos` N:dx N:dy（无 end） | 像素×1.5 |
   | P3 Phase2 | `pos` N:dx N:dy `end` | 像素×1.5 |
 
@@ -450,208 +450,6 @@ pnp_1/
 1. TIM2 频率调整 → §18.3
 
 
-### 9.15 加热台协议重构（2026-06-17）
-
-**背景：** 加热台从机通信协议规范化（参考 `AGENTS_HEATER.md`），原 `driver_heater.c/h` 使用临时 CAN ID（0x10/0x11）和错误的状态/错误码定义，且未按协议规范处理 CRC。
-
-**改动内容：**
-
-| 改动项 | 旧值 | 新值 |
-|--------|------|------|
-| CAN ID 命令/状态 | 0x10 / 0x11 | 0x04 / 0x05 |
-| 状态码 | 7 个（STANDBY~ERROR） | 6 个（IDLE/HEATING/HOLDING/COOLING/COMPLETE/ERROR） |
-| 错误码 | SENSOR/OVERTEMP/TIMEOUT | THERMOCOUPLE/OVERTEMP/COMM_TIMEOUT |
-| 命令 CRC | 无（依赖 CAN_Transmit_Data 自动 CRC） | START/STOP/QUERY 无 CRC；SET_TEMP/SET_PID 附加 CRC（纯数据累加，不含 CAN ID） |
-| 发送函数 | 通过 CAN_Transmit_Data（电机 CRC 规则） | 独立 Heater_Transmit() 直接调用 HAL_FDCAN_AddMessageToTxFifoQ |
-| 接收过滤 | `pkt.FuncCode == HEATER_STATUS_ID`（逻辑错误） | `pkt.ID == HEATER_STATUS_ID`（纯 CAN ID 过滤） |
-| 新增命令 | — | `Heater_SendQuery()` (0x05) |
-
-**CAN RX 路由（driver_can.c）：** `HAL_FDCAN_RxFifo0Callback` 中新增加热台帧分发：
-```c
-if (pkt.ID == HEATER_STATUS_ID && heater_rx_queue != NULL) {
-    osMessageQueuePut(heater_rx_queue, &pkt, 0, 0);
-}
-```
-同时补充了此前遗漏的 `pkt.DataLength = header.DataLength` 赋值。
-
-**温度打印修复：** `Heater_ProcessStatus` 中新增 `print_temp()` 辅助函数，先取绝对值再格式化，避免 C 语言负数除/取模歧义（`-5/10=0` 导致 `-0.5°C` 错误显示为 `0.5`）。
-
-**波特率确认：** 加热台与电机共享 FDCAN1（1 Mbps），加热台从机侧已同步调整为 1 Mbps。
-
-**涉及文件：**
-
-| 文件 | 改动 |
-|------|------|
-| `driver_heater.h` | CAN ID/状态码/错误码/命令码宏全面重写，新增 Heater_SendQuery 声明 |
-| `driver_heater.c` | 新增 Heater_Transmit 原生发送 + 全部命令函数重写 + ProcessStatus 修复 + print_temp 辅助函数 + 死代码移除 |
-| `driver_can.c` | 加热台 ID=0x05 路由 + DataLength 赋值 |
-| `AGENTS.md` | §4.4 新增加热台协议文档 + 硬件表/目录结构/任务通信/数据结构表更新 |
-
-
-### 9.9 TMC2209
-### 9.16 R 轴两步闭环角度矫正 + Host_Task 坐标映射修正（2026-06-19）
-
-**背景：** 原先 Host_Task 和 StartCamTestTask 中 R 轴角度矫正逻辑存在两个问题：（1）P1 检测到的元件角度未被用于矫正，仅打印日志；（2）P3 残余角度也未做二次精修。此外 Host_Task 的三个视觉 step 函数使用直接坐标映射（dx→X, dy→Y），与 cam_test_run 中已验证的摄像头→电机轴映射（cam Y→X1+X2, cam X→Y 电机）不一致。
-
-#### R 轴两步闭环矫正流程
-
-```
-P1 检测角度 → [矫正1: r_axis_rotate(p1_angle)] → 吸取 → 移至下相机
-  → P3 验证 → [矫正2: 若 |residual| > 阈值 → r_axis_rotate(residual)]
-  → 贴装/释放
-```
-
-**设计要点：**
-- 矫正 1（P1 后）：摄像头检测到元件偏角后**立即**旋转补偿，而非等到贴装前一次性旋转。补偿后吸取，确保元件以零偏角吸附在吸嘴上。
-- 矫正 2（P3 后）：下相机验证矫正结果。若仍有残余偏角（机械公差、吸取偏移导致），执行二次精修。
-- 两次矫正使用相同的阈值 `R_CORRECTION_THRESHOLD_DEG`（0.1°）和转速 `R_SPEED_RPM`（60 RPM）。
-
-#### host_correct_r_from_vision 辅助函数
-
-Host_Task 中提取了公共辅助函数（[app_host.c](E:/Desktop/qiansai/pnp_1/Task/app_host.c:782)），消除 find_comp_step 和 offset_check_step 中的重复代码：
-
-```c
-static bool host_correct_r_from_vision(const VisionResult_t *r, const char *stage) {
-    if (!r || !r->angle_valid) return false;          // 空指针 + 有效性守卫
-    float ang = (float)r->angle_x100 / 100.0f;
-    if (fabsf(ang) <= R_CORRECTION_THRESHOLD_DEG) return false;  // 低于阈值跳过
-    PrintDebug("[HOST] %s: R correction %.2f deg\r\n", stage, (double)ang);
-    r_axis_rotate(ang, R_SPEED_RPM);
-    return true;
-}
-```
-
-调用点：
-- `find_comp_step` VISION_DONE → `host_correct_r_from_vision(r, "P1")` → HOST_PICK
-- `offset_check_step` VISION_DONE → `host_correct_r_from_vision(r, "P3")` → HOST_MOVE_TO_PCB
-
-#### Host_Task 坐标映射修正
-
-三处视觉 step 函数的坐标映射均已修正为与 cam_test_run 一致的摄像头→电机轴映射（§9.14）：
-
-| 函数 | 进程 | 修正前 | 修正后 |
-|------|------|--------|--------|
-| `find_comp_step` | P1 | `dx_s = r->dx * coeff` | `dx_s = -(r->dy * coeff)` — cam Y→X1+X2, 取反 |
-| | | `dy_s = r->dy * coeff` | `dy_s = -(r->dx * coeff)` — cam X→Y 电机, 取反 |
-| `mark_align_step` | P2 | `dx_s = r->dx / 10000 * steps` | `dx_s = -(r->dy / 10000 * steps)` |
-| | | `dy_s = r->dy / 10000 * steps` | `dy_s = -(r->dx / 10000 * steps)` |
-| `offset_check_step` | P3 | `dx_s = r->dx * 0.1f` | `dx_s = (r->dy * 0.1f)` — cam Y→X1+X2, 不取反 |
-| | | `dy_s = r->dy * 0.1f` | `dy_s = -(r->dx * 0.1f)` — cam X→Y 电机, 取反 |
-
-#### 共享常量治理
-
-| 常量 | 定义位置 | 说明 |
-|------|----------|------|
-| `R_CORRECTION_THRESHOLD_DEG` (0.1f) | `app_config.h` | 新增。R 轴矫正最小角度阈值，host + test 共用 |
-| `R_SPEED_RPM` (60.0f) | `app_config.h` | 从 `app_host.h` 迁移。R 轴矫正/贴装转速，host + test 共用 |
-
-#### StartCamTestTask 测试流程更新
-
-初始化流程对齐 Host_Task（DRV8803→舵机上电→Valve_Off→TMC→Calib_Load→舵机安全角→CAN→Motor→Vision→P0握手）。
-测试流程激活完整闭环：P1 检测 → R 矫正1 → pick_component 吸取 → 移至下相机 → P3 验证 → R 矫正2 → 释放 → P2 Mark 建系。
-
-#### 涉及文件
-
-| 文件 | 改动 |
-|------|------|
-| `app_config.h` | 新增 `R_CORRECTION_THRESHOLD_DEG`；移入 `R_SPEED_RPM` |
-| `app_host.h` | 移除 `R_SPEED_RPM`（已迁至 app_config.h） |
-| `app_host.c` | 新增 `host_correct_r_from_vision` 辅助函数；find_comp_step/offset_check_step VISION_DONE 调用辅助函数；find_comp_step/mark_align_step/offset_check_step VISION_GOT_POS 坐标映射修正 |
-| `app_test.c` | StartCamTestTask 初始化流程对齐；P1/P2/P3 测试流程激活；R 轴两步矫正逻辑；硬编码 0.1f/60.0f 替换为命名常量；cam_test_run 移动调用改为 safe_move_to |
-
-
-### 9.17 上位机↔电机坐标系约定 + PrintDebug 显示统一（2026-06-22）
-
-**背景：** 点动模式下 MOVE_UP 打印 `(153,0)` 而非预期的 `(0,153)`，同时 MOVE_TO (5,5) 实际走到 (-5,5)。排查发现上位机坐标系（X=水平、Y=垂直）与电机坐标系（X电机=垂直、Y电机=水平）之间存在 90° 旋转 + 水平轴符号翻转，部分代码路径未正确处理。
-
-#### 坐标系约定
-
-```
-上位机坐标系（host）：        电机坐标系（motor）：
-     Y+ (上)                      X电机+ (上)
-      ↑                            ↑
-      |                            |
-      +--→ X+ (右)                +--→ Y电机+ (左)
-
-映射关系：
-  host_x = -motor_y      （Y电机正转 = 机器向左 = 上位机 X 负方向）
-  host_y = +motor_x      （X电机正转 = 机器向上 = 上位机 Y 正方向）
-
-逆映射：
-  motor_x = +host_y
-  motor_y = -host_x
-```
-
-#### 离散移动方向验证
-
-`handle_debug_cmd` 离散移动查表存储的是**电机轴偏移量**（sx=X电机符号, sy=Y电机符号）：
-
-| 方向 | 表值 | 电机动作 | 上位机等效 | 正确？ |
-|------|------|---------|-----------|--------|
-| MOVE_UP | {+1, 0} | X电机+ | host Y+ | ✓ |
-| MOVE_DOWN | {-1, 0} | X电机- | host Y- | ✓ |
-| MOVE_LEFT | {0, +1} | Y电机+ | host X- | ✓ |
-| MOVE_RIGHT | {0, -1} | Y电机- | host X+ | ✓ |
-
-JOG 连续移动（MOVE_*_START）直接控制对应电机，方向一致。
-
-#### MOVE_TO Bug 修复
-
-[app_host.c](E:/Desktop/qiansai/pnp_1/Task/app_host.c:537) MOVE_TO 原先的映射：
-
-```c
-// 修复前：
-tx = cmd->param2 * STEPS;   // host Y → X电机 (正确)
-ty = cmd->param  * STEPS;   // host X → Y电机 (缺取反！)
-// MOVE_TO 5 5 → 实际走到 (-5, 5)
-```
-
-```c
-// 修复后：
-tx = cmd->param2 * STEPS;   // host Y → X电机 (同号)
-ty = -cmd->param * STEPS;   // host X → Y电机 (取反)
-// MOVE_TO 5 5 → 正确走到 (5, 5)
-```
-
-#### PrintDebug 显示统一
-
-将所有显示 `Coord_Get().x / .y` 的 PrintDebug 统一转换为上位机坐标系：`(-motor_y, motor_x)`。
-
-涉及位置：
-
-| 行号 | 命令/函数 | 改动 |
-|------|----------|------|
-| ~481,484 | 离散移动 (MOVE_UP/DOWN/LEFT/RIGHT) | `(x,y)` → `(-y,x)` |
-| ~541 | MOVE_TO | `(x,y)` → `(-y,x)` + ty 取反 |
-| ~382 | SET_SCATTER_AREA | `(x,y)` → `(-y,x)` |
-| ~391 | SET_HEATER_PLATFORM_MIN | `(x,y)` → `(-y,x)` |
-| ~396 | SET_HEATER_PLATFORM_MAX | `(x,y)` → `(-y,x)` |
-| ~401 | SET_BOTTOM_CAM | `(x,y)` → `(-y,x)` |
-
-#### 标定数据存储说明
-
-标定 SET 命令（SET_SCATTER_AREA、SET_BOTTOM_CAM 等）**存入 Flash 的是电机坐标**（`Coord_Get().x/y` 原始值）。后续 PnP 流程从 Flash 读出后直接传给 `safe_move_to`，后者也接受电机坐标。全过程无坐标系转换，存取闭环正确。PrintDebug 仅显示层转换，不影响存储值。
-
-#### 摄像头→电机映射（不受影响）
-
-P1/P2/P3 视觉 step 函数使用独立的摄像头→电机映射（§9.14, §9.16），与本次修改的 `handle_debug_cmd` 和 MOVE_TO 路径物理隔离，互不干扰。
-
-#### 涉及文件
-
-| 文件 | 改动 |
-|------|------|
-| `app_host.c` | `handle_debug_cmd`：离散移动 PrintDebug 坐标转换 + MOVE_TO ty 取反 + MOVE_TO PrintDebug 坐标转换 |
-| `app_host.c` | `handle_calib_cmd`：四个标定 SET 命令 PrintDebug 坐标转换 |
-| `AGENTS.md` | §9.17 新增，§27.8 坐标映射条目修正 |
-
-
-### 9.9 TMC2209 使能/关闭设计（2026-06-11~12）
-
-> 此设计的完整文档已移至 §16.7，此处仅保留与 TMC2209 使能/关闭主设计无关的边缘说明。
-
-**补充 2 — DRV8803 24V 端口为低端开关：** Port_24VO1(PA6) 等为标准 DRV8803 低端驱动（IN=HIGH→OUT=LOW→负载导通，与 12V 端口逻辑一致）。详见 §10.4。
-**补充 1 — VACTUAL 启动扭矩不足：** 直接跳全速时静摩擦卡住电机，需用速度斜坡（5000→80000 μstep/s，每级 +8000，40ms/级）。详见 §16.3。
-
 ### 9.8 已完成的架构改进（2026-06-10）
 
 **1. Host_Task 启动不再发送 DOWNLOAD_READY：** 上位机协议规定 `DEBUG_MODE` 解锁调试按钮，`DOWNLOAD_READY` 进入文件下载模式。原代码启动时同时发送两者，导致上位机被 `DOWNLOAD_READY` 带入下载模式，调试按钮被重新锁定。修复：启动只发 `DEBUG_MODE\n`，`DOWNLOAD_READY` 仅在下载完成或退出调试时发送。
@@ -679,6 +477,13 @@ P1/P2/P3 视觉 step 函数使用独立的摄像头→电机映射（§9.14, §9
 **12. 运动命令不受 g_state 限制：** `handle_debug_cmd` 调用条件从 `if (g_state == HOST_DEBUG)` 改为 `if (cmd != RAW_LINE/NONE/UNKNOWN)`，确保即使状态意外切换（如被 CSV 数据误触 HOST_DOWNLOADING），运动命令仍能正常处理。
 
 **13. Host_UartRecvCallback 重复注释头清理：** 移除旧的 `/* === Host_UartRecvCallback — UART ISR 中调用 === */` 注释块，只保留"已弃用队列模式"版本。
+
+### 9.9 TMC2209 使能/关闭设计（2026-06-11~12）
+
+> 此设计的完整文档已移至 §16.7，此处仅保留与 TMC2209 使能/关闭主设计无关的边缘说明。
+
+**补充 2 — DRV8803 24V 端口为低端开关：** Port_24VO1(PA6) 等为标准 DRV8803 低端驱动（IN=HIGH→OUT=LOW→负载导通，与 12V 端口逻辑一致）。详见 §10.4。
+**补充 1 — VACTUAL 启动扭矩不足：** 直接跳全速时静摩擦卡住电机，需用速度斜坡（5000→80000 μstep/s，每级 +8000，40ms/级）。详见 §16.3。
 
 ### 9.10 UART DMA 架构改进（2026-06-12）
 
@@ -912,6 +717,200 @@ osEventFlagsClear → 发 CAN 命令 → while(真实时钟未超时) {
 | app_host.c | find_comp_step / mark_align_step / offset_check_step 同步修正为相同轴映射（§9.16） |
 | app_test.c | 新增 `#define DEBUG_MOVE` / `#define DEBUG_CAN_PROC` 诊断开关 |
 | app_motion.c | CAN_Process_Task：到位帧日志加 `#ifdef DEBUG_CAN_PROC` 保护 |
+
+### 9.15 加热台协议重构（2026-06-17）
+
+**背景：** 加热台从机通信协议规范化（参考 `AGENTS_HEATER.md`），原 `driver_heater.c/h` 使用临时 CAN ID（0x10/0x11）和错误的状态/错误码定义，且未按协议规范处理 CRC。
+
+**改动内容：**
+
+| 改动项 | 旧值 | 新值 |
+|--------|------|------|
+| CAN ID 命令/状态 | 0x10 / 0x11 | 0x04 / 0x05 |
+| 状态码 | 7 个（STANDBY~ERROR） | 6 个（IDLE/HEATING/HOLDING/COOLING/COMPLETE/ERROR） |
+| 错误码 | SENSOR/OVERTEMP/TIMEOUT | THERMOCOUPLE/OVERTEMP/COMM_TIMEOUT |
+| 命令 CRC | 无（依赖 CAN_Transmit_Data 自动 CRC） | START/STOP/QUERY 无 CRC；SET_TEMP/SET_PID 附加 CRC（纯数据累加，不含 CAN ID） |
+| 发送函数 | 通过 CAN_Transmit_Data（电机 CRC 规则） | 独立 Heater_Transmit() 直接调用 HAL_FDCAN_AddMessageToTxFifoQ |
+| 接收过滤 | `pkt.FuncCode == HEATER_STATUS_ID`（逻辑错误） | `pkt.ID == HEATER_STATUS_ID`（纯 CAN ID 过滤） |
+| 新增命令 | — | `Heater_SendQuery()` (0x05) |
+
+**CAN RX 路由（driver_can.c）：** `HAL_FDCAN_RxFifo0Callback` 中新增加热台帧分发：
+```c
+if (pkt.ID == HEATER_STATUS_ID && heater_rx_queue != NULL) {
+    osMessageQueuePut(heater_rx_queue, &pkt, 0, 0);
+}
+```
+同时补充了此前遗漏的 `pkt.DataLength = header.DataLength` 赋值。
+
+**温度打印修复：** `Heater_ProcessStatus` 中新增 `print_temp()` 辅助函数，先取绝对值再格式化，避免 C 语言负数除/取模歧义（`-5/10=0` 导致 `-0.5°C` 错误显示为 `0.5`）。
+
+**波特率确认：** 加热台与电机共享 FDCAN1（1 Mbps），加热台从机侧已同步调整为 1 Mbps。
+
+**涉及文件：**
+
+| 文件 | 改动 |
+|------|------|
+| `driver_heater.h` | CAN ID/状态码/错误码/命令码宏全面重写，新增 Heater_SendQuery 声明 |
+| `driver_heater.c` | 新增 Heater_Transmit 原生发送 + 全部命令函数重写 + ProcessStatus 修复 + print_temp 辅助函数 + 死代码移除 |
+| `driver_can.c` | 加热台 ID=0x05 路由 + DataLength 赋值 |
+| `AGENTS.md` | §4.4 新增加热台协议文档 + 硬件表/目录结构/任务通信/数据结构表更新 |
+
+
+### 9.16 R 轴两步闭环角度矫正 + Host_Task 坐标映射修正（2026-06-19）
+
+**背景：** 原先 Host_Task 和 StartCamTestTask 中 R 轴角度矫正逻辑存在两个问题：（1）P1 检测到的元件角度未被用于矫正，仅打印日志；（2）P3 残余角度也未做二次精修。此外 Host_Task 的三个视觉 step 函数使用直接坐标映射（dx→X, dy→Y），与 cam_test_run 中已验证的摄像头→电机轴映射（cam Y→X1+X2, cam X→Y 电机）不一致。
+
+#### R 轴两步闭环矫正流程
+
+```
+P1 检测角度 → [矫正1: r_axis_rotate(p1_angle)] → 吸取 → 移至下相机
+  → P3 验证 → [矫正2: 若 |residual| > 阈值 → r_axis_rotate(residual)]
+  → 贴装/释放
+```
+
+**设计要点：**
+- 矫正 1（P1 后）：摄像头检测到元件偏角后**立即**旋转补偿，而非等到贴装前一次性旋转。补偿后吸取，确保元件以零偏角吸附在吸嘴上。
+- 矫正 2（P3 后）：下相机验证矫正结果。若仍有残余偏角（机械公差、吸取偏移导致），执行二次精修。
+- 两次矫正使用相同的阈值 `R_CORRECTION_THRESHOLD_DEG`（0.1°）和转速 `R_SPEED_RPM`（60 RPM）。
+
+#### host_correct_r_from_vision 辅助函数
+
+Host_Task 中提取了公共辅助函数（[app_host.c](E:/Desktop/qiansai/pnp_1/Task/app_host.c:782)），消除 find_comp_step 和 offset_check_step 中的重复代码：
+
+```c
+static bool host_correct_r_from_vision(const VisionResult_t *r, const char *stage) {
+    if (!r || !r->angle_valid) return false;          // 空指针 + 有效性守卫
+    float ang = (float)r->angle_x100 / 100.0f;
+    if (fabsf(ang) <= R_CORRECTION_THRESHOLD_DEG) return false;  // 低于阈值跳过
+    PrintDebug("[HOST] %s: R correction %.2f deg\r\n", stage, (double)ang);
+    r_axis_rotate(ang, R_SPEED_RPM);
+    return true;
+}
+```
+
+调用点：
+- `find_comp_step` VISION_DONE → `host_correct_r_from_vision(r, "P1")` → HOST_PICK
+- `offset_check_step` VISION_DONE → `host_correct_r_from_vision(r, "P3")` → HOST_MOVE_TO_PCB
+
+#### Host_Task 坐标映射修正
+
+三处视觉 step 函数的坐标映射均已修正为与 cam_test_run 一致的摄像头→电机轴映射（§9.14）：
+
+| 函数 | 进程 | 修正前 | 修正后 |
+|------|------|--------|--------|
+| `find_comp_step` | P1 | `dx_s = r->dx * coeff` | `dx_s = -(r->dy * coeff)` — cam Y→X1+X2, 取反 |
+| | | `dy_s = r->dy * coeff` | `dy_s = -(r->dx * coeff)` — cam X→Y 电机, 取反 |
+| `mark_align_step` | P2 | `dx_s = r->dx / 10000 * steps` | `dx_s = -(r->dy / 10000 * steps)` |
+| | | `dy_s = r->dy / 10000 * steps` | `dy_s = -(r->dx / 10000 * steps)` |
+| `offset_check_step` | P3 | `dx_s = r->dx * 0.1f` | `dx_s = (r->dy * 0.1f)` — cam Y→X1+X2, 不取反 |
+| | | `dy_s = r->dy * 0.1f` | `dy_s = -(r->dx * 0.1f)` — cam X→Y 电机, 取反 |
+
+#### 共享常量治理
+
+| 常量 | 定义位置 | 说明 |
+|------|----------|------|
+| `R_CORRECTION_THRESHOLD_DEG` (0.1f) | `app_config.h` | 新增。R 轴矫正最小角度阈值，host + test 共用 |
+| `R_SPEED_RPM` (60.0f) | `app_config.h` | 从 `app_host.h` 迁移。R 轴矫正/贴装转速，host + test 共用 |
+
+#### StartCamTestTask 测试流程更新
+
+初始化流程对齐 Host_Task（DRV8803→舵机上电→Valve_Off→TMC→Calib_Load→舵机安全角→CAN→Motor→Vision→P0握手）。
+测试流程激活完整闭环：P1 检测 → R 矫正1 → pick_component 吸取 → 移至下相机 → P3 验证 → R 矫正2 → 释放 → P2 Mark 建系。
+
+#### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `app_config.h` | 新增 `R_CORRECTION_THRESHOLD_DEG`；移入 `R_SPEED_RPM` |
+| `app_host.h` | 移除 `R_SPEED_RPM`（已迁至 app_config.h） |
+| `app_host.c` | 新增 `host_correct_r_from_vision` 辅助函数；find_comp_step/offset_check_step VISION_DONE 调用辅助函数；find_comp_step/mark_align_step/offset_check_step VISION_GOT_POS 坐标映射修正 |
+| `app_test.c` | StartCamTestTask 初始化流程对齐；P1/P2/P3 测试流程激活；R 轴两步矫正逻辑；硬编码 0.1f/60.0f 替换为命名常量；cam_test_run 移动调用改为 safe_move_to |
+
+
+### 9.17 上位机↔电机坐标系约定 + PrintDebug 显示统一（2026-06-22）
+
+**背景：** 点动模式下 MOVE_UP 打印 `(153,0)` 而非预期的 `(0,153)`，同时 MOVE_TO (5,5) 实际走到 (-5,5)。排查发现上位机坐标系（X=水平、Y=垂直）与电机坐标系（X电机=垂直、Y电机=水平）之间存在 90° 旋转 + 水平轴符号翻转，部分代码路径未正确处理。
+
+#### 坐标系约定
+
+```
+上位机坐标系（host）：        电机坐标系（motor）：
+     Y+ (上)                      X电机+ (上)
+      ↑                            ↑
+      |                            |
+      +--→ X+ (右)                +--→ Y电机+ (左)
+
+映射关系：
+  host_x = -motor_y      （Y电机正转 = 机器向左 = 上位机 X 负方向）
+  host_y = +motor_x      （X电机正转 = 机器向上 = 上位机 Y 正方向）
+
+逆映射：
+  motor_x = +host_y
+  motor_y = -host_x
+```
+
+#### 离散移动方向验证
+
+`handle_debug_cmd` 离散移动查表存储的是**电机轴偏移量**（sx=X电机符号, sy=Y电机符号）：
+
+| 方向 | 表值 | 电机动作 | 上位机等效 | 正确？ |
+|------|------|---------|-----------|--------|
+| MOVE_UP | {+1, 0} | X电机+ | host Y+ | ✓ |
+| MOVE_DOWN | {-1, 0} | X电机- | host Y- | ✓ |
+| MOVE_LEFT | {0, +1} | Y电机+ | host X- | ✓ |
+| MOVE_RIGHT | {0, -1} | Y电机- | host X+ | ✓ |
+
+JOG 连续移动（MOVE_*_START）直接控制对应电机，方向一致。
+
+#### MOVE_TO Bug 修复
+
+[app_host.c](E:/Desktop/qiansai/pnp_1/Task/app_host.c:537) MOVE_TO 原先的映射：
+
+```c
+// 修复前：
+tx = cmd->param2 * STEPS;   // host Y → X电机 (正确)
+ty = cmd->param  * STEPS;   // host X → Y电机 (缺取反！)
+// MOVE_TO 5 5 → 实际走到 (-5, 5)
+```
+
+```c
+// 修复后：
+tx = cmd->param2 * STEPS;   // host Y → X电机 (同号)
+ty = -cmd->param * STEPS;   // host X → Y电机 (取反)
+// MOVE_TO 5 5 → 正确走到 (5, 5)
+```
+
+#### PrintDebug 显示统一
+
+将所有显示 `Coord_Get().x / .y` 的 PrintDebug 统一转换为上位机坐标系：`(-motor_y, motor_x)`。
+
+涉及位置：
+
+| 行号 | 命令/函数 | 改动 |
+|------|----------|------|
+| ~481,484 | 离散移动 (MOVE_UP/DOWN/LEFT/RIGHT) | `(x,y)` → `(-y,x)` |
+| ~541 | MOVE_TO | `(x,y)` → `(-y,x)` + ty 取反 |
+| ~382 | SET_SCATTER_AREA | `(x,y)` → `(-y,x)` |
+| ~391 | SET_HEATER_PLATFORM_MIN | `(x,y)` → `(-y,x)` |
+| ~396 | SET_HEATER_PLATFORM_MAX | `(x,y)` → `(-y,x)` |
+| ~401 | SET_BOTTOM_CAM | `(x,y)` → `(-y,x)` |
+
+#### 标定数据存储说明
+
+标定 SET 命令（SET_SCATTER_AREA、SET_BOTTOM_CAM 等）**存入 Flash 的是电机坐标**（`Coord_Get().x/y` 原始值）。后续 PnP 流程从 Flash 读出后直接传给 `safe_move_to`，后者也接受电机坐标。全过程无坐标系转换，存取闭环正确。PrintDebug 仅显示层转换，不影响存储值。
+
+#### 摄像头→电机映射（不受影响）
+
+P1/P2/P3 视觉 step 函数使用独立的摄像头→电机映射（§9.14, §9.16），与本次修改的 `handle_debug_cmd` 和 MOVE_TO 路径物理隔离，互不干扰。
+
+#### 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `app_host.c` | `handle_debug_cmd`：离散移动 PrintDebug 坐标转换 + MOVE_TO ty 取反 + MOVE_TO PrintDebug 坐标转换 |
+| `app_host.c` | `handle_calib_cmd`：四个标定 SET 命令 PrintDebug 坐标转换 |
+| `AGENTS.md` | §9.17 新增，§27.8 坐标映射条目修正 |
+
 
 ### 10.1 常用 GPIO 引脚速查
 | 功能 | 引脚 | 备注 |
@@ -2086,7 +2085,7 @@ P1/P3 视觉检测的 `angle_x100` 在 `Host_Task` 的 `find_comp_step`/`offset_
 
 ## 二十一、2026-06-19 会话更新 — 电机去重BUG修复 + 替换工具升级
 
-### 22.1 handle_debug_cmd 去重范围收窄
+### 21.1 handle_debug_cmd 去重范围收窄
 
 **问题：** `handle_debug_cmd` 的去重逻辑 `if (cmd->cmd == g_last_cmd && cmd->param == g_last_param)` 对所有命令生效。离散移动命令（`MOVE_UP/DOWN/LEFT/RIGHT`）执行一次后，`g_last_cmd` 和 `g_last_param` 被设置为该命令，后续相同命令被静默丢弃，导致「每个方向只能动一次」。
 
@@ -2113,7 +2112,7 @@ if ((cmd->cmd == HCMD_MOVE_UP_START   || cmd->cmd == HCMD_MOVE_DOWN_START ||
 - 连续 JOG `MOVE_*_START` — 同方向同速度双击防抖保留
 - `MOVE_STOP` 或换方向自动复位去重状态
 
-### 22.2 tools/_replace.ps1 升级到 v2
+### 21.2 tools/_replace.ps1 升级到 v2
 
 **原问题：**
 1. `@'...'@` here-string 的换行符取决于 `.ps1` 文件自身格式，与目标文件 CRLF/LF 不一致时匹配失败
@@ -3307,3 +3306,69 @@ pick_component() 依赖 vacuum_ok() 判断吸取是否成功，但因无实际�
 | driver_tmc2209.h | RAMPMODE_VELOCITY_HOLD 宏已不再使用（TMC_SetSpeed 内部用字面量 1/2） |
 | app_motion.c | r_axis_rotate 剥离 IOIN/GSTAT 诊断读；保留 delta 一行打印 |
 | app_test.c | P3 矫正后新增 r_axis_set_zero()；P1 retry 矫正后新增 r_axis_set_zero() |
+
+
+## 三十、2026-06-25~26 会话 — P2 对齐竞态修复 + 单位统一 + 轴映射修正
+
+### 30.1 物理轴约定
+
+
+
+| 电机 | CAN ID | 代码中命名 | 实际物理轴 | 正方向 |
+|------|--------|-----------|-----------|--------|
+| X1 | 0x01 | X 电机 | Y 轴（前后） | 上正下负 |
+| X2 | 0x02 | X 电机 | Y 轴（前后） | 上正下负 |
+| Y  | 0x03 | Y 电机 | X 轴（左右） | 左负右正 |
+
+**关键映射规则（所有涉及设计坐标 → 电机坐标的地方必须遵守）：**
+
+`
+设计坐标 target_x  → 物理 X 轴（左右） → Y 电机   → machine_y / marks_actual[][1]
+设计坐标 target_y  → 物理 Y 轴（上下） → X1+X2 电机 → machine_x / marks_actual[][0]
+相机 X 偏移 (r->dx) → Y 电机   (物理 X)
+相机 Y 偏移 (r->dy) → X1+X2 电机 (物理 Y)
+`
+
+**涉及位置（共 5 处，已全部修正）：**
+
+1. Mark 跳转（cam_p2_full_test_run + mark_align_step）
+2. 仿射建系 actual_ang 计算
+3. 仿射建系 origin 计算
+4. 仿射建系 Mark3 预测
+5. move_to_pcb_step 贴装位置计算
+
+### 30.2 P2 对齐死循环竞态修复
+
+**文件：** Task/app_test.c
+
+**问题：** cam_p2_full_test_run 和 cam_test_run 的 GOT_POS 分支调用 Vision_Go() 后有 vTaskDelay(50ms)，在此期间 ISR 可能已收到 Cam 的完整响应（pos+N:dx+N:dy+end），将 g_state 切回 VISION_GOT_POS。但循环末尾 prev = state 保存的是**进入 switch 时缓存的旧值**，导致下一轮 state == prev，switch 被跳过，任务死循环直至 120s 超时。
+
+**修复：** prev = state → prev = VISION_BUSY（两处：cam_p2_full_test_run 和 cam_test_run）。因为 Vision_Go() 总是将状态转到 VISION_BUSY，用 VISION_BUSY 作为 prev 可确保 ISR 设回的任何新状态都能被下一轮 state != prev 检测到。
+
+### 30.3 P2 输入单位从 mm×10000 改为 px
+
+**涉及文件：** Task/app_test.c、Task/app_host.c
+
+| 位置 | 改前 | 改后 |
+|------|------|------|
+| cam_test_run P2 分支 (app_test.c) | CAM_MM10000_TO_STEPS | CAM_PX_TO_STEPS |
+| cam_p2_full_test_run GOT_POS (app_test.c) | CAM_MM10000_TO_STEPS | CAM_PX_TO_STEPS |
+| mark_align_step GOT_POS (app_host.c) | /10000.0f | /1000.0f |
+| g_mark_avg_dx/dy 贴装修正 (app_host.c) | /10000.0f | /1000.0f |
+| 所有 P2 偏移日志 | mm10000 | px |
+
+换算系数统一为 CAM_PX_TO_STEPS = STEPS_PER_MM / 1000.0f（与 P1 一致），**前提是 Cam 端同步将 P2 的 pos 数据从 mm×10000 改为像素输出**。
+
+### 30.4 P2 运动参数统一为与 P1 一致
+
+| 位置 | 改前 | 改后 |
+|------|------|------|
+| cam_p2_full_test_run GOT_POS | PNP_SPEED_FINE(100), PNP_ACC_FINE(10) | CAM_MOVE_SPEED(100), CAM_MOVE_ACC(25) |
+| mark_align_step GOT_POS | PNP_SPEED_FINE(100), PNP_ACC_FINE(10) | 100, 25 |
+
+### 30.5 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| Task/app_test.c | 竞态修复（2处）、P2 单位 px 化、P2 速度统一、Mark 跳转 swap、仿射建系 swap、测试坐标调整 |
+| Task/app_host.c | P2 单位 px 化、P2 速度统一、Mark 跳转 swap、仿射建系 swap、move_to_pcb_step swap |

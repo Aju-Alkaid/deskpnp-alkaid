@@ -774,8 +774,8 @@ static void mark_align_step(void) {
                 /* 首次 GOT_STOP (上一 Mark 完成): 跳转到预估位置 */
                 float tdx = g_marks[idx].target_x - g_marks[idx-1].target_x;
                 float tdy = g_marks[idx].target_y - g_marks[idx-1].target_y;
-                int32_t dx = (int32_t)(tdx * STEPS_PER_MM);
-                int32_t dy = (int32_t)(tdy * STEPS_PER_MM);
+                int32_t dx = (int32_t)(tdy * STEPS_PER_MM);  // target_y → X1+X2 电机（物理 Y 轴）
+                int32_t dy = (int32_t)(tdx * STEPS_PER_MM);  // target_x → Y 电机（物理 X 轴）
                 int32_t prev = idx - 1;
                 safe_move_to(g_marks_actual[prev][0] + dx,
                              g_marks_actual[prev][1] + dy,
@@ -830,23 +830,24 @@ static void mark_align_step(void) {
         float t3x = g_marks[2].target_x, t3y = g_marks[2].target_y;
 
         float theory_ang = atan2f(t2y - t1y, t2x - t1x);
-        float actual_ang = atan2f((float)(a2y - a1y), (float)(a2x - a1x));
+        float actual_ang = atan2f((float)(a2x - a1x), (float)(a2y - a1y));
         float theta = actual_ang - theory_ang;
 
+        /* target_x → 物理 X(Y电机), target_y → 物理 Y(X电机) */
         float mt_x = (t1x + t2x) * 0.5f * STEPS_PER_MM;
         float mt_y = (t1y + t2y) * 0.5f * STEPS_PER_MM;
         int32_t ma_x = (a1x + a2x) / 2;
         int32_t ma_y = (a1y + a2y) / 2;
 
         float cos_t = cosf(theta), sin_t = sinf(theta);
-        g_pcb_frame.origin_x_steps = ma_x - (int32_t)(mt_x * cos_t - mt_y * sin_t);
-        g_pcb_frame.origin_y_steps = ma_y - (int32_t)(mt_x * sin_t + mt_y * cos_t);
+        g_pcb_frame.origin_x_steps = ma_x - (int32_t)(mt_y * cos_t - mt_x * sin_t);
+        g_pcb_frame.origin_y_steps = ma_y - (int32_t)(mt_y * sin_t + mt_x * cos_t);
         g_pcb_frame.rotation_rad = theta;
 
         int32_t t3x_s = (int32_t)(t3x * STEPS_PER_MM);
         int32_t t3y_s = (int32_t)(t3y * STEPS_PER_MM);
-        int32_t pred_x = (int32_t)(t3x_s * cos_t - t3y_s * sin_t) + g_pcb_frame.origin_x_steps;
-        int32_t pred_y = (int32_t)(t3x_s * sin_t + t3y_s * cos_t) + g_pcb_frame.origin_y_steps;
+        int32_t pred_x = (int32_t)(t3y_s * cos_t - t3x_s * sin_t) + g_pcb_frame.origin_x_steps;
+        int32_t pred_y = (int32_t)(t3y_s * sin_t + t3x_s * cos_t) + g_pcb_frame.origin_y_steps;
         int32_t err_x = pred_x - a3x, err_y = pred_y - a3y;
         float err_mm = sqrtf((float)(err_x*err_x + err_y*err_y)) / STEPS_PER_MM;
         g_pcb_frame.valid = (err_mm < MARK_VERIFY_ERR_MM);
@@ -1175,11 +1176,12 @@ static void move_to_pcb_step(void) {
     int32_t machine_x, machine_y;
     if (g_pcb_frame.valid) {
         float cos_t = cosf(g_pcb_frame.rotation_rad), sin_t = sinf(g_pcb_frame.rotation_rad);
-        machine_x = (int32_t)(cx * cos_t - cy * sin_t) + g_pcb_frame.origin_x_steps + g_p3_offset_x;
-        machine_y = (int32_t)(cx * sin_t + cy * cos_t) + g_pcb_frame.origin_y_steps + g_p3_offset_y;
+        /* target_x → 物理 X(Y电机), target_y → 物理 Y(X电机) */
+        machine_x = (int32_t)(cy * cos_t - cx * sin_t) + g_pcb_frame.origin_x_steps + g_p3_offset_x;
+        machine_y = (int32_t)(cy * sin_t + cx * cos_t) + g_pcb_frame.origin_y_steps + g_p3_offset_y;
     } else {
-        machine_x = cx + (int32_t)(g_mark_avg_dx / 1000.0f * STEPS_PER_MM);
-        machine_y = cy + (int32_t)(g_mark_avg_dy / 1000.0f * STEPS_PER_MM);
+        machine_x = cy + (int32_t)(g_mark_avg_dy / 1000.0f * STEPS_PER_MM);
+        machine_y = cx + (int32_t)(g_mark_avg_dx / 1000.0f * STEPS_PER_MM);
     }
     /* 摄像头à吸嘴偏置补偿: PCB 坐标系基于摄像头建系，需偏移到吸嘴位置 */
     machine_x += g_calib.cam_to_nozzle_dx_steps;

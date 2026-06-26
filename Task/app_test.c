@@ -1207,8 +1207,8 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
                         /* Mark 间跳转预估 (同 Host_Task) */
                         float tdx = marks[idx].target_x - marks[idx-1].target_x;
                         float tdy = marks[idx].target_y - marks[idx-1].target_y;
-                        int32_t dx = (int32_t)(tdx * STEPS_PER_MM);
-                        int32_t dy = (int32_t)(tdy * STEPS_PER_MM);
+                        int32_t dx = (int32_t)(tdy * STEPS_PER_MM);  // target_y → X1+X2 电机（物理 Y 轴）
+                        int32_t dy = (int32_t)(tdx * STEPS_PER_MM);  // target_x → Y 电机（物理 X 轴）
                         int32_t prev_idx = idx - 1;
                         safe_move_to(marks_actual[prev_idx][0] + dx,
                                      marks_actual[prev_idx][1] + dy,
@@ -1264,22 +1264,23 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
                     float t3x = marks[2].target_x, t3y = marks[2].target_y;
 
                     float theory_ang = atan2f(t2y - t1y, t2x - t1x);
-                    float actual_ang = atan2f((float)(a2y - a1y), (float)(a2x - a1x));
+                    float actual_ang = atan2f((float)(a2x - a1x), (float)(a2y - a1y));
                     float theta = actual_ang - theory_ang;
 
+                    /* target_x → 物理 X(Y电机), target_y → 物理 Y(X电机) */
                     float mt_x = (t1x + t2x) * 0.5f * STEPS_PER_MM;
                     float mt_y = (t1y + t2y) * 0.5f * STEPS_PER_MM;
                     int32_t ma_x = (a1x + a2x) / 2;
                     int32_t ma_y = (a1y + a2y) / 2;
 
                     float cos_t = cosf(theta), sin_t = sinf(theta);
-                    int32_t origin_x = ma_x - (int32_t)(mt_x * cos_t - mt_y * sin_t);
-                    int32_t origin_y = ma_y - (int32_t)(mt_x * sin_t + mt_y * cos_t);
+                    int32_t origin_x = ma_x - (int32_t)(mt_y * cos_t - mt_x * sin_t);
+                    int32_t origin_y = ma_y - (int32_t)(mt_y * sin_t + mt_x * cos_t);
 
                     int32_t t3x_s = (int32_t)(t3x * STEPS_PER_MM);
                     int32_t t3y_s = (int32_t)(t3y * STEPS_PER_MM);
-                    int32_t pred_x = (int32_t)(t3x_s * cos_t - t3y_s * sin_t) + origin_x;
-                    int32_t pred_y = (int32_t)(t3x_s * sin_t + t3y_s * cos_t) + origin_y;
+                    int32_t pred_x = (int32_t)(t3y_s * cos_t - t3x_s * sin_t) + origin_x;
+                    int32_t pred_y = (int32_t)(t3y_s * sin_t + t3x_s * cos_t) + origin_y;
                     int32_t err_x = pred_x - a3x, err_y = pred_y - a3y;
                     float err_mm = sqrtf((float)(err_x*err_x + err_y*err_y)) / STEPS_PER_MM;
                     bool valid = (err_mm < P2_TEST_VERIFY_ERR_MM);
@@ -1520,8 +1521,8 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
         Component_t test_marks[3];
         memset(test_marks, 0, sizeof(test_marks));
         test_marks[0].target_x = 5.0f;   test_marks[0].target_y = 5.0f;
-        test_marks[1].target_x = 5.0f;   test_marks[1].target_y = 20.0f;
-        test_marks[2].target_x = 20.0f;  test_marks[2].target_y = 5.0f;
+        test_marks[1].target_x = 20.0f;  test_marks[1].target_y = 5.0f;
+        test_marks[2].target_x = 5.0f;   test_marks[2].target_y = 20.0f;
         if (!cam_p2_full_test_run(test_marks, 3, CAM_TEST_TIMEOUT_P2)) {
             PrintDebug("[CAM_TEST] P2 FULL FAILED\r\n");
         } else {
