@@ -5,7 +5,6 @@
 #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
 #include <touchgfx/Color.hpp>
 #include <texts/TextKeysAndLanguages.hpp>
-#include <images/BitmapDatabase.hpp>
 
 Screen_LOGViewBase::Screen_LOGViewBase()
 {
@@ -19,13 +18,19 @@ Screen_LOGViewBase::Screen_LOGViewBase()
     box1.setColor(touchgfx::Color::getColorFromRGB(255, 255, 255));
     add(box1);
 
-    LOG.setXY(60, 0);
-    LOG.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
-    LOG.setLinespacing(0);
-    LOG.setTypedText(touchgfx::TypedText(T___SINGLEUSE_3E0M));
-    add(LOG);
+    tip1.setXY(60, 0);
+    tip1.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+    tip1.setLinespacing(0);
+    tip1.setTypedText(touchgfx::TypedText(T___SINGLEUSE_KKDV));
+    add(tip1);
 
-    scrollableContainer1.setPosition(60, 34, 341, 266);
+    tip2.setXY(60, 28);
+    tip2.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+    tip2.setLinespacing(0);
+    tip2.setTypedText(touchgfx::TypedText(T___SINGLEUSE_GX7L));
+    add(tip2);
+
+    scrollableContainer1.setPosition(60, 56, 341, 244);
     scrollableContainer1.setScrollbarsColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
     scrollableContainer1.setScrollbarsAlpha(255);
     textArea1.setPosition(0, 0, 340, 600);
@@ -39,10 +44,6 @@ Screen_LOGViewBase::Screen_LOGViewBase()
 
     pageTable.setXY(0, 0);
     add(pageTable);
-
-    open.setXY(6, 256);
-    open.setBitmaps(touchgfx::Bitmap(BITMAP_SIMPLE_RIGHT_ID), touchgfx::Bitmap(BITMAP_SIMPLE_LEFT_ID));
-    add(open);
 }
 
 Screen_LOGViewBase::~Screen_LOGViewBase()

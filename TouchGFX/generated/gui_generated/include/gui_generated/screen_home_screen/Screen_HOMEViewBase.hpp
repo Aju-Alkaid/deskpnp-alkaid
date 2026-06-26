@@ -12,7 +12,6 @@
 #include <touchgfx/widgets/TextAreaWithWildcard.hpp>
 #include <gui/containers/circleProgress.hpp>
 #include <gui/containers/PageTable.hpp>
-#include <touchgfx/widgets/Button.hpp>
 
 class Screen_HOMEViewBase : public touchgfx::View<Screen_HOMEPresenter>
 {
@@ -33,10 +32,11 @@ protected:
     touchgfx::Box __background;
     touchgfx::Box box1;
     touchgfx::TextArea HOME;
+    touchgfx::TextAreaWithOneWildcard MotorSpeed;
     touchgfx::TextAreaWithOneWildcard temperature;
     circleProgress Progress1;
     PageTable pageTable;
-    touchgfx::Button open;
+    touchgfx::TextAreaWithOneWildcard progress;
 
     /*
      * Wildcard Buffers

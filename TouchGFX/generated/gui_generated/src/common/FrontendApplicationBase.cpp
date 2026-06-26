@@ -16,6 +16,8 @@
 #include <gui/screen_log_screen/Screen_LOGPresenter.hpp>
 #include <gui/screen_reset_screen/Screen_RESETView.hpp>
 #include <gui/screen_reset_screen/Screen_RESETPresenter.hpp>
+#include <gui/screen_wifi_screen/Screen_WIFIView.hpp>
+#include <gui/screen_wifi_screen/Screen_WIFIPresenter.hpp>
 
 using namespace touchgfx;
 

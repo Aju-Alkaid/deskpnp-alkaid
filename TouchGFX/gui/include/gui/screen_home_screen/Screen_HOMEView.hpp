@@ -18,17 +18,25 @@ public:
     virtual void tearDownScreen();
     virtual void handleTickEvent(); // 每tick调用一次
     virtual void handleFreshEvent();// 处理刷新事件函数
+    void applyMotorSpeed(uint16_t speed, bool force = false);
 
     virtual void handleKeyEvent(uint8_t key); // 处理按键函数
+    virtual void handleSMTProgress(uint8_t current, uint8_t total);
+    virtual void handleMotorSpeed(uint16_t speed);
 protected:
-    touchgfx::Unicode::UnicodeChar wildcard1Buffer[10];
+    static const uint16_t MOTOR_SPEED_SIZE = 10;
+    touchgfx::Unicode::UnicodeChar motorSpeedBuffer[MOTOR_SPEED_SIZE];
+    static const uint16_t WILDCARD1_SIZE = 10;
+    touchgfx::Unicode::UnicodeChar wildcard1Buffer[WILDCARD1_SIZE];
 
     // 缓存上次刷新的值，仅在变化时刷新
+    uint8_t  last_speed_applied;
+    uint16_t last_motor_speed;
     uint8_t  last_if_now_SMT;
     uint8_t  last_total_SMT;
     uint8_t  last_now_SMT;
     uint8_t  last_Temp;
-    bool increase = true;
 };
 
 #endif // SCREEN_HOMEVIEW_HPP
+

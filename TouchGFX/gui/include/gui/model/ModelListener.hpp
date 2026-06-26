@@ -27,6 +27,8 @@ public:
     virtual void onNotifySMTProgress(uint8_t cur, uint8_t total) {}
     virtual void onNotifyMotorResetDone()                  {}
     virtual void onNotifyCustom(uint8_t code, uint8_t param) {}
+    virtual void onNotifyMotorSpeed(uint16_t speed) {}
+    virtual void onNotifyLogText(uint8_t code, uint8_t param) {}
 
     void bind(Model* m)
     {

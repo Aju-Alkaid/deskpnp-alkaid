@@ -232,11 +232,17 @@
     <Filter Include="Header Files\generated\gui_generated\screen_reset_screen">
       <UniqueIdentifier>70B4A251-240E-3A2B-EF6E-8ED1C8BA974B</UniqueIdentifier>
     </Filter>
-    <Filter Include="Source Files\gui\screen_refre_screen">
-      <UniqueIdentifier>8FB043E4-11F6-526D-2D56-1E2DB7E80A1F</UniqueIdentifier>
+    <Filter Include="Header Files\gui\screen_wifi_screen">
+      <UniqueIdentifier>7E87D37A-3879-D33D-99BB-C3669F4BED41</UniqueIdentifier>
     </Filter>
-    <Filter Include="Header Files\gui\screen_refre_screen">
-      <UniqueIdentifier>1DC3B36B-1058-3971-A26D-CEFF0D054906</UniqueIdentifier>
+    <Filter Include="Source Files\gui\screen_wifi_screen">
+      <UniqueIdentifier>74DDF67F-656E-8435-B03D-DA0692039B7D</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\gui_generated\screen_wifi_screen">
+      <UniqueIdentifier>9437104F-1349-9E94-D1C8-B171701CDA54</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\generated\gui_generated\screen_wifi_screen">
+      <UniqueIdentifier>F7B45718-87C3-CFFD-578A-57BBF37D9822</UniqueIdentifier>
     </Filter>
   </ItemGroup>
   <ItemGroup>
@@ -266,12 +272,6 @@
     </ClCompile>
     <ClCompile Include="..\..\gui\src\model\Model.cpp">
       <Filter>Source Files\gui\model</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\gui\src\containers\detail.cpp">
-      <Filter>Source Files\gui\containers</Filter>
-    </ClCompile>
-    <ClCompile Include="..\..\generated\gui_generated\src\containers\detailBase.cpp">
-      <Filter>Source Files\generated\gui_generated\containers</Filter>
     </ClCompile>
     <ClCompile Include="..\..\generated\simulator\src\video\SoftwareMJPEGDecoder.cpp">
       <Filter>Source Files\generated\simulator\video</Filter>
@@ -327,11 +327,14 @@
     <ClCompile Include="..\..\generated\gui_generated\src\screen_reset_screen\Screen_RESETViewBase.cpp">
       <Filter>Source Files\generated\gui_generated\screen_reset_screen</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREPresenter.cpp">
-      <Filter>Source Files\gui\screen_refre_screen</Filter>
+    <ClCompile Include="..\..\gui\src\screen_wifi_screen\Screen_WIFIPresenter.cpp">
+      <Filter>Source Files\gui\screen_wifi_screen</Filter>
     </ClCompile>
-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREView.cpp">
-      <Filter>Source Files\gui\screen_refre_screen</Filter>
+    <ClCompile Include="..\..\gui\src\screen_wifi_screen\Screen_WIFIView.cpp">
+      <Filter>Source Files\gui\screen_wifi_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\generated\gui_generated\src\screen_wifi_screen\Screen_WIFIViewBase.cpp">
+      <Filter>Source Files\generated\gui_generated\screen_wifi_screen</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -766,12 +769,6 @@
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\common\SimConstants.hpp">
       <Filter>Header Files\generated\gui_generated\common</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\gui\include\gui\containers\detail.hpp">
-      <Filter>Header Files\gui\containers</Filter>
-    </ClInclude>
-    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\containers\detailBase.hpp">
-      <Filter>Header Files\generated\gui_generated\containers</Filter>
-    </ClInclude>
     <ClInclude Include="..\..\gui\include\gui\screen_log_screen\Screen_LOGPresenter.hpp">
       <Filter>Header Files\gui\screen_log_screen</Filter>
     </ClInclude>
@@ -832,11 +829,14 @@
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_reset_screen\Screen_RESETViewBase.hpp">
       <Filter>Header Files\generated\gui_generated\screen_reset_screen</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREPresenter.hpp">
-      <Filter>Header Files\gui\screen_refre_screen</Filter>
+    <ClInclude Include="..\..\gui\include\gui\screen_wifi_screen\Screen_WIFIPresenter.hpp">
+      <Filter>Header Files\gui\screen_wifi_screen</Filter>
     </ClInclude>
-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREView.hpp">
-      <Filter>Header Files\gui\screen_refre_screen</Filter>
+    <ClInclude Include="..\..\gui\include\gui\screen_wifi_screen\Screen_WIFIView.hpp">
+      <Filter>Header Files\gui\screen_wifi_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_wifi_screen\Screen_WIFIViewBase.hpp">
+      <Filter>Header Files\generated\gui_generated\screen_wifi_screen</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

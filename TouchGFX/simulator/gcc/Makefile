@@ -1,4 +1,4 @@
-# Helper macros to convert spaces into question marks and back again
+﻿# Helper macros to convert spaces into question marks and back again
 e := 
 sp := $(e) $(e)
 qs = $(subst ?,$(sp),$1)
@@ -20,8 +20,8 @@ all clean assets:
 $(error Spaces not allowed in path)
 else
 
-ADDITIONAL_SOURCES := 
-ADDITIONAL_INCLUDE_PATHS := 
+ADDITIONAL_SOURCES := tools/os_shim/touchgfx_sim_os_shim.cpp
+ADDITIONAL_INCLUDE_PATHS := simulator/include tools/os_shim
 ADDITIONAL_LIBRARY_PATHS := 
 ADDITIONAL_LIBRARIES :=
 export ADDITIONAL_SOURCES ADDITIONAL_INCLUDE_PATHS ADDITIONAL_LIBRARY_PATHS ADDITIONAL_LIBRARIES

@@ -12,7 +12,6 @@
 #include <touchgfx/containers/ScrollableContainer.hpp>
 #include <touchgfx/widgets/TextAreaWithWildcard.hpp>
 #include <gui/containers/PageTable.hpp>
-#include <touchgfx/widgets/Button.hpp>
 
 class Screen_LOGViewBase : public touchgfx::View<Screen_LOGPresenter>
 {
@@ -31,11 +30,11 @@ protected:
      */
     touchgfx::Box __background;
     touchgfx::Box box1;
-    touchgfx::TextArea LOG;
+    touchgfx::TextArea tip1;
+    touchgfx::TextArea tip2;
     touchgfx::ScrollableContainer scrollableContainer1;
     touchgfx::TextAreaWithOneWildcard textArea1;
     PageTable pageTable;
-    touchgfx::Button open;
 
 private:
 

@@ -1,4 +1,4 @@
-#ifndef SCREEN_HOMEPRESENTER_HPP
+﻿#ifndef SCREEN_HOMEPRESENTER_HPP
 #define SCREEN_HOMEPRESENTER_HPP
 
 #include <gui/model/ModelListener.hpp>
@@ -17,17 +17,19 @@ public:
      * The activate function is called automatically when this screen is "switched in"
      * (ie. made active). Initialization logic can be placed here.
      */
-    virtual void activate();
+    virtual void activate() override;
 
     /**
      * The deactivate function is called automatically when this screen is "switched out"
      * (ie. made inactive). Teardown functionality can be placed here.
      */
-    virtual void deactivate();
+    virtual void deactivate() override;
 
     virtual ~Screen_HOMEPresenter() {}
     Model * getModel();
-    virtual void onKeyPressed(uint8_t keyId);
+    virtual void onKeyPressed(uint8_t keyId) override;
+    virtual void onNotifySMTProgress(uint8_t current, uint8_t total) override;
+    virtual void onNotifyMotorSpeed(uint16_t speed) override;
 private:
     Screen_HOMEPresenter();
 
@@ -35,3 +37,5 @@ private:
 };
 
 #endif // SCREEN_HOMEPRESENTER_HPP
+
+

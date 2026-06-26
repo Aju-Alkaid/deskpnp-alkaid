@@ -18,6 +18,12 @@ public:
         model.tick();
         FrontendApplicationBase::handleTickEvent();
     }
+
+    // WIFI 页面跳转（Designer 未自动生成，手动添加）
+    void gotoScreen_WIFIScreenNoTransition();
+    void gotoScreen_WIFIScreenNoTransitionImpl();
+
+    touchgfx::Callback<FrontendApplication> transitionCallbackWIFI;
 private:
 };
 

@@ -5,7 +5,6 @@
 #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
 #include <touchgfx/Color.hpp>
 #include <texts/TextKeysAndLanguages.hpp>
-#include <images/BitmapDatabase.hpp>
 
 Screen_HOMEViewBase::Screen_HOMEViewBase()
 {
@@ -25,6 +24,12 @@ Screen_HOMEViewBase::Screen_HOMEViewBase()
     HOME.setTypedText(touchgfx::TypedText(T___SINGLEUSE_G70R));
     add(HOME);
 
+    MotorSpeed.setXY(60, 265);
+    MotorSpeed.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+    MotorSpeed.setLinespacing(0);
+    MotorSpeed.setTypedText(touchgfx::TypedText(T___SINGLEUSE_2QJ5));
+    add(MotorSpeed);
+
     temperature.setXY(265, 0);
     temperature.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
     temperature.setLinespacing(0);
@@ -34,15 +39,17 @@ Screen_HOMEViewBase::Screen_HOMEViewBase()
     temperature.setTypedText(touchgfx::TypedText(T___SINGLEUSE_SYMX));
     add(temperature);
 
-    Progress1.setXY(153, 76);
+    Progress1.setXY(154, 49);
     add(Progress1);
 
     pageTable.setXY(0, 0);
     add(pageTable);
 
-    open.setXY(6, 256);
-    open.setBitmaps(touchgfx::Bitmap(BITMAP_SIMPLE_RIGHT_ID), touchgfx::Bitmap(BITMAP_SIMPLE_LEFT_ID));
-    add(open);
+    progress.setXY(60, 237);
+    progress.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+    progress.setLinespacing(0);
+    progress.setTypedText(touchgfx::TypedText(T___SINGLEUSE_TDMH));
+    add(progress);
 }
 
 Screen_HOMEViewBase::~Screen_HOMEViewBase()

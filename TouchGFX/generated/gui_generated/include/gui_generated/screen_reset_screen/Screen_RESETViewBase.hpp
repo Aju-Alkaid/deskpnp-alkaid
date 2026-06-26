@@ -10,7 +10,6 @@
 #include <touchgfx/widgets/Box.hpp>
 #include <touchgfx/widgets/TextArea.hpp>
 #include <gui/containers/PageTable.hpp>
-#include <touchgfx/widgets/Button.hpp>
 
 class Screen_RESETViewBase : public touchgfx::View<Screen_RESETPresenter>
 {
@@ -49,7 +48,6 @@ protected:
     touchgfx::Box box1;
     touchgfx::TextArea caution;
     PageTable pageTable;
-    touchgfx::Button open;
     touchgfx::TextArea Reseting;
     touchgfx::TextArea Reset_done;
 

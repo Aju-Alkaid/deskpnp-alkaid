@@ -10,7 +10,6 @@
 #include <touchgfx/widgets/Box.hpp>
 #include <touchgfx/widgets/TextArea.hpp>
 #include <gui/containers/PageTable.hpp>
-#include <touchgfx/widgets/Button.hpp>
 
 class Screen_IMPORTViewBase : public touchgfx::View<Screen_IMPORTPresenter>
 {
@@ -31,7 +30,6 @@ protected:
     touchgfx::Box box1;
     touchgfx::TextArea IMPORT;
     PageTable pageTable;
-    touchgfx::Button open;
     touchgfx::TextArea Ready;
     touchgfx::TextArea Importing;
     touchgfx::TextArea Import_done;
