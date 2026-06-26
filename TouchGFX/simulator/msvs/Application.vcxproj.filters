@@ -232,6 +232,18 @@
     <Filter Include="Header Files\generated\gui_generated\screen_reset_screen">
       <UniqueIdentifier>70B4A251-240E-3A2B-EF6E-8ED1C8BA974B</UniqueIdentifier>
     </Filter>
+    <Filter Include="Header Files\gui\screen_wifi_screen">
+      <UniqueIdentifier>7E87D37A-3879-D33D-99BB-C3669F4BED41</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\gui\screen_wifi_screen">
+      <UniqueIdentifier>74DDF67F-656E-8435-B03D-DA0692039B7D</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\generated\gui_generated\screen_wifi_screen">
+      <UniqueIdentifier>9437104F-1349-9E94-D1C8-B171701CDA54</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\generated\gui_generated\screen_wifi_screen">
+      <UniqueIdentifier>F7B45718-87C3-CFFD-578A-57BBF37D9822</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="$(TouchGFXReleasePath)\framework\source\platform\driver\touch\SDL2TouchController.cpp">
@@ -314,6 +326,15 @@
     </ClCompile>
     <ClCompile Include="..\..\generated\gui_generated\src\screen_reset_screen\Screen_RESETViewBase.cpp">
       <Filter>Source Files\generated\gui_generated\screen_reset_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\gui\src\screen_wifi_screen\Screen_WIFIPresenter.cpp">
+      <Filter>Source Files\gui\screen_wifi_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\gui\src\screen_wifi_screen\Screen_WIFIView.cpp">
+      <Filter>Source Files\gui\screen_wifi_screen</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\generated\gui_generated\src\screen_wifi_screen\Screen_WIFIViewBase.cpp">
+      <Filter>Source Files\generated\gui_generated\screen_wifi_screen</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -807,6 +828,15 @@
     </ClInclude>
     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_reset_screen\Screen_RESETViewBase.hpp">
       <Filter>Header Files\generated\gui_generated\screen_reset_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\screen_wifi_screen\Screen_WIFIPresenter.hpp">
+      <Filter>Header Files\gui\screen_wifi_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\gui\include\gui\screen_wifi_screen\Screen_WIFIView.hpp">
+      <Filter>Header Files\gui\screen_wifi_screen</Filter>
+    </ClInclude>
+    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_wifi_screen\Screen_WIFIViewBase.hpp">
+      <Filter>Header Files\generated\gui_generated\screen_wifi_screen</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>

@@ -21,6 +21,7 @@ public:
     virtual void updateSelection(bool flag, uint8_t page);
     virtual void handleKey(uint8_t key);
     virtual void refre_handleKey(uint8_t key);
+    void setWifiConnected(bool connected);
 
     // REFRE 屏幕专用
     void setRefreWidgets(touchgfx::TextArea& caution,
@@ -39,8 +40,13 @@ protected:
     touchgfx::TextArea* pReseting;
     touchgfx::TextArea* pResetDone;
 
+    static const uint8_t PAGE_COUNT = 5;
     uint8_t last_page_cnt;
     uint8_t page_cnt = 0;
+    bool wifi_state = false;
+    void applyWifiIcon(bool selected);
 };
 
 #endif // PAGETABLE_HPP
+
+

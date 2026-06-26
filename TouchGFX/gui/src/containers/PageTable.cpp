@@ -1,4 +1,4 @@
-#include <gui/containers/PageTable.hpp>
+﻿#include <gui/containers/PageTable.hpp>
 #include "key.h"
 #include <gui/common/FrontendApplication.hpp>
 #include <gui/model/Data_Transfer.h>
@@ -42,8 +42,26 @@ void PageTable::blinkRefre_selc()
 
 void PageTable::updateDetail()
 {
-    detail1.setVisible(!detail1.isVisible());
-    detail1.invalidate();
+    // TODO: detail1 widget is missing in current UI generator output
+    // detail1.invalidate();
+}
+
+void PageTable::setWifiConnected(bool connected)
+{
+    wifi_state = connected;
+    applyWifiIcon(page_cnt == 4);
+}
+
+void PageTable::applyWifiIcon(bool selected)
+{
+    wifi_disc.setVisible(!wifi_state && !selected);
+    wifi_disc.invalidate();
+    wifi_connected.setVisible(wifi_state && !selected);
+    wifi_connected.invalidate();
+    wifi_disc_selc.setVisible(!wifi_state && selected);
+    wifi_disc_selc.invalidate();
+    wifi_connected_selc.setVisible(wifi_state && selected);
+    wifi_connected_selc.invalidate();
 }
 
 void PageTable::updateSelection(bool flag, uint8_t page)
@@ -65,6 +83,9 @@ void PageTable::updateSelection(bool flag, uint8_t page)
             refre_selc.setVisible(true);
             refre_selc.invalidate();
         }
+        if(page == 4){
+            applyWifiIcon(true);
+        }
     }
     if(flag == 0){
         if(page == 0){
@@ -83,6 +104,9 @@ void PageTable::updateSelection(bool flag, uint8_t page)
             refre_selc.setVisible(false);
             refre_selc.invalidate();
         }
+        if(page == 4){
+            applyWifiIcon(false);
+        }
     }
 }
 
@@ -91,12 +115,12 @@ void PageTable::handleKey(uint8_t key)
     last_page_cnt = page_cnt;
 		switch(key){
 			case KEY_DOWN:
-        page_cnt = (page_cnt + 1) % 4;
+        page_cnt = (page_cnt + 1) % PAGE_COUNT;
         updateSelection(1, page_cnt);
         updateSelection(0, last_page_cnt);
 				break;
       case KEY_UP:
-        page_cnt = (page_cnt + 3) % 4;
+        page_cnt = (page_cnt + PAGE_COUNT - 1) % PAGE_COUNT;
         updateSelection(1, page_cnt);
         updateSelection(0, last_page_cnt);
 				break;
@@ -116,6 +140,9 @@ void PageTable::handleKey(uint8_t key)
             break;
         case 3:
             static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_RESETScreenNoTransition();
+            break;
+        case 4:
+            static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_WIFIScreenNoTransition();
             break;
         }
 				break;
@@ -183,3 +210,4 @@ void PageTable::motorReset()
 {
     motorReset_Start();
 }
+

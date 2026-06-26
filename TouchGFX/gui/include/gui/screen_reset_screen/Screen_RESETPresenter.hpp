@@ -1,4 +1,4 @@
-#ifndef SCREEN_RESETPRESENTER_HPP
+﻿#ifndef SCREEN_RESETPRESENTER_HPP
 #define SCREEN_RESETPRESENTER_HPP
 
 #include <gui/model/ModelListener.hpp>
@@ -17,17 +17,17 @@ public:
      * The activate function is called automatically when this screen is "switched in"
      * (ie. made active). Initialization logic can be placed here.
      */
-    virtual void activate();
+    virtual void activate() override;
 
     /**
      * The deactivate function is called automatically when this screen is "switched out"
      * (ie. made inactive). Teardown functionality can be placed here.
      */
-    virtual void deactivate();
+    virtual void deactivate() override;
 
     virtual ~Screen_RESETPresenter() {}
 		Model * getModel();
-    virtual void onKeyPressed(uint8_t keyId);
+    virtual void onKeyPressed(uint8_t keyId) override;
 
 private:
     Screen_RESETPresenter();
@@ -36,3 +36,4 @@ private:
 };
 
 #endif // SCREEN_RESETPRESENTER_HPP
+

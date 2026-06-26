@@ -39,7 +39,7 @@ Screen_HOMEViewBase::Screen_HOMEViewBase()
     temperature.setTypedText(touchgfx::TypedText(T___SINGLEUSE_SYMX));
     add(temperature);
 
-    Progress1.setXY(140, 40);
+    Progress1.setXY(154, 49);
     add(Progress1);
 
     pageTable.setXY(0, 0);

@@ -33,10 +33,14 @@ protected:
     touchgfx::Image home;
     touchgfx::Image import;
     touchgfx::Image log;
+    touchgfx::Image wifi_disc;
+    touchgfx::Image wifi_connected;
     touchgfx::Image refre_selc;
     touchgfx::Image home_selc;
     touchgfx::Image import_selc;
     touchgfx::Image log_selc;
+    touchgfx::Image wifi_connected_selc;
+    touchgfx::Image wifi_disc_selc;
 
 private:
 

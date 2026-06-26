@@ -4,6 +4,9 @@
 
 Model::Model() : modelListener(0)
 {
+#ifdef SIMULATOR
+    DT_Init();
+#endif
 }
 
 void Model::tick()

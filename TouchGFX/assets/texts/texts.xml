@@ -6,6 +6,15 @@
   <Texts>
     <TextGroup Id="Group1" />
     <TextGroup Id="Unsorted">
+      <Text Id="__SingleUse_GX7L" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Key1 to bottom        Key2 to clear</Translation>
+      </Text>
+      <Text Id="__SingleUse_KKDV" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">Push to enter\exit LOG</Translation>
+      </Text>
+      <Text Id="__SingleUse_1F5Z" Alignment="Left" TypographyId="regular">
+        <Translation Language="GB">WIFI</Translation>
+      </Text>
       <Text Id="__SingleUse_TDMH" Alignment="Left" TypographyId="regular">
         <Translation Language="GB">Progress &lt;value&gt;</Translation>
       </Text>
@@ -62,9 +71,6 @@
       </Text>
       <Text Id="__SingleUse_C4NX" Alignment="Left" TypographyId="regular">
         <Translation Language="GB">IMPORT</Translation>
-      </Text>
-      <Text Id="__SingleUse_3E0M" Alignment="Left" TypographyId="regular">
-        <Translation Language="GB">LOG</Translation>
       </Text>
     </TextGroup>
   </Texts>

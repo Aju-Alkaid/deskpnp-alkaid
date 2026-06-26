@@ -20,7 +20,11 @@
  */
 
 #include <stdint.h>
+#ifdef SIMULATOR
+#include "touchgfx_sim_os_shim.h"
+#else
 #include "cmsis_os2.h"
+#endif
 
 #ifdef __cplusplus
 extern "C" {
@@ -131,6 +135,3 @@ void DT_Dispatch(const DT_Msg_t *cmd);
 #endif
 
 #endif
-
-
-

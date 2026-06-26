@@ -17,17 +17,17 @@ public:
      * The activate function is called automatically when this screen is "switched in"
      * (ie. made active). Initialization logic can be placed here.
      */
-    virtual void activate();
+    virtual void activate() override;
 
     /**
      * The deactivate function is called automatically when this screen is "switched out"
      * (ie. made inactive). Teardown functionality can be placed here.
      */
-    virtual void deactivate();
+    virtual void deactivate() override;
 
     virtual ~Screen_LOGPresenter() {}
     Model * getModel();
-    virtual void onKeyPressed(uint8_t keyId);
+    virtual void onKeyPressed(uint8_t keyId) override;
     virtual void onNotifyLogText(uint8_t code, uint8_t param) override;
 
 private:
@@ -37,4 +37,5 @@ private:
 };
 
 #endif // SCREEN_LOGPRESENTER_HPP
+
 

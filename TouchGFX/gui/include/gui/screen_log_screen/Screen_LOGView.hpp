@@ -22,6 +22,7 @@ public:
 
     virtual void handleKeyEvent(uint8_t key);
     virtual void handleSystemLog(uint8_t code, uint8_t param);
+    bool isFocused() const { return m_focused; }
 
 protected:
     static const uint16_t LOG_MAX_LINES = 100;
@@ -31,9 +32,12 @@ protected:
     uint16_t logBufferUsed;
     bool m_autoFollow;
     int16_t m_lastScrollY;
+    bool m_focused;
 };
 
 #endif // SCREEN_LOGVIEW_HPP
+
+
 
 
 

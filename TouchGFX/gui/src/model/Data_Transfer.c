@@ -40,6 +40,15 @@ static const int s_routeCount = sizeof(s_routeTable) / sizeof(DT_Route_t);
 
 void DT_Init(void)
 {
+    // Simulator-only runtime queue stubs (added by compatibility fix)
+    #ifdef SIMULATOR
+    if (dataTransferQueue == NULL) {
+        dataTransferQueue = osMessageQueueNew(DT_LOG_QUEUE_DEPTH, sizeof(DT_Msg_t), NULL);
+    }
+    if (guiCmdQueue == NULL) {
+        guiCmdQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
+    }
+    #endif
     // 鐩墠璺敱琛ㄤ负闈欐€佹暟缁勶紝鏃犻渶鍔ㄦ€佸垵濮嬪寲
     // 鏈潵鍙湪姝ゆ敞鍐屽姩鎬佽矾鐢?
 }
@@ -86,25 +95,32 @@ static void _DT_PutToGuiQueue(const DT_Msg_t *msg)
 
 void DT_NotifySMTStatus(uint8_t is_smt)
 {
-    DT_Msg_t msg = { .type = DT_SMT_STATUS, .data.status = is_smt };
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_SMT_STATUS;
+    msg.data.status = is_smt;
     _DT_PutToGuiQueue(&msg);
 }
 
 void DT_NotifyTemp(uint16_t temp)
 {
-    DT_Msg_t msg = { .type = DT_TEMP_CHANGE, .data.temp = temp };
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_TEMP_CHANGE;
+    msg.data.temp = temp;
     _DT_PutToGuiQueue(&msg);
 }
 
 void DT_NotifyDownloadStatus(uint8_t status)
 {
-    DT_Msg_t msg = { .type = DT_DOWNLOAD_STATUS, .data.status = status };
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_DOWNLOAD_STATUS;
+    msg.data.status = status;
     _DT_PutToGuiQueue(&msg);
 }
 
 void DT_NotifySMTProgress(uint8_t current, uint8_t total)
 {
-    DT_Msg_t msg = { .type = DT_SMT_PROGRESS };
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_SMT_PROGRESS;
     msg.data.progress.current = current;
     msg.data.progress.total   = total;
     _DT_PutToGuiQueue(&msg);
@@ -112,13 +128,15 @@ void DT_NotifySMTProgress(uint8_t current, uint8_t total)
 
 void DT_NotifyMotorResetDone(void)
 {
-    DT_Msg_t msg = { .type = DT_MOTOR_RESET_DONE };
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_MOTOR_RESET_DONE;
     _DT_PutToGuiQueue(&msg);
 }
 
 void DT_NotifyCustom(uint8_t code, uint8_t param)
 {
-    DT_Msg_t msg = { .type = DT_CUSTOM_MSG };
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_CUSTOM_MSG;
     msg.data.raw[0] = code;
     msg.data.raw[1] = param;
     _DT_PutToGuiQueue(&msg);
@@ -126,13 +144,16 @@ void DT_NotifyCustom(uint8_t code, uint8_t param)
 
 void DT_NotifyMotorSpeed(uint16_t speed)
 {
-    DT_Msg_t msg = { .type = DT_MOTOR_SPEED, .data.motor_speed = speed };
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_MOTOR_SPEED;
+    msg.data.motor_speed = speed;
     _DT_PutToGuiQueue(&msg);
 }
 
 void DT_NotifyLogText(uint8_t code, uint8_t param)
 {
-    DT_Msg_t msg = { .type = DT_LOG_TEXT };
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_LOG_TEXT;
     msg.data.tag.code = code;
     msg.data.tag.param = param;
     _DT_PutToGuiQueue(&msg);
@@ -142,15 +163,13 @@ void DT_NotifyLogText(uint8_t code, uint8_t param)
 // 姣忎釜 handler 浠呭仛鏈€灏戠殑鍙傛暟鎻愬彇 + 璋冪敤宸叉湁鐨勭郴缁熷嚱鏁般€?
 // 澶嶆潅涓氬姟閫昏緫搴斿湪鍚勮嚜鐨勪换鍔′腑瀹炵幇銆?
 
-#include "driver_motor.h"   // Motor_Init, positionMode3Run 绛?
-#include "app_motion.h"      // 杩愬姩鎺у埗鍑芥暟
+#include "driver_motor.h"
+#include "app_motion.h"
 
 static void _h_motor_move(const DT_Msg_t *msg)
 {
-    int32_t x = msg->data.move.x;
-    int32_t y = msg->data.move.y;
-    int32_t r = msg->data.move.r;
-    // TODO: 灏?x,y,r 杞崲涓烘鏁帮紝閫氳繃 motion_cmd_queue 鍙戦€佺粰 MotionTask_Func
+    (void)msg;
+    // TODO: 灏?x,y,r 杞换涓烘ラ帮紝閫氳繃 motion_cmd_queue 鍙戦€佺粰 MotionTask_Func
     // 绀轰緥锛歁otionCmd_t cmd = { .cmd_type = MOTION_CMD_MOVE_TO, .target_x = x, ... };
     // osMessageQueuePut(motion_cmd_queue, &cmd, 0, 0);
 }
@@ -179,8 +198,8 @@ static void _h_smt_pause(const DT_Msg_t *msg)
 
 static void _h_heater_set(const DT_Msg_t *msg)
 {
-    uint16_t temp = msg->data.temp;
-    // TODO: 閫氳繃 CAN 鍙戦€佹俯搴﹁缃懡浠ゅ埌鍔犵儹鍙帮紙CAN ID 0x10锛?
+    (void)msg;
+    // TODO: 閫氳繃 CAN 鍙戦€佹俯搴辰缃懡浠ゅ埌鍔犵儹鍙帮紙CAN ID 0x10锛?
     // 鍙傝€?Drivers/ZeMCU-G4/driver_heater.c
 }
 
@@ -211,4 +230,5 @@ void smt_Start(void)
 {
     // TODO: 鍚姩璐寸墖娴佺▼锛堢敱璐寸墖浠诲姟瀹炵幇锛?
 }
+
 

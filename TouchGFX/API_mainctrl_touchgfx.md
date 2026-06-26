@@ -116,7 +116,18 @@ DT_CMD_CUSTOM
 4. **主控端不要直接访问 TouchGFX View/Presenter/Widget**。
 5. **坐标、温度、进度、速度均使用整数单位**，避免浮点进队列。
 
+### WiFi 状态
+- 主控端通知 WiFi 连接状态使用：
+```c
+DT_NotifyWifiStatus(connected);  // connected: 0=断开, 1=已连接
+```
+- GUI `Screen_WIFI` / `PageTable` 会切换对应图标（`wifi_disc` / `wifi_connected` / 选中态）
+
+> 注意：`DT_NotifyWifiStatus` 尚未在 `Data_Transfer.c` 中实现，需要主控端 AI 或 GUI 端 AI 补充消息类型 `DT_WIFI_STATUS` 及对应 handler。
+
 ## 7. 当前未完成项（留给主控端 AI）
 
 - `Data_Transfer.c` 中 7 个 GUI→System handler 仍是 TODO 占位。
 - 主控端需要补实际动作函数后，再让 `DT_Dispatch()` 真正触发系统行为。
+- 需要新增 `DT_WIFI_STATUS` 消息类型及 `DT_NotifyWifiStatus()` 接口函数。
+

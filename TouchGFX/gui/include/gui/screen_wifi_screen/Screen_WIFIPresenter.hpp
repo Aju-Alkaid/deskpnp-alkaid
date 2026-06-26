@@ -1,17 +1,17 @@
-﻿#ifndef SCREEN_IMPORTPRESENTER_HPP
-#define SCREEN_IMPORTPRESENTER_HPP
+﻿#ifndef SCREEN_WIFIPRESENTER_HPP
+#define SCREEN_WIFIPRESENTER_HPP
 
 #include <gui/model/ModelListener.hpp>
 #include <mvp/Presenter.hpp>
 
 using namespace touchgfx;
 
-class Screen_IMPORTView;
+class Screen_WIFIView;
 
-class Screen_IMPORTPresenter : public touchgfx::Presenter, public ModelListener
+class Screen_WIFIPresenter : public touchgfx::Presenter, public ModelListener
 {
 public:
-    Screen_IMPORTPresenter(Screen_IMPORTView& v);
+    Screen_WIFIPresenter(Screen_WIFIView& v);
 
     /**
      * The activate function is called automatically when this screen is "switched in"
@@ -25,15 +25,13 @@ public:
      */
     virtual void deactivate() override;
 
-    virtual ~Screen_IMPORTPresenter() {}
-    Model * getModel();
-    virtual void onKeyPressed(uint8_t keyId) override;
+    virtual ~Screen_WIFIPresenter() {}
 
 private:
-    Screen_IMPORTPresenter();
+    Screen_WIFIPresenter();
 
-    Screen_IMPORTView& view;
+    Screen_WIFIView& view;
 };
 
-#endif // SCREEN_IMPORTPRESENTER_HPP
+#endif // SCREEN_WIFIPRESENTER_HPP
 
