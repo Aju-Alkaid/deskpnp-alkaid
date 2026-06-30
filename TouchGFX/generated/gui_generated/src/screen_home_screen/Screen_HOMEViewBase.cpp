@@ -62,33 +62,3 @@ void Screen_HOMEViewBase::setupScreen()
     Progress1.initialize();
     pageTable.initialize();
 }
-
-void Screen_HOMEViewBase::handleKeyEvent(uint8_t key)
-{
-    if(9 == key)
-    {
-        //Interaction1
-        //When hardware button 9 clicked change screen to Screen_IMPORT
-        //Go to Screen_IMPORT with no screen transition
-        application().gotoScreen_IMPORTScreenNoTransition();
-    
-    }
-
-    if(10 == key)
-    {
-        //Interaction2
-        //When hardware button 10 clicked change screen to Screen_LOG
-        //Go to Screen_LOG with no screen transition
-        application().gotoScreen_LOGScreenNoTransition();
-    
-    }
-
-    if(11 == key)
-    {
-        //Interaction3
-        //When hardware button 11 clicked change screen to Screen_RESET
-        //Go to Screen_RESET with no screen transition
-        application().gotoScreen_RESETScreenNoTransition();
-    
-    }
-}

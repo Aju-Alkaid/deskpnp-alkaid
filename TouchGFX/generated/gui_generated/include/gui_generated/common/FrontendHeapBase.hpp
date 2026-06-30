@@ -18,8 +18,6 @@
 #include <gui/screen_import_screen/Screen_IMPORTPresenter.hpp>
 #include <gui/screen_log_screen/Screen_LOGView.hpp>
 #include <gui/screen_log_screen/Screen_LOGPresenter.hpp>
-#include <gui/screen_reset_screen/Screen_RESETView.hpp>
-#include <gui/screen_reset_screen/Screen_RESETPresenter.hpp>
 #include <gui/screen_wifi_screen/Screen_WIFIView.hpp>
 #include <gui/screen_wifi_screen/Screen_WIFIPresenter.hpp>
 
@@ -47,9 +45,8 @@ public:
     typedef touchgfx::meta::TypeList< Screen_HOMEView,
             touchgfx::meta::TypeList< Screen_IMPORTView,
             touchgfx::meta::TypeList< Screen_LOGView,
-            touchgfx::meta::TypeList< Screen_RESETView,
             touchgfx::meta::TypeList< Screen_WIFIView,
-            touchgfx::meta::Nil > > > >
+            touchgfx::meta::Nil > > >
             > GeneratedViewTypes;
 
     /**
@@ -64,9 +61,8 @@ public:
     typedef touchgfx::meta::TypeList< Screen_HOMEPresenter,
             touchgfx::meta::TypeList< Screen_IMPORTPresenter,
             touchgfx::meta::TypeList< Screen_LOGPresenter,
-            touchgfx::meta::TypeList< Screen_RESETPresenter,
             touchgfx::meta::TypeList< Screen_WIFIPresenter,
-            touchgfx::meta::Nil > > > >
+            touchgfx::meta::Nil > > >
             > GeneratedPresenterTypes;
 
     /**

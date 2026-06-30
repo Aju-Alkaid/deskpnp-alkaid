@@ -5,6 +5,7 @@
 #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
 #include <touchgfx/Color.hpp>
 #include <texts/TextKeysAndLanguages.hpp>
+#include <images/BitmapDatabase.hpp>
 
 Screen_WIFIViewBase::Screen_WIFIViewBase()
 {
@@ -26,6 +27,21 @@ Screen_WIFIViewBase::Screen_WIFIViewBase()
 
     pageTable.setXY(0, 0);
     add(pageTable);
+
+    ON.setXY(298, 125);
+    ON.setBitmap(touchgfx::Bitmap(BITMAP_ALTERNATE_THEME_IMAGES_WIDGETS_RADIOBUTTON_CHECK_LARGE_ROUNDED_OFF_PRESSED_ID));
+    ON.setVisible(false);
+    add(ON);
+
+    OFF.setXY(298, 125);
+    OFF.setBitmap(touchgfx::Bitmap(BITMAP_ALTERNATE_THEME_IMAGES_WIDGETS_RADIOBUTTON_CHECK_LARGE_ROUNDED_OFF_ID));
+    add(OFF);
+
+    keyGuide.setXY(118, 136);
+    keyGuide.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+    keyGuide.setLinespacing(0);
+    keyGuide.setTypedText(touchgfx::TypedText(T___SINGLEUSE_OHMQ));
+    add(keyGuide);
 }
 
 Screen_WIFIViewBase::~Screen_WIFIViewBase()

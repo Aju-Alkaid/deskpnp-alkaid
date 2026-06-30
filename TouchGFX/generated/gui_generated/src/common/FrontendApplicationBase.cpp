@@ -14,8 +14,6 @@
 #include <gui/screen_import_screen/Screen_IMPORTPresenter.hpp>
 #include <gui/screen_log_screen/Screen_LOGView.hpp>
 #include <gui/screen_log_screen/Screen_LOGPresenter.hpp>
-#include <gui/screen_reset_screen/Screen_RESETView.hpp>
-#include <gui/screen_reset_screen/Screen_RESETPresenter.hpp>
 #include <gui/screen_wifi_screen/Screen_WIFIView.hpp>
 #include <gui/screen_wifi_screen/Screen_WIFIPresenter.hpp>
 
@@ -46,43 +44,4 @@ void FrontendApplicationBase::gotoScreen_HOMEScreenNoTransition()
 void FrontendApplicationBase::gotoScreen_HOMEScreenNoTransitionImpl()
 {
     touchgfx::makeTransition<Screen_HOMEView, Screen_HOMEPresenter, touchgfx::NoTransition, Model >(&currentScreen, &currentPresenter, frontendHeap, &currentTransition, &model);
-}
-
-// Screen_IMPORT
-
-void FrontendApplicationBase::gotoScreen_IMPORTScreenNoTransition()
-{
-    transitionCallback = touchgfx::Callback<FrontendApplicationBase>(this, &FrontendApplicationBase::gotoScreen_IMPORTScreenNoTransitionImpl);
-    pendingScreenTransitionCallback = &transitionCallback;
-}
-
-void FrontendApplicationBase::gotoScreen_IMPORTScreenNoTransitionImpl()
-{
-    touchgfx::makeTransition<Screen_IMPORTView, Screen_IMPORTPresenter, touchgfx::NoTransition, Model >(&currentScreen, &currentPresenter, frontendHeap, &currentTransition, &model);
-}
-
-// Screen_LOG
-
-void FrontendApplicationBase::gotoScreen_LOGScreenNoTransition()
-{
-    transitionCallback = touchgfx::Callback<FrontendApplicationBase>(this, &FrontendApplicationBase::gotoScreen_LOGScreenNoTransitionImpl);
-    pendingScreenTransitionCallback = &transitionCallback;
-}
-
-void FrontendApplicationBase::gotoScreen_LOGScreenNoTransitionImpl()
-{
-    touchgfx::makeTransition<Screen_LOGView, Screen_LOGPresenter, touchgfx::NoTransition, Model >(&currentScreen, &currentPresenter, frontendHeap, &currentTransition, &model);
-}
-
-// Screen_RESET
-
-void FrontendApplicationBase::gotoScreen_RESETScreenNoTransition()
-{
-    transitionCallback = touchgfx::Callback<FrontendApplicationBase>(this, &FrontendApplicationBase::gotoScreen_RESETScreenNoTransitionImpl);
-    pendingScreenTransitionCallback = &transitionCallback;
-}
-
-void FrontendApplicationBase::gotoScreen_RESETScreenNoTransitionImpl()
-{
-    touchgfx::makeTransition<Screen_RESETView, Screen_RESETPresenter, touchgfx::NoTransition, Model >(&currentScreen, &currentPresenter, frontendHeap, &currentTransition, &model);
 }

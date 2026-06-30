@@ -33,7 +33,8 @@ static DT_Route_t s_routeTable[] = {
     { DT_CMD_SMT_PAUSE,    _h_smt_pause,        NULL },
     { DT_CMD_HEATER_SET,   _h_heater_set,       NULL },
     { DT_CMD_SYSTEM_RESET, _h_system_reset,     NULL },
-    { DT_CMD_CUSTOM,       NULL,                NULL },  // 棰勭暀锛岀敱 Model 鑷澶勭悊
+    { DT_CMD_CUSTOM,       NULL,                NULL },
+    { DT_CMD_WIFI_CTRL,    NULL,                NULL },  // 棰勭暀锛岀敱 Model 鑷澶勭悊
 };
 
 static const int s_routeCount = sizeof(s_routeTable) / sizeof(DT_Route_t);
