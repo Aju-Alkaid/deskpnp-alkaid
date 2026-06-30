@@ -19,10 +19,18 @@ public:
         FrontendApplicationBase::handleTickEvent();
     }
 
-    // WIFI 页面跳转（Designer 未自动生成，手动添加）
+    // Designer 未自动生成的页面跳转，手动添加
+    void gotoScreen_IMPORTScreenNoTransition();
+    void gotoScreen_LOGScreenNoTransition();
     void gotoScreen_WIFIScreenNoTransition();
+
+protected:
+    void gotoScreen_IMPORTScreenNoTransitionImpl();
+    void gotoScreen_LOGScreenNoTransitionImpl();
     void gotoScreen_WIFIScreenNoTransitionImpl();
 
+    touchgfx::Callback<FrontendApplication> transitionCallbackIMPORT;
+    touchgfx::Callback<FrontendApplication> transitionCallbackLOG;
     touchgfx::Callback<FrontendApplication> transitionCallbackWIFI;
 private:
 };

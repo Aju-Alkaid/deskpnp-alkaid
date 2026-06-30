@@ -10,6 +10,7 @@
 #include <touchgfx/widgets/Box.hpp>
 #include <touchgfx/widgets/TextArea.hpp>
 #include <gui/containers/PageTable.hpp>
+#include <touchgfx/widgets/Image.hpp>
 
 class Screen_WIFIViewBase : public touchgfx::View<Screen_WIFIPresenter>
 {
@@ -48,6 +49,9 @@ protected:
     touchgfx::Box box1;
     touchgfx::TextArea WIFI;
     PageTable pageTable;
+    touchgfx::Image ON;
+    touchgfx::Image OFF;
+    touchgfx::TextArea keyGuide;
 
 private:
 

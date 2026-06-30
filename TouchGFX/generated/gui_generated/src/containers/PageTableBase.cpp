@@ -22,10 +22,6 @@ PageTableBase::PageTableBase()
     line1_1.setLineEndingStyle(touchgfx::Line::SQUARE_CAP_ENDING);
     add(line1_1);
 
-    refre.setXY(6, 156);
-    refre.setBitmap(touchgfx::Bitmap(BITMAP_REFRE_ID));
-    add(refre);
-
     home.setXY(6, 6);
     home.setBitmap(touchgfx::Bitmap(BITMAP_HOME_ID));
     add(home);
@@ -38,19 +34,14 @@ PageTableBase::PageTableBase()
     log.setBitmap(touchgfx::Bitmap(BITMAP_MESSAGE_ID));
     add(log);
 
-    wifi_disc.setXY(6, 206);
+    wifi_disc.setXY(6, 156);
     wifi_disc.setBitmap(touchgfx::Bitmap(BITMAP_WIFI_DISC_ID));
     add(wifi_disc);
 
-    wifi_connected.setXY(6, 206);
+    wifi_connected.setXY(6, 156);
     wifi_connected.setBitmap(touchgfx::Bitmap(BITMAP_WIFI_CONNECTED_ID));
     wifi_connected.setVisible(false);
     add(wifi_connected);
-
-    refre_selc.setXY(6, 156);
-    refre_selc.setBitmap(touchgfx::Bitmap(BITMAP_REFRE_SELECTED_ID));
-    refre_selc.setVisible(false);
-    add(refre_selc);
 
     home_selc.setXY(6, 6);
     home_selc.setBitmap(touchgfx::Bitmap(BITMAP_HOME_SELECTED_ID));
@@ -67,12 +58,12 @@ PageTableBase::PageTableBase()
     log_selc.setVisible(false);
     add(log_selc);
 
-    wifi_connected_selc.setXY(6, 206);
+    wifi_connected_selc.setXY(6, 156);
     wifi_connected_selc.setBitmap(touchgfx::Bitmap(BITMAP_WIFI_CONNECTED_SELECTED_ID));
     wifi_connected_selc.setVisible(false);
     add(wifi_connected_selc);
 
-    wifi_disc_selc.setXY(6, 206);
+    wifi_disc_selc.setXY(6, 156);
     wifi_disc_selc.setBitmap(touchgfx::Bitmap(BITMAP_WIFI_DISC_SELECTED_ID));
     wifi_disc_selc.setVisible(false);
     add(wifi_disc_selc);

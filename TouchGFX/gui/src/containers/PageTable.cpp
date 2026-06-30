@@ -1,13 +1,9 @@
-﻿#include <gui/containers/PageTable.hpp>
+#include <gui/containers/PageTable.hpp>
 #include "key.h"
 #include <gui/common/FrontendApplication.hpp>
 #include <gui/model/Data_Transfer.h>
 
 PageTable::PageTable()
-    : refreState(REFRE_NORMAL)
-    , pCaution(0)
-    , pReseting(0)
-    , pResetDone(0)
 {
 }
 
@@ -34,22 +30,15 @@ void PageTable::blinkImport_selc()
     import_selc.invalidate();
 }
 
-void PageTable::blinkRefre_selc()
-{
-    refre_selc.setVisible(!refre_selc.isVisible());
-    refre_selc.invalidate();
-}
-
 void PageTable::updateDetail()
 {
     // TODO: detail1 widget is missing in current UI generator output
-    // detail1.invalidate();
 }
 
 void PageTable::setWifiConnected(bool connected)
 {
     wifi_state = connected;
-    applyWifiIcon(page_cnt == 4);
+    applyWifiIcon(page_cnt == 3);
 }
 
 void PageTable::applyWifiIcon(bool selected)
@@ -80,10 +69,6 @@ void PageTable::updateSelection(bool flag, uint8_t page)
             log_selc.invalidate();
         }
         if(page == 3){
-            refre_selc.setVisible(true);
-            refre_selc.invalidate();
-        }
-        if(page == 4){
             applyWifiIcon(true);
         }
     }
@@ -101,10 +86,6 @@ void PageTable::updateSelection(bool flag, uint8_t page)
             log_selc.invalidate();
         }
         if(page == 3){
-            refre_selc.setVisible(false);
-            refre_selc.invalidate();
-        }
-        if(page == 4){
             applyWifiIcon(false);
         }
     }
@@ -113,101 +94,35 @@ void PageTable::updateSelection(bool flag, uint8_t page)
 void PageTable::handleKey(uint8_t key)
 {
     last_page_cnt = page_cnt;
-		switch(key){
-			case KEY_DOWN:
-        page_cnt = (page_cnt + 1) % PAGE_COUNT;
-        updateSelection(1, page_cnt);
-        updateSelection(0, last_page_cnt);
-				break;
-      case KEY_UP:
-        page_cnt = (page_cnt + PAGE_COUNT - 1) % PAGE_COUNT;
-        updateSelection(1, page_cnt);
-        updateSelection(0, last_page_cnt);
-				break;
-			case KEY_KEY1:
-        updateDetail();
-				break;
-			case KEY_KEY2:
-        switch (page_cnt) {
-        case 0:
-            static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_HOMEScreenNoTransition();
+    switch(key){
+        case KEY_DOWN:
+            page_cnt = (page_cnt + 1) % PAGE_COUNT;
+            updateSelection(1, page_cnt);
+            updateSelection(0, last_page_cnt);
             break;
-        case 1:
-            static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_IMPORTScreenNoTransition();
+        case KEY_UP:
+            page_cnt = (page_cnt + PAGE_COUNT - 1) % PAGE_COUNT;
+            updateSelection(1, page_cnt);
+            updateSelection(0, last_page_cnt);
             break;
-        case 2:
-            static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_LOGScreenNoTransition();
+        case KEY_KEY1:
+            updateDetail();
             break;
-        case 3:
-            static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_RESETScreenNoTransition();
-            break;
-        case 4:
-            static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_WIFIScreenNoTransition();
-            break;
-        }
-				break;
-    }
-}
-
-void PageTable::setRefreWidgets(touchgfx::TextArea& caution,
-                                 touchgfx::TextArea& reseting,
-                                 touchgfx::TextArea& resetDone)
-{
-    pCaution   = &caution;
-    pReseting  = &reseting;
-    pResetDone = &resetDone;
-}
-
-void PageTable::refre_handleKey(uint8_t key)
-{
-    if (key == KEY_DOWN) {
-        static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_HOMEScreenNoTransition();
-
-    } else if (key == KEY_UP) {
-        if (!pCaution || !pReseting) return;
-
-        pCaution->setVisible(false);
-        pCaution->invalidate();
-
-        pReseting->setVisible(true);
-        pReseting->invalidate();
-
-        motorReset_Start();
-        refreState = REFRE_RESETING;
-
-    } else if (key == KEY_KEY1) {
-        updateDetail();
-    }
-}
-
-void PageTable::refre_tick()
-{
-    switch (refreState) {
-    case REFRE_RESETING:
-        if (motorReset_IsDone()) {
-            if (pReseting) {
-                pReseting->setVisible(false);
-                pReseting->invalidate();
+        case KEY_KEY2:
+            switch (page_cnt) {
+            case 0:
+                static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_HOMEScreenNoTransition();
+                break;
+            case 1:
+                static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_IMPORTScreenNoTransition();
+                break;
+            case 2:
+                static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_LOGScreenNoTransition();
+                break;
+            case 3:
+                static_cast<FrontendApplication*>(touchgfx::Application::getInstance())->gotoScreen_WIFIScreenNoTransition();
+                break;
             }
-            if (pResetDone) {
-                pResetDone->setVisible(true);
-                pResetDone->invalidate();
-            }
-            refreState = REFRE_DONE;
-        }
-        break;
-
-    case REFRE_DONE:
-        break;
-
-    case REFRE_NORMAL:
-    default:
-        break;
+            break;
     }
 }
-
-void PageTable::motorReset()
-{
-    motorReset_Start();
-}
-

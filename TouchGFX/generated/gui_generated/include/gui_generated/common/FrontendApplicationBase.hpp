@@ -23,15 +23,6 @@ public:
     // Screen_HOME
     void gotoScreen_HOMEScreenNoTransition();
 
-    // Screen_IMPORT
-    void gotoScreen_IMPORTScreenNoTransition();
-
-    // Screen_LOG
-    void gotoScreen_LOGScreenNoTransition();
-
-    // Screen_RESET
-    void gotoScreen_RESETScreenNoTransition();
-
 protected:
     touchgfx::Callback<FrontendApplicationBase> transitionCallback;
     FrontendHeap& frontendHeap;
@@ -39,15 +30,6 @@ protected:
 
     // Screen_HOME
     void gotoScreen_HOMEScreenNoTransitionImpl();
-
-    // Screen_IMPORT
-    void gotoScreen_IMPORTScreenNoTransitionImpl();
-
-    // Screen_LOG
-    void gotoScreen_LOGScreenNoTransitionImpl();
-
-    // Screen_RESET
-    void gotoScreen_RESETScreenNoTransitionImpl();
 };
 
 #endif // FRONTENDAPPLICATIONBASE_HPP

@@ -29,13 +29,11 @@ protected:
     touchgfx::Box box1;
     touchgfx::Line line1_1;
     touchgfx::PainterBW line1_1Painter;
-    touchgfx::Image refre;
     touchgfx::Image home;
     touchgfx::Image import;
     touchgfx::Image log;
     touchgfx::Image wifi_disc;
     touchgfx::Image wifi_connected;
-    touchgfx::Image refre_selc;
     touchgfx::Image home_selc;
     touchgfx::Image import_selc;
     touchgfx::Image log_selc;

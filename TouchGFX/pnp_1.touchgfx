@@ -23,7 +23,7 @@
             "Name": "HOME",
             "X": 60,
             "Width": 66,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_G70R",
             "TextRotation": "0",
             "AutoSize": true
@@ -34,7 +34,7 @@
             "X": 60,
             "Y": 265,
             "Width": 155,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_2QJ5",
             "TextRotation": "0",
             "AutoSize": true,
@@ -45,7 +45,7 @@
             "Name": "temperature",
             "X": 265,
             "Width": 135,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_SYMX",
             "TextRotation": "0",
             "AutoSize": true,
@@ -77,51 +77,14 @@
             "X": 60,
             "Y": 237,
             "Width": 94,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_TDMH",
             "TextRotation": "0",
             "AutoSize": true,
             "Wildcard1": {}
           }
         ],
-        "Interactions": [
-          {
-            "InteractionName": "Interaction1",
-            "Trigger": {
-              "Type": "TriggerPhysicalButtonClicked",
-              "ButtonKey": 9
-            },
-            "Action": {
-              "Type": "ActionGotoScreen",
-              "ScreenTransitionType": "ScreenTransitionNone",
-              "ActionComponent": "Screen_IMPORT"
-            }
-          },
-          {
-            "InteractionName": "Interaction2",
-            "Trigger": {
-              "Type": "TriggerPhysicalButtonClicked",
-              "ButtonKey": 10
-            },
-            "Action": {
-              "Type": "ActionGotoScreen",
-              "ScreenTransitionType": "ScreenTransitionNone",
-              "ActionComponent": "Screen_LOG"
-            }
-          },
-          {
-            "InteractionName": "Interaction3",
-            "Trigger": {
-              "Type": "TriggerPhysicalButtonClicked",
-              "ButtonKey": 11
-            },
-            "Action": {
-              "Type": "ActionGotoScreen",
-              "ScreenTransitionType": "ScreenTransitionNone",
-              "ActionComponent": "Screen_RESET"
-            }
-          }
-        ]
+        "Interactions": []
       },
       {
         "Name": "Screen_IMPORT",
@@ -145,7 +108,7 @@
             "Name": "IMPORT",
             "X": 60,
             "Width": 82,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_C4NX",
             "TextRotation": "0",
             "AutoSize": true
@@ -163,7 +126,7 @@
             "X": 153,
             "Y": 50,
             "Width": 165,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_YVVQ",
             "TextRotation": "0",
             "AutoSize": true
@@ -174,7 +137,7 @@
             "X": 153,
             "Y": 78,
             "Width": 118,
-            "Height": 31,
+            "Height": 28,
             "Visible": false,
             "TextId": "__SingleUse_F9WI",
             "TextRotation": "0",
@@ -186,7 +149,7 @@
             "X": 153,
             "Y": 106,
             "Width": 137,
-            "Height": 93,
+            "Height": 84,
             "Visible": false,
             "TextId": "__SingleUse_KF87",
             "TextRotation": "0",
@@ -269,83 +232,6 @@
         "Interactions": []
       },
       {
-        "Name": "Screen_RESET",
-        "CanvasBufferSize": 6000,
-        "Components": [
-          {
-            "Type": "Box",
-            "Name": "box1",
-            "X": 59,
-            "Width": 342,
-            "Height": 300,
-            "LockPosition": true,
-            "Color": {
-              "Red": 255,
-              "Green": 255,
-              "Blue": 255
-            }
-          },
-          {
-            "Type": "TextArea",
-            "Name": "caution",
-            "X": 77,
-            "Width": 305,
-            "Height": 186,
-            "TextId": "__SingleUse_3GH9",
-            "TextRotation": "0",
-            "AutoSize": true
-          },
-          {
-            "Type": "CustomContainerInstance",
-            "Name": "pageTable",
-            "Width": 59,
-            "Height": 300,
-            "CustomContainerDefinitionName": "PageTable"
-          },
-          {
-            "Type": "TextArea",
-            "Name": "Reseting",
-            "X": 77,
-            "Y": 56,
-            "Width": 103,
-            "Height": 31,
-            "Visible": false,
-            "TextId": "__SingleUse_FQ8H",
-            "TextRotation": "0",
-            "AutoSize": true
-          },
-          {
-            "Type": "TextArea",
-            "Name": "Reset_done",
-            "X": 77,
-            "Y": 56,
-            "Width": 176,
-            "Height": 93,
-            "Visible": false,
-            "TextId": "__SingleUse_2LX0",
-            "TextRotation": "0",
-            "AutoSize": true
-          }
-        ],
-        "Interactions": [
-          {
-            "InteractionName": "Interaction1",
-            "Trigger": {
-              "Type": "TriggerPhysicalButtonClicked"
-            },
-            "Action": {
-              "Type": "ActionCustom",
-              "FunctionName": "refresh_all_motors"
-            }
-          }
-        ],
-        "CustomActions": [
-          {
-            "Name": "refresh_motors"
-          }
-        ]
-      },
-      {
         "Name": "Screen_WIFI",
         "CanvasBufferSize": 6000,
         "Components": [
@@ -367,7 +253,7 @@
             "Name": "WIFI",
             "X": 60,
             "Width": 44,
-            "Height": 31,
+            "Height": 28,
             "TextId": "__SingleUse_1F5Z",
             "TextRotation": "0",
             "AutoSize": true
@@ -378,6 +264,36 @@
             "Width": 59,
             "Height": 300,
             "CustomContainerDefinitionName": "PageTable"
+          },
+          {
+            "Type": "Image",
+            "Name": "ON",
+            "X": 298,
+            "Y": 125,
+            "Width": 50,
+            "Height": 50,
+            "Visible": false,
+            "RelativeFilename": "__generated\\alternate_theme_images_widgets_radiobutton_check_large_rounded_off_pressed.png"
+          },
+          {
+            "Type": "Image",
+            "Name": "OFF",
+            "X": 298,
+            "Y": 125,
+            "Width": 50,
+            "Height": 50,
+            "RelativeFilename": "__generated\\alternate_theme_images_widgets_radiobutton_check_large_rounded_off.png"
+          },
+          {
+            "Type": "TextArea",
+            "Name": "keyGuide",
+            "X": 118,
+            "Y": 136,
+            "Width": 144,
+            "Height": 28,
+            "TextId": "__SingleUse_OHMQ",
+            "TextRotation": "0",
+            "AutoSize": true
           }
         ],
         "Interactions": [
@@ -430,15 +346,6 @@
           },
           {
             "Type": "Image",
-            "Name": "refre",
-            "X": 6,
-            "Y": 156,
-            "Width": 44,
-            "Height": 44,
-            "RelativeFilename": "refre.png"
-          },
-          {
-            "Type": "Image",
             "Name": "home",
             "X": 6,
             "Y": 6,
@@ -468,7 +375,7 @@
             "Type": "Image",
             "Name": "wifi_disc",
             "X": 6,
-            "Y": 206,
+            "Y": 156,
             "Width": 44,
             "Height": 44,
             "RelativeFilename": "wifi_disc.png"
@@ -477,21 +384,11 @@
             "Type": "Image",
             "Name": "wifi_connected",
             "X": 6,
-            "Y": 206,
-            "Width": 44,
-            "Height": 44,
-            "Visible": false,
-            "RelativeFilename": "wifi_connected.png"
-          },
-          {
-            "Type": "Image",
-            "Name": "refre_selc",
-            "X": 6,
             "Y": 156,
             "Width": 44,
             "Height": 44,
             "Visible": false,
-            "RelativeFilename": "refre_selected.png"
+            "RelativeFilename": "wifi_connected.png"
           },
           {
             "Type": "Image",
@@ -527,7 +424,7 @@
             "Type": "Image",
             "Name": "wifi_connected_selc",
             "X": 6,
-            "Y": 206,
+            "Y": 156,
             "Width": 44,
             "Height": 44,
             "Visible": false,
@@ -537,7 +434,7 @@
             "Type": "Image",
             "Name": "wifi_disc_selc",
             "X": 6,
-            "Y": 206,
+            "Y": 156,
             "Width": 44,
             "Height": 44,
             "Visible": false,

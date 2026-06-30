@@ -60,6 +60,7 @@ typedef enum {
     DT_CMD_HEATER_SET   = 0x15, // 设置加热台温度
     DT_CMD_SYSTEM_RESET = 0x16, // 系统软复位
     DT_CMD_CUSTOM       = 0x1F, // 自定义命令
+    DT_CMD_WIFI_CTRL    = 0x17, // WiFi 开关控制（data.status: 0=关, 1=开）
 } DT_MsgType_t;
 
 // ======================== 统一消息体 ========================

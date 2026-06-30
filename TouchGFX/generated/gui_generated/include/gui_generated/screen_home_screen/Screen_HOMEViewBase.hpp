@@ -19,7 +19,6 @@ public:
     Screen_HOMEViewBase();
     virtual ~Screen_HOMEViewBase();
     virtual void setupScreen();
-    virtual void handleKeyEvent(uint8_t key);
 
 protected:
     FrontendApplication& application() {

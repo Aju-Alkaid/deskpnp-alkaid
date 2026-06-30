@@ -1,0 +1,2390 @@
+From 5bc7ac80a1ca6bd5b0e53a22aa5e1c6bb9926e0b Mon Sep 17 00:00:00 2001
+From: Alkaid0516 <2958461771@qq.com>
+Date: Wed, 24 Jun 2026 08:58:44 +0800
+Subject: [PATCH 1/2] =?UTF-8?q?=E5=88=9D=E7=89=88patch=EF=BC=8C=E5=B0=9A?=
+ =?UTF-8?q?=E6=9C=AA=E9=AA=8C=E8=AF=81=E5=8F=AF=E8=A1=8C=E6=80=A7?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+---
+ AGENTS.md                                     | 141 +++++++--------
+ MDK-ARM/pnp_1.uvprojx                         |  26 +--
+ TouchGFX/API_mainctrl_touchgfx.md             | 122 +++++++++++++
+ TouchGFX/README_touchgfx.md                   | 116 ++++++++++++
+ TouchGFX/assets/texts/texts.xml               |  19 +-
+ .../containers/PageTableBase.hpp              |   2 -
+ .../gui_generated/containers/detailBase.hpp   |  41 -----
+ .../Screen_HOMEViewBase.hpp                   |   4 +-
+ .../Screen_IMPORTViewBase.hpp                 |   2 -
+ .../screen_log_screen/Screen_LOGViewBase.hpp  |   2 -
+ .../Screen_RESETViewBase.hpp                  |   2 -
+ .../src/containers/PageTableBase.cpp          |   6 +-
+ .../src/containers/detailBase.cpp             |  58 ------
+ .../Screen_HOMEViewBase.cpp                   |  17 +-
+ .../Screen_IMPORTViewBase.cpp                 |   5 -
+ .../screen_log_screen/Screen_LOGViewBase.cpp  |   5 -
+ .../Screen_RESETViewBase.cpp                  |   5 -
+ .../texts/cache/LanguageCpp_Gb.cache          |   2 +-
+ .../texts/cache/TextKeysAndLanguages.cache    |   2 +-
+ TouchGFX/generated/texts/cache/TextsCpp.cache |   2 +-
+ .../texts/cache/TypedTextDatabaseCpp.cache    |   2 +-
+ .../include/texts/TextKeysAndLanguages.hpp    |   6 +-
+ TouchGFX/generated/texts/src/LanguageGb.cpp   |  30 ++--
+ TouchGFX/generated/texts/src/Texts.cpp        |  24 ++-
+ .../generated/texts/src/TypedTextDatabase.cpp |   6 +-
+ .../gui/include/gui/containers/detail.hpp     |  16 --
+ .../gui/include/gui/model/Data_Transfer.h     |  20 ++-
+ .../gui/include/gui/model/ModelListener.hpp   |   4 +-
+ .../Screen_HOMEPresenter.hpp                  |   5 +-
+ .../screen_home_screen/Screen_HOMEView.hpp    |  14 +-
+ .../screen_log_screen/Screen_LOGPresenter.hpp |   4 +-
+ .../gui/screen_log_screen/Screen_LOGView.hpp  |  15 +-
+ TouchGFX/gui/src/containers/detail.cpp        |  11 --
+ TouchGFX/gui/src/model/Data_Transfer.c        |  91 ++++++----
+ TouchGFX/gui/src/model/Model.cpp              |  51 +++---
+ .../Screen_HOMEPresenter.cpp                  |  15 +-
+ .../screen_home_screen/Screen_HOMEView.cpp    |  54 ++++--
+ .../screen_log_screen/Screen_LOGPresenter.cpp |  11 +-
+ .../src/screen_log_screen/Screen_LOGView.cpp  |  90 +++++++++-
+ ...\273\272 DOC \346\226\207\346\241\243.doc" | Bin 0 -> 14848 bytes
+ TouchGFX/pnp_1.touchgfx                       | 166 ++++--------------
+ TouchGFX/simulator/msvs/Application.vcxproj   |   8 -
+ .../msvs/Application.vcxproj.filters          |  30 ----
+ 43 files changed, 685 insertions(+), 567 deletions(-)
+ create mode 100644 TouchGFX/API_mainctrl_touchgfx.md
+ create mode 100644 TouchGFX/README_touchgfx.md
+ delete mode 100644 TouchGFX/generated/gui_generated/include/gui_generated/containers/detailBase.hpp
+ delete mode 100644 TouchGFX/generated/gui_generated/src/containers/detailBase.cpp
+ delete mode 100644 TouchGFX/gui/include/gui/containers/detail.hpp
+ delete mode 100644 TouchGFX/gui/src/containers/detail.cpp
+ create mode 100644 "TouchGFX/gui/\346\226\260\345\273\272 DOC \346\226\207\346\241\243.doc"
+
+diff --git a/AGENTS.md b/AGENTS.md
+index ccd956c..19dc1ab 100644
+--- a/AGENTS.md
++++ b/AGENTS.md
+@@ -64,7 +64,7 @@
+ | 加热台 | CAN ID 0x04(命令) / 0x05(状态), FDCAN1 1Mbps, 共享电机 CAN 总线 |
+ | 温度传感器 | PF9 / PA3, DS18B20 |
+ | 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM) |
+-| 吸嘴气泵 | PE11 (12VO1, DRV8803 U12 OUT1 开关) |
++| 吸嘴气泵 | PE11 (12VO1, DRV8803 U12 OUT1 开关) |
+ | 下相机补光灯 | PE12 (12VO2, DRV8803 U12 OUT2 开关) |
+ | 电磁阀 | PA6 (24VO1, DRV8803 U13 OUT5, PA6=HIGH时导通 — 标准DRV8803: IN=HIGH→OUT=LOW) |
+ | BOOT0 | PB8, 启动选择 |
+@@ -129,9 +129,9 @@ pnp_1/
+   - `PUMP_ON` — 开启气泵
+   - `PUMP_OFF` — 关闭气泵 + 电磁阀吹气 1s 后关阀
+   - HEAT_ON / HEAT_OFF — 加热台启动/停止
+-  - EXIT_DEBUG_MODE — 退出调试模式
+-  - HOME — 回零（移动至原点）
+-  - VALVE_ON — 开电磁阀
++  - EXIT_DEBUG_MODE — 退出调试模式
++  - HOME — 回零（移动至原点）
++  - VALVE_ON — 开电磁阀
+   - VALVE_OFF — 关电磁阀
+   - RESUME — 从 WAIT_REFILL / ERROR 恢复
+   - ABORT — 中止当前 PnP 流程，回 HOST_DEBUG
+@@ -2991,71 +2991,71 @@ volatile bool     g_axes_error    = false; // F4/F5 0x03 堵转标志
+ - **到位阈值 50 而非更低：** 5 步（~0.05mm）会导致伺服闭环振荡不稳定。50 步（~0.5mm）兼顾到位确认与稳定性。
+ - **移除 MOVE_STOP 检测而非保留：** 运动期间 `Host_Task` 处于阻塞态，上位机无法发送需要即时响应的命令。`MOVE_STOP` 由上位机通过 JOG 状态机自行管理（`MOVE_*_START` 的第二次点击）。
+ - **坐标映射正确性：** 电机 X1/X2 控制机器垂直轴（上下），电机 Y 控制水平轴（左右）。上位机坐标系约定 X=水平、Y=垂直，与电机坐标系差 90° 旋转 + 水平轴取反：`host_x = -motor_y`，`host_y = +motor_x`。`handle_debug_cmd` 离散移动表和 JOG 方向的电机映射已确认正确，`MOVE_TO` 的 `ty` 需取反（-cmd->param）以匹配此约定。标定 SET 命令存电机坐标、读取也用电机坐标，往返闭环正确，Display 层统一转上位机坐标显示。详见 §9.17。
+-
+-
+-## 二十八、2026-06-23 会话 — 下相机补光灯 + Flash 标定数据诊断与防御
+-
+-### 28.1 12VO2 下相机补光灯
+-
+-**硬件：** 12VO2 = PE12（DRV8803 U12 芯片 IN3）。DRV8803 逻辑 IN=HIGH → OUT=LOW，PE12 高电平时 12V 输出导通。
+-
+-**新增接口**（`driver_drv8803.h`）：
+-```c
+-#define LIGHT_LOWERCAM_PORT  (&Port_12VO2)   // 12VO2/PE12 接下位相机补光灯
+-
+-static inline void LowerCam_Light_On(void)  { DRV8803_SetOutput(&Port_12VO2, true); }
+-static inline void LowerCam_Light_Off(void) { DRV8803_SetOutput(&Port_12VO2, false); }
+-```
+-
+-**使用**（`app_test.c` StartCamTestTask）：在 P3 `cam_test_run(VCMD_P3, ...)` 前开灯，结束后关灯。
+-err3_8 重试循环内灯保持开启，循环退出后关灯。当前 P3 块处于注释状态，补光灯调用以 `//` 注释保持一致。
+-
+-### 28.2 Flash 标定数据的潜在危险
+-
+-**问题：** `Calib_Load` 仅校验 magic + CRC32，不校验字段值的合理性。只要 magic 和 CRC 通过，
+-Flash 中的任何数据（包括 110° 的安全高度、0.0 的视觉系数）都会被原样加载。
+-`calib_set_defaults` 只有在 magic 不匹配或 CRC 失败时才会触发。
+-
+-**根因链：** 旧 Flash 数据中 `z_safe=110.0` 的场景：
+-1. 某次标定时舵机在 110° 位置执行了 `SET_Z_SAFE` → `g_calib.z_safe_angle = 110.0`
+-2. `SET_Z_PICK` / `SET_Z_PLACE` 从未执行，对应字段为 0.0 或旧值
+-3. `SAVE_CALIB` → 整份数据（含 110.0 / 0.0 / 0.0 + 正确 CRC）写进 Flash
+-4. 之后每次 `Calib_Load` magic+CRC 通过 → 照单全收
+-
+-**Host_Task 同样受影响：** `handle_debug_cmd` 的 JOG START 直接调用 `z_safe()`，
+-离散移动走 `safe_move_to` → `z_safe()`，都使用 `g_calib.z_safe_angle`（即 Flash 值）。
+-如果 Flash 里是 110°，Host_Task 点动时也会把舵机设到 110°，只是没有先设 78° 的对比，不易察觉。
+-
+-### 28.3 标定结构体字段与默认值
+-
+-| 字段 | 类型 | 默认值 | 说明 |
+-|------|------|--------|------|
+-| `scatter_x/y_steps` | int32_t | 0 | 散料区原点（步数） |
+-| `scatter_size_steps` | int32_t | 0 | 散料区边长（步数） |
+-| `heat_platform_x/y_min/max` | int32_t | 0 | 加热台平台区域（步数） |
+-| `bottom_cam_x/y_steps` | int32_t | 0 | 下相机位置（步数） |
+-| `cam_to_nozzle_dx/dy_steps` | int32_t | 0 | 摄像头→吸嘴偏置（步数） |
+-| `z_safe_angle` | float | 78.0f | 安全高度（°） |
+-| `z_pick_angle` | float | 116.0f | 吸取高度（°） |
+-| `z_place_angle` | float | 116.0f | 贴装高度（°） |
+-| `cam_p1_val_to_steps` | float | 3.277f | P1 上摄像头：视觉值→步数比例 |
+-| `cam_p3_val_to_steps` | float | 3.277f | P3 下摄像头：视觉值→步数比例 |
+-
+-> **重要：** `cam_p1/p3_val_to_steps` 为 0 时视觉闭环矫正完全失效——摄像头检测到偏移后乘以 0 得 0 步，电机不补偿。
+-
+-### 28.4 诊断日志
+-
+-Host_Task 和 StartCamTestTask 均在 `Calib_Load` 后输出 4 行完整标定数据诊断日志：
+-
+-```
+-[HOST] Calib: z_safe=77.9 z_pick=115.9 z_place=115.9
+-[HOST] Calib: scatter=(58880,-25600) size=37888
+-[HOST] Calib: heat=(25600,-82432)-(71680,-131072) botcam=(-103,-25650)
+-[HOST] Calib: nozzle_off=(-5991,-24988) cam_p1=-0.000 cam_p3=0.000
+-```
+-
+-零值字段 = 未标定 = 垃圾数据，非零值 = 有效。
+-
++
++
++## 二十八、2026-06-23 会话 — 下相机补光灯 + Flash 标定数据诊断与防御
++
++### 28.1 12VO2 下相机补光灯
++
++**硬件：** 12VO2 = PE12（DRV8803 U12 芯片 IN3）。DRV8803 逻辑 IN=HIGH → OUT=LOW，PE12 高电平时 12V 输出导通。
++
++**新增接口**（`driver_drv8803.h`）：
++```c
++#define LIGHT_LOWERCAM_PORT  (&Port_12VO2)   // 12VO2/PE12 接下位相机补光灯
++
++static inline void LowerCam_Light_On(void)  { DRV8803_SetOutput(&Port_12VO2, true); }
++static inline void LowerCam_Light_Off(void) { DRV8803_SetOutput(&Port_12VO2, false); }
++```
++
++**使用**（`app_test.c` StartCamTestTask）：在 P3 `cam_test_run(VCMD_P3, ...)` 前开灯，结束后关灯。
++err3_8 重试循环内灯保持开启，循环退出后关灯。当前 P3 块处于注释状态，补光灯调用以 `//` 注释保持一致。
++
++### 28.2 Flash 标定数据的潜在危险
++
++**问题：** `Calib_Load` 仅校验 magic + CRC32，不校验字段值的合理性。只要 magic 和 CRC 通过，
++Flash 中的任何数据（包括 110° 的安全高度、0.0 的视觉系数）都会被原样加载。
++`calib_set_defaults` 只有在 magic 不匹配或 CRC 失败时才会触发。
++
++**根因链：** 旧 Flash 数据中 `z_safe=110.0` 的场景：
++1. 某次标定时舵机在 110° 位置执行了 `SET_Z_SAFE` → `g_calib.z_safe_angle = 110.0`
++2. `SET_Z_PICK` / `SET_Z_PLACE` 从未执行，对应字段为 0.0 或旧值
++3. `SAVE_CALIB` → 整份数据（含 110.0 / 0.0 / 0.0 + 正确 CRC）写进 Flash
++4. 之后每次 `Calib_Load` magic+CRC 通过 → 照单全收
++
++**Host_Task 同样受影响：** `handle_debug_cmd` 的 JOG START 直接调用 `z_safe()`，
++离散移动走 `safe_move_to` → `z_safe()`，都使用 `g_calib.z_safe_angle`（即 Flash 值）。
++如果 Flash 里是 110°，Host_Task 点动时也会把舵机设到 110°，只是没有先设 78° 的对比，不易察觉。
++
++### 28.3 标定结构体字段与默认值
++
++| 字段 | 类型 | 默认值 | 说明 |
++|------|------|--------|------|
++| `scatter_x/y_steps` | int32_t | 0 | 散料区原点（步数） |
++| `scatter_size_steps` | int32_t | 0 | 散料区边长（步数） |
++| `heat_platform_x/y_min/max` | int32_t | 0 | 加热台平台区域（步数） |
++| `bottom_cam_x/y_steps` | int32_t | 0 | 下相机位置（步数） |
++| `cam_to_nozzle_dx/dy_steps` | int32_t | 0 | 摄像头→吸嘴偏置（步数） |
++| `z_safe_angle` | float | 78.0f | 安全高度（°） |
++| `z_pick_angle` | float | 116.0f | 吸取高度（°） |
++| `z_place_angle` | float | 116.0f | 贴装高度（°） |
++| `cam_p1_val_to_steps` | float | 3.277f | P1 上摄像头：视觉值→步数比例 |
++| `cam_p3_val_to_steps` | float | 3.277f | P3 下摄像头：视觉值→步数比例 |
++
++> **重要：** `cam_p1/p3_val_to_steps` 为 0 时视觉闭环矫正完全失效——摄像头检测到偏移后乘以 0 得 0 步，电机不补偿。
++
++### 28.4 诊断日志
++
++Host_Task 和 StartCamTestTask 均在 `Calib_Load` 后输出 4 行完整标定数据诊断日志：
++
++```
++[HOST] Calib: z_safe=77.9 z_pick=115.9 z_place=115.9
++[HOST] Calib: scatter=(58880,-25600) size=37888
++[HOST] Calib: heat=(25600,-82432)-(71680,-131072) botcam=(-103,-25650)
++[HOST] Calib: nozzle_off=(-5991,-24988) cam_p1=-0.000 cam_p3=0.000
++```
++
++零值字段 = 未标定 = 垃圾数据，非零值 = 有效。
++
+ 
+ ### 28.5 StartCamTestTask 的 Flash 数据风险
+ 
+@@ -3186,7 +3186,8 @@ g_calib.cam_p3_val_to_steps    = 0.0f;
+ 
+ ### 28.12 文件编辑注意事项
+ 
+-- Node.js 的 eadFileSync 读取 UTF-8 + CRLF 文件时保留 \r\n，替换时需匹配正确的换行符。
++- Node.js 的 
++eadFileSync 读取 UTF-8 + CRLF 文件时保留 \r\n，替换时需匹配正确的换行符。
+ - 当替换文本中包含 % 字符时，PowerShell inline 
+ ode -e 会解析失败，应将 JS 写入临时 .js 文件再执行。
+ - git checkout 会丢弃未提交的工作区改动，执行前应确认无重要修改。git stash 可保护工作区改动。
+diff --git a/MDK-ARM/pnp_1.uvprojx b/MDK-ARM/pnp_1.uvprojx
+index 78f4060..298ab98 100644
+--- a/MDK-ARM/pnp_1.uvprojx
++++ b/MDK-ARM/pnp_1.uvprojx
+@@ -1,10 +1,7 @@
+-<?xml version="1.0" encoding="UTF-8" standalone="no" ?>
++<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+ <Project xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="project_projx.xsd">
+-
+   <SchemaVersion>2.1</SchemaVersion>
+-
+   <Header>### uVision Project, (C) Keil Software</Header>
+-
+   <Targets>
+     <Target>
+       <TargetName>pnp_1</TargetName>
+@@ -3630,11 +3627,6 @@
+               <FileType>1</FileType>
+               <FilePath>../touchgfx/gui/src/model/data_transfer.c</FilePath>
+             </File>
+-            <File>
+-              <FileName>detail.cpp</FileName>
+-              <FileType>8</FileType>
+-              <FilePath>../touchgfx/gui/src/containers/detail.cpp</FilePath>
+-            </File>
+             <File>
+               <FileName>FrontendApplication.cpp</FileName>
+               <FileType>8</FileType>
+@@ -3715,11 +3707,6 @@
+               <FileType>8</FileType>
+               <FilePath>../touchgfx/generated/gui_generated/src/containers/circleprogressbase.cpp</FilePath>
+             </File>
+-            <File>
+-              <FileName>detailBase.cpp</FileName>
+-              <FileType>8</FileType>
+-              <FilePath>../touchgfx/generated/gui_generated/src/containers/detailbase.cpp</FilePath>
+-            </File>
+             <File>
+               <FileName>Font_comic_25_1bpp_0.cpp</FileName>
+               <FileType>8</FileType>
+@@ -3983,20 +3970,18 @@
+       </Groups>
+     </Target>
+   </Targets>
+-
+   <RTE>
+-    <apis/>
++    <apis></apis>
+     <components>
+       <component Cclass="CMSIS" Cgroup="CORE" Cvendor="ARM" Cversion="5.6.0" condition="ARMv6_7_8-M Device">
+-        <package name="CMSIS" schemaVersion="1.7.7" url="http://www.keil.com/pack/" vendor="ARM" version="5.9.0"/>
++        <package name="CMSIS" schemaVersion="1.7.7" url="http://www.keil.com/pack/" vendor="ARM" version="5.9.0"></package>
+         <targetInfos>
+-          <targetInfo name="pnp_1"/>
++          <targetInfo name="pnp_1"></targetInfo>
+         </targetInfos>
+       </component>
+     </components>
+-    <files/>
++    <files></files>
+   </RTE>
+-
+   <LayerInfo>
+     <Layers>
+       <Layer>
+@@ -4005,5 +3990,4 @@
+       </Layer>
+     </Layers>
+   </LayerInfo>
+-
+ </Project>
+diff --git a/TouchGFX/API_mainctrl_touchgfx.md b/TouchGFX/API_mainctrl_touchgfx.md
+new file mode 100644
+index 0000000..343b0f3
+--- /dev/null
++++ b/TouchGFX/API_mainctrl_touchgfx.md
+@@ -0,0 +1,122 @@
++﻿# TouchGFX ↔ 主控 对接文档（API）
++
++> 本文档只面向**主控端 AI / 开发者**，用于对接 TouchGFX GUI 的消息通信接口。
++> 目标是：主控端只通过统一消息中枢（`Data_Transfer`）与 GUI 通信，不直接耦合具体屏幕实现。
++
++## 1. 通信模型
++
++```
++主控系统任务
++   │
++   ▼
++DT_Notify*()
++   │
++   ▼
++dataTransferQueue
++   │
++   ▼
++Model::processQueue()
++   │
++   ▼
++Presenter -> View
++```
++
++- **System → GUI**：主控端调用 `DT_Notify*()`
++- **GUI → System**：Presenter 通过 `Model::sendCommand()` 发送命令
++
++## 2. 当前可用 System → GUI API
++
++### 2.1 贴片状态
++```c
++void DT_NotifySMTStatus(uint8_t is_smt);
++```
++
++### 2.2 温度
++```c
++void DT_NotifyTemp(uint16_t temp); // 单位 0.1°C
++```
++
++### 2.3 导入/下载状态
++```c
++void DT_NotifyDownloadStatus(uint8_t status);
++```
++
++### 2.4 贴片进度（高频可用）
++```c
++void DT_NotifySMTProgress(uint8_t current, uint8_t total);
++```
++
++### 2.5 电机复位完成
++```c
++void DT_NotifyMotorResetDone(void);
++```
++
++### 2.6 电机默认速度（低频）
++```c
++void DT_NotifyMotorSpeed(uint16_t speed);
++```
++
++### 2.7 系统短日志（推荐）
++```c
++void DT_NotifyLogText(uint8_t code, uint8_t param);
++```
++
++### 2.8 通用消息（旧接口）
++```c
++void DT_NotifyCustom(uint8_t code, uint8_t param);
++```
++
++## 3. 当前推荐的 LOG 使用方式
++
++**不要直接发长字符串到 GUI 队列。**
++
++推荐：
++
++- 用 `DT_NotifyLogText(code, param)`
++- GUI 端会显示为：`code:param`
++
++后续可扩展“短模板映射表”（GUI 侧根据 code 映射中文提示），但当前版本先保持最小闭环。
++
++## 4. MotorSpeed / Progress 显示
++
++### MotorSpeed
++- 主控启动后调用一次：
++```c
++DT_NotifyMotorSpeed(speed);
++```
++- GUI `Screen_HOME` 会写入 `MotorSpeed` 文本框，且只在值变化时刷新。
++
++### Progress
++- 高频进度更新使用：
++```c
++DT_NotifySMTProgress(current, total);
++```
++- GUI `Screen_HOME` 会刷新 `circleProgress` 及数字显示。
++
++## 5. GUI → System 命令（保留，待主控端接入）
++
++```c
++DT_CMD_MOTOR_MOVE
++DT_CMD_MOTOR_STOP
++DT_CMD_MOTOR_HOME
++DT_CMD_SMT_START
++DT_CMD_SMT_PAUSE
++DT_CMD_HEATER_SET
++DT_CMD_SYSTEM_RESET
++DT_CMD_CUSTOM
++```
++
++这些命令当前由 `Data_Transfer.c` 的路由表维护，但具体业务函数仍需主控端实现。
++
++## 6. 对接约束（主控端必读）
++
++1. **队列深度有限**：`dataTransferQueue` 默认 16 深度，避免高频阻塞写入。
++2. **不传长字符串**：`DT_Msg_t` 只有 8 字节 raw payload。
++3. **进度类通知可高频，日志类通知建议低频**。
++4. **主控端不要直接访问 TouchGFX View/Presenter/Widget**。
++5. **坐标、温度、进度、速度均使用整数单位**，避免浮点进队列。
++
++## 7. 当前未完成项（留给主控端 AI）
++
++- `Data_Transfer.c` 中 7 个 GUI→System handler 仍是 TODO 占位。
++- 主控端需要补实际动作函数后，再让 `DT_Dispatch()` 真正触发系统行为。
+diff --git a/TouchGFX/README_touchgfx.md b/TouchGFX/README_touchgfx.md
+new file mode 100644
+index 0000000..f94731c
+--- /dev/null
++++ b/TouchGFX/README_touchgfx.md
+@@ -0,0 +1,116 @@
++﻿# TouchGFX 端侧开发文档
++
++> 本文档用于记录 TouchGFX 端侧当前已实现功能、关键文件、开发流程、更新历史、以及已知问题，便于后续 agent 继续开发。
++
++## 1. 当前已实现功能
++
++### 1.1 消息通信中枢（Data_Transfer）
++- `TouchGFX/gui/include/gui/model/Data_Transfer.h`
++- `TouchGFX/gui/src/model/Data_Transfer.c`
++
++已实现：
++- `DT_Msg_t` 统一消息体
++- `dataTransferQueue`（System → GUI）
++- `guiCmdQueue`（GUI → System）
++- `DT_Notify*` 系列通知函数
++- `DT_Dispatch()` 路由表（GUI → System）
++
++新增：
++- `DT_MOTOR_SPEED`
++- `DT_LOG_TEXT`
++- `DT_NotifyMotorSpeed()`
++- `DT_NotifyLogText()`
++
++### 1.2 Model / ModelListener 分发
++- `TouchGFX/gui/src/model/Model.cpp`
++- `TouchGFX/gui/include/gui/model/ModelListener.hpp`
++
++已实现：
++- `Model::processQueue()` 每帧消费 GUI 队列
++- `Model::sendCommand()` Presenter 发命令入口
++- `ModelListener` 新增：
++  - `onNotifyMotorSpeed(uint16_t speed)`
++  - `onNotifyLogText(uint8_t code, uint8_t param)`
++
++### 1.3 Screen_HOME
++- `TouchGFX/gui/src/screen_home_screen/Screen_HOMEView.cpp`
++- `TouchGFX/gui/src/screen_home_screen/Screen_HOMEPresenter.cpp`
++
++已实现：
++- `MotorSpeed` 文本显示
++- `progress` 圆环 + 数字显示
++- 通过 Presenter 接收：
++  - `onNotifySMTProgress`
++  - `onNotifyMotorSpeed`
++- 仅在数据变化时刷新
++
++### 1.4 Screen_LOG
++- `TouchGFX/gui/src/screen_log_screen/Screen_LOGView.cpp`
++- `TouchGFX/gui/src/screen_log_screen/Screen_LOGPresenter.cpp`
++
++已实现：
++- `LogAddStr()` 追加日志到 `textArea1`
++- 最大 100 行裁剪（`LOG_MAX_LINES`）
++- 自动跟随最新日志（默认 `m_autoFollow=true`）
++- Presenter 接收 `DT_LOG_TEXT`，转发到 `handleSystemLog(code, param)`
++
++## 2. 关键文件位置
++
++### 消息层
++- `TouchGFX/gui/include/gui/model/Data_Transfer.h`
++- `TouchGFX/gui/src/model/Data_Transfer.c`
++- `TouchGFX/gui/include/gui/model/Model.hpp`
++- `TouchGFX/gui/src/model/Model.cpp`
++- `TouchGFX/gui/include/gui/model/ModelListener.hpp`
++
++### Home
++- `TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEView.hpp`
++- `TouchGFX/gui/src/screen_home_screen/Screen_HOMEView.cpp`
++- `TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEPresenter.hpp`
++- `TouchGFX/gui/src/screen_home_screen/Screen_HOMEPresenter.cpp`
++
++### LOG
++- `TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGView.hpp`
++- `TouchGFX/gui/src/screen_log_screen/Screen_LOGView.cpp`
++- `TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGPresenter.hpp`
++- `TouchGFX/gui/src/screen_log_screen/Screen_LOGPresenter.cpp`
++
++## 3. 当前开发结论
++
++### MotorSpeed
++- 主控端低频通知即可：
++```c
++DT_NotifyMotorSpeed(speed);
++```
++
++### Progress
++- 主控端高频通知即可：
++```c
++DT_NotifySMTProgress(current, total);
++```
++
++### LOG
++- 当前推荐短标签日志：
++```c
++DT_NotifyLogText(code, param);
++```
++- GUI 显示为 `code:param`
++- 后续如果需要“模板化中文提示”，可在 GUI 侧扩展映射表，而不是在主控端拼字符串。
++
++## 4. 更新历史
++
++### 2026-06-24
++- 新增 `DT_MOTOR_SPEED` / `DT_LOG_TEXT`
++- `Screen_HOME` 支持 MotorSpeed 显示
++- `Screen_LOG` 支持 100 行裁剪 + 自动跟随
++- Presenter 层补齐 `onNotifyMotorSpeed` / `onNotifyLogText`
++- 新增：
++  - `TouchGFX/API_mainctrl_touchgfx.md`
++  - `TouchGFX/README_touchgfx.md`
++
++## 5. 已知问题 / 注意事项
++
++1. `Data_Transfer.c` 中 GUI→System 的 7 个 handler 仍是 TODO，需要主控端接入真实函数。
++2. `Screen_LOG` 当前仅支持 ASCII 短文本；中文日志建议后续走模板映射，不要直接塞长 Unicode 文本。
++3. `dataTransferQueue` 深度默认 16，日志类通知不要高频灌入。
++4. `Screen_LOG` 自动跟随基于当前实现状态，后续如果需要精确 `scrollToBottom` 行为，需要再对齐 TouchGFX 版本对应 API。
+diff --git a/TouchGFX/assets/texts/texts.xml b/TouchGFX/assets/texts/texts.xml
+index afc41df..bd0b916 100644
+--- a/TouchGFX/assets/texts/texts.xml
++++ b/TouchGFX/assets/texts/texts.xml
+@@ -4,21 +4,14 @@
+     <Language Id="GB" />
+   </Languages>
+   <Texts>
+-    <TextGroup Id="Group1">
+-      <Text Id="__SingleUse_QTOZ" Alignment="Left" TypographyId="normal_handwrite">
+-        <Translation Language="GB">home</Translation>
+-      </Text>
+-      <Text Id="__SingleUse_XWGZ" Alignment="Left" TypographyId="normal_handwrite">
+-        <Translation Language="GB">import</Translation>
+-      </Text>
+-      <Text Id="__SingleUse_13NH" Alignment="Left" TypographyId="normal_handwrite">
+-        <Translation Language="GB">reset</Translation>
++    <TextGroup Id="Group1" />
++    <TextGroup Id="Unsorted">
++      <Text Id="__SingleUse_TDMH" Alignment="Left" TypographyId="regular">
++        <Translation Language="GB">Progress &lt;value&gt;</Translation>
+       </Text>
+-      <Text Id="__SingleUse_SXYA" Alignment="Left" TypographyId="normal_handwrite">
+-        <Translation Language="GB">log</Translation>
++      <Text Id="__SingleUse_2QJ5" Alignment="Left" TypographyId="regular">
++        <Translation Language="GB">MOTOR Speed &lt;value&gt;</Translation>
+       </Text>
+-    </TextGroup>
+-    <TextGroup Id="Unsorted">
+       <Text Id="__SingleUse_2LX0" Alignment="Left" TypographyId="regular">
+         <Translation Language="GB">Reset done&#10;   up   -&gt; HOME&#10;down -&gt; IMPORT</Translation>
+       </Text>
+diff --git a/TouchGFX/generated/gui_generated/include/gui_generated/containers/PageTableBase.hpp b/TouchGFX/generated/gui_generated/include/gui_generated/containers/PageTableBase.hpp
+index 0fc3705..4d337b7 100644
+--- a/TouchGFX/generated/gui_generated/include/gui_generated/containers/PageTableBase.hpp
++++ b/TouchGFX/generated/gui_generated/include/gui_generated/containers/PageTableBase.hpp
+@@ -9,7 +9,6 @@
+ #include <touchgfx/widgets/Box.hpp>
+ #include <touchgfx/widgets/canvas/Line.hpp>
+ #include <touchgfx/widgets/canvas/PainterBW.hpp>
+-#include <gui/containers/detail.hpp>
+ #include <touchgfx/widgets/Image.hpp>
+ 
+ class PageTableBase : public touchgfx::Container
+@@ -30,7 +29,6 @@ protected:
+     touchgfx::Box box1;
+     touchgfx::Line line1_1;
+     touchgfx::PainterBW line1_1Painter;
+-    detail detail1;
+     touchgfx::Image refre;
+     touchgfx::Image home;
+     touchgfx::Image import;
+diff --git a/TouchGFX/generated/gui_generated/include/gui_generated/containers/detailBase.hpp b/TouchGFX/generated/gui_generated/include/gui_generated/containers/detailBase.hpp
+deleted file mode 100644
+index 4eda1b5..0000000
+--- a/TouchGFX/generated/gui_generated/include/gui_generated/containers/detailBase.hpp
++++ /dev/null
+@@ -1,41 +0,0 @@
+-/*********************************************************************************/
+-/********** THIS FILE IS GENERATED BY TOUCHGFX DESIGNER, DO NOT MODIFY ***********/
+-/*********************************************************************************/
+-#ifndef DETAILBASE_HPP
+-#define DETAILBASE_HPP
+-
+-#include <gui/common/FrontendApplication.hpp>
+-#include <touchgfx/containers/Container.hpp>
+-#include <touchgfx/widgets/Box.hpp>
+-#include <touchgfx/widgets/canvas/Line.hpp>
+-#include <touchgfx/widgets/canvas/PainterBW.hpp>
+-#include <touchgfx/widgets/TextArea.hpp>
+-
+-class detailBase : public touchgfx::Container
+-{
+-public:
+-    detailBase();
+-    virtual ~detailBase();
+-    virtual void initialize();
+-
+-protected:
+-    FrontendApplication& application() {
+-        return *static_cast<FrontendApplication*>(touchgfx::Application::getInstance());
+-    }
+-
+-    /*
+-     * Member Declarations
+-     */
+-    touchgfx::Box box1;
+-    touchgfx::Line line1;
+-    touchgfx::PainterBW line1Painter;
+-    touchgfx::TextArea home;
+-    touchgfx::TextArea download;
+-    touchgfx::TextArea reset;
+-    touchgfx::TextArea message;
+-
+-private:
+-
+-};
+-
+-#endif // DETAILBASE_HPP
+diff --git a/TouchGFX/generated/gui_generated/include/gui_generated/screen_home_screen/Screen_HOMEViewBase.hpp b/TouchGFX/generated/gui_generated/include/gui_generated/screen_home_screen/Screen_HOMEViewBase.hpp
+index 9327b85..04e61f1 100644
+--- a/TouchGFX/generated/gui_generated/include/gui_generated/screen_home_screen/Screen_HOMEViewBase.hpp
++++ b/TouchGFX/generated/gui_generated/include/gui_generated/screen_home_screen/Screen_HOMEViewBase.hpp
+@@ -12,7 +12,6 @@
+ #include <touchgfx/widgets/TextAreaWithWildcard.hpp>
+ #include <gui/containers/circleProgress.hpp>
+ #include <gui/containers/PageTable.hpp>
+-#include <touchgfx/widgets/Button.hpp>
+ 
+ class Screen_HOMEViewBase : public touchgfx::View<Screen_HOMEPresenter>
+ {
+@@ -33,10 +32,11 @@ protected:
+     touchgfx::Box __background;
+     touchgfx::Box box1;
+     touchgfx::TextArea HOME;
++    touchgfx::TextAreaWithOneWildcard MotorSpeed;
+     touchgfx::TextAreaWithOneWildcard temperature;
+     circleProgress Progress1;
+     PageTable pageTable;
+-    touchgfx::Button open;
++    touchgfx::TextAreaWithOneWildcard progress;
+ 
+     /*
+      * Wildcard Buffers
+diff --git a/TouchGFX/generated/gui_generated/include/gui_generated/screen_import_screen/Screen_IMPORTViewBase.hpp b/TouchGFX/generated/gui_generated/include/gui_generated/screen_import_screen/Screen_IMPORTViewBase.hpp
+index 7136fbd..fd03cbf 100644
+--- a/TouchGFX/generated/gui_generated/include/gui_generated/screen_import_screen/Screen_IMPORTViewBase.hpp
++++ b/TouchGFX/generated/gui_generated/include/gui_generated/screen_import_screen/Screen_IMPORTViewBase.hpp
+@@ -10,7 +10,6 @@
+ #include <touchgfx/widgets/Box.hpp>
+ #include <touchgfx/widgets/TextArea.hpp>
+ #include <gui/containers/PageTable.hpp>
+-#include <touchgfx/widgets/Button.hpp>
+ 
+ class Screen_IMPORTViewBase : public touchgfx::View<Screen_IMPORTPresenter>
+ {
+@@ -31,7 +30,6 @@ protected:
+     touchgfx::Box box1;
+     touchgfx::TextArea IMPORT;
+     PageTable pageTable;
+-    touchgfx::Button open;
+     touchgfx::TextArea Ready;
+     touchgfx::TextArea Importing;
+     touchgfx::TextArea Import_done;
+diff --git a/TouchGFX/generated/gui_generated/include/gui_generated/screen_log_screen/Screen_LOGViewBase.hpp b/TouchGFX/generated/gui_generated/include/gui_generated/screen_log_screen/Screen_LOGViewBase.hpp
+index 31c98c8..d64a8bc 100644
+--- a/TouchGFX/generated/gui_generated/include/gui_generated/screen_log_screen/Screen_LOGViewBase.hpp
++++ b/TouchGFX/generated/gui_generated/include/gui_generated/screen_log_screen/Screen_LOGViewBase.hpp
+@@ -12,7 +12,6 @@
+ #include <touchgfx/containers/ScrollableContainer.hpp>
+ #include <touchgfx/widgets/TextAreaWithWildcard.hpp>
+ #include <gui/containers/PageTable.hpp>
+-#include <touchgfx/widgets/Button.hpp>
+ 
+ class Screen_LOGViewBase : public touchgfx::View<Screen_LOGPresenter>
+ {
+@@ -35,7 +34,6 @@ protected:
+     touchgfx::ScrollableContainer scrollableContainer1;
+     touchgfx::TextAreaWithOneWildcard textArea1;
+     PageTable pageTable;
+-    touchgfx::Button open;
+ 
+ private:
+ 
+diff --git a/TouchGFX/generated/gui_generated/include/gui_generated/screen_reset_screen/Screen_RESETViewBase.hpp b/TouchGFX/generated/gui_generated/include/gui_generated/screen_reset_screen/Screen_RESETViewBase.hpp
+index e52bccc..fe22e17 100644
+--- a/TouchGFX/generated/gui_generated/include/gui_generated/screen_reset_screen/Screen_RESETViewBase.hpp
++++ b/TouchGFX/generated/gui_generated/include/gui_generated/screen_reset_screen/Screen_RESETViewBase.hpp
+@@ -10,7 +10,6 @@
+ #include <touchgfx/widgets/Box.hpp>
+ #include <touchgfx/widgets/TextArea.hpp>
+ #include <gui/containers/PageTable.hpp>
+-#include <touchgfx/widgets/Button.hpp>
+ 
+ class Screen_RESETViewBase : public touchgfx::View<Screen_RESETPresenter>
+ {
+@@ -49,7 +48,6 @@ protected:
+     touchgfx::Box box1;
+     touchgfx::TextArea caution;
+     PageTable pageTable;
+-    touchgfx::Button open;
+     touchgfx::TextArea Reseting;
+     touchgfx::TextArea Reset_done;
+ 
+diff --git a/TouchGFX/generated/gui_generated/src/containers/PageTableBase.cpp b/TouchGFX/generated/gui_generated/src/containers/PageTableBase.cpp
+index 8a51ec1..a98138f 100644
+--- a/TouchGFX/generated/gui_generated/src/containers/PageTableBase.cpp
++++ b/TouchGFX/generated/gui_generated/src/containers/PageTableBase.cpp
+@@ -22,10 +22,6 @@ PageTableBase::PageTableBase()
+     line1_1.setLineEndingStyle(touchgfx::Line::SQUARE_CAP_ENDING);
+     add(line1_1);
+ 
+-    detail1.setXY(56, 0);
+-    detail1.setVisible(false);
+-    add(detail1);
+-
+     refre.setXY(6, 156);
+     refre.setBitmap(touchgfx::Bitmap(BITMAP_REFRE_ID));
+     add(refre);
+@@ -70,5 +66,5 @@ PageTableBase::~PageTableBase()
+ 
+ void PageTableBase::initialize()
+ {
+-    detail1.initialize();
++
+ }
+diff --git a/TouchGFX/generated/gui_generated/src/containers/detailBase.cpp b/TouchGFX/generated/gui_generated/src/containers/detailBase.cpp
+deleted file mode 100644
+index e49d7dc..0000000
+--- a/TouchGFX/generated/gui_generated/src/containers/detailBase.cpp
++++ /dev/null
+@@ -1,58 +0,0 @@
+-/*********************************************************************************/
+-/********** THIS FILE IS GENERATED BY TOUCHGFX DESIGNER, DO NOT MODIFY ***********/
+-/*********************************************************************************/
+-#include <gui_generated/containers/detailBase.hpp>
+-#include <touchgfx/Color.hpp>
+-#include <texts/TextKeysAndLanguages.hpp>
+-
+-detailBase::detailBase()
+-{
+-    setWidth(97);
+-    setHeight(300);
+-    box1.setPosition(0, 0, 97, 300);
+-    box1.setColor(touchgfx::Color::getColorFromRGB(255, 255, 255));
+-    add(box1);
+-
+-    line1.setPosition(94, 0, 3, 300);
+-    line1Painter.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+-    line1.setPainter(line1Painter);
+-    line1.setStart(0, 0);
+-    line1.setEnd(0, 300);
+-    line1.setLineWidth(10);
+-    line1.setLineEndingStyle(touchgfx::Line::SQUARE_CAP_ENDING);
+-    add(line1);
+-
+-    home.setXY(0, 14);
+-    home.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+-    home.setLinespacing(0);
+-    home.setTypedText(touchgfx::TypedText(T___SINGLEUSE_QTOZ));
+-    add(home);
+-
+-    download.setXY(0, 64);
+-    download.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+-    download.setLinespacing(0);
+-    download.setTypedText(touchgfx::TypedText(T___SINGLEUSE_XWGZ));
+-    add(download);
+-
+-    reset.setXY(0, 164);
+-    reset.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+-    reset.setLinespacing(0);
+-    reset.setTypedText(touchgfx::TypedText(T___SINGLEUSE_13NH));
+-    add(reset);
+-
+-    message.setXY(0, 114);
+-    message.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+-    message.setLinespacing(0);
+-    message.setTypedText(touchgfx::TypedText(T___SINGLEUSE_SXYA));
+-    add(message);
+-}
+-
+-detailBase::~detailBase()
+-{
+-
+-}
+-
+-void detailBase::initialize()
+-{
+-
+-}
+diff --git a/TouchGFX/generated/gui_generated/src/screen_home_screen/Screen_HOMEViewBase.cpp b/TouchGFX/generated/gui_generated/src/screen_home_screen/Screen_HOMEViewBase.cpp
+index 2cf7a08..cb20d0a 100644
+--- a/TouchGFX/generated/gui_generated/src/screen_home_screen/Screen_HOMEViewBase.cpp
++++ b/TouchGFX/generated/gui_generated/src/screen_home_screen/Screen_HOMEViewBase.cpp
+@@ -5,7 +5,6 @@
+ #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
+ #include <touchgfx/Color.hpp>
+ #include <texts/TextKeysAndLanguages.hpp>
+-#include <images/BitmapDatabase.hpp>
+ 
+ Screen_HOMEViewBase::Screen_HOMEViewBase()
+ {
+@@ -25,6 +24,12 @@ Screen_HOMEViewBase::Screen_HOMEViewBase()
+     HOME.setTypedText(touchgfx::TypedText(T___SINGLEUSE_G70R));
+     add(HOME);
+ 
++    MotorSpeed.setXY(60, 265);
++    MotorSpeed.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
++    MotorSpeed.setLinespacing(0);
++    MotorSpeed.setTypedText(touchgfx::TypedText(T___SINGLEUSE_2QJ5));
++    add(MotorSpeed);
++
+     temperature.setXY(265, 0);
+     temperature.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+     temperature.setLinespacing(0);
+@@ -34,15 +39,17 @@ Screen_HOMEViewBase::Screen_HOMEViewBase()
+     temperature.setTypedText(touchgfx::TypedText(T___SINGLEUSE_SYMX));
+     add(temperature);
+ 
+-    Progress1.setXY(153, 76);
++    Progress1.setXY(140, 40);
+     add(Progress1);
+ 
+     pageTable.setXY(0, 0);
+     add(pageTable);
+ 
+-    open.setXY(6, 256);
+-    open.setBitmaps(touchgfx::Bitmap(BITMAP_SIMPLE_RIGHT_ID), touchgfx::Bitmap(BITMAP_SIMPLE_LEFT_ID));
+-    add(open);
++    progress.setXY(60, 237);
++    progress.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
++    progress.setLinespacing(0);
++    progress.setTypedText(touchgfx::TypedText(T___SINGLEUSE_TDMH));
++    add(progress);
+ }
+ 
+ Screen_HOMEViewBase::~Screen_HOMEViewBase()
+diff --git a/TouchGFX/generated/gui_generated/src/screen_import_screen/Screen_IMPORTViewBase.cpp b/TouchGFX/generated/gui_generated/src/screen_import_screen/Screen_IMPORTViewBase.cpp
+index 6cc221d..e5f4286 100644
+--- a/TouchGFX/generated/gui_generated/src/screen_import_screen/Screen_IMPORTViewBase.cpp
++++ b/TouchGFX/generated/gui_generated/src/screen_import_screen/Screen_IMPORTViewBase.cpp
+@@ -5,7 +5,6 @@
+ #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
+ #include <touchgfx/Color.hpp>
+ #include <texts/TextKeysAndLanguages.hpp>
+-#include <images/BitmapDatabase.hpp>
+ 
+ Screen_IMPORTViewBase::Screen_IMPORTViewBase()
+ {
+@@ -28,10 +27,6 @@ Screen_IMPORTViewBase::Screen_IMPORTViewBase()
+     pageTable.setXY(0, 0);
+     add(pageTable);
+ 
+-    open.setXY(6, 256);
+-    open.setBitmaps(touchgfx::Bitmap(BITMAP_SIMPLE_RIGHT_ID), touchgfx::Bitmap(BITMAP_SIMPLE_LEFT_ID));
+-    add(open);
+-
+     Ready.setXY(153, 50);
+     Ready.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+     Ready.setLinespacing(0);
+diff --git a/TouchGFX/generated/gui_generated/src/screen_log_screen/Screen_LOGViewBase.cpp b/TouchGFX/generated/gui_generated/src/screen_log_screen/Screen_LOGViewBase.cpp
+index c36eb2c..2b79a45 100644
+--- a/TouchGFX/generated/gui_generated/src/screen_log_screen/Screen_LOGViewBase.cpp
++++ b/TouchGFX/generated/gui_generated/src/screen_log_screen/Screen_LOGViewBase.cpp
+@@ -5,7 +5,6 @@
+ #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
+ #include <touchgfx/Color.hpp>
+ #include <texts/TextKeysAndLanguages.hpp>
+-#include <images/BitmapDatabase.hpp>
+ 
+ Screen_LOGViewBase::Screen_LOGViewBase()
+ {
+@@ -39,10 +38,6 @@ Screen_LOGViewBase::Screen_LOGViewBase()
+ 
+     pageTable.setXY(0, 0);
+     add(pageTable);
+-
+-    open.setXY(6, 256);
+-    open.setBitmaps(touchgfx::Bitmap(BITMAP_SIMPLE_RIGHT_ID), touchgfx::Bitmap(BITMAP_SIMPLE_LEFT_ID));
+-    add(open);
+ }
+ 
+ Screen_LOGViewBase::~Screen_LOGViewBase()
+diff --git a/TouchGFX/generated/gui_generated/src/screen_reset_screen/Screen_RESETViewBase.cpp b/TouchGFX/generated/gui_generated/src/screen_reset_screen/Screen_RESETViewBase.cpp
+index f43d7e9..9f3df65 100644
+--- a/TouchGFX/generated/gui_generated/src/screen_reset_screen/Screen_RESETViewBase.cpp
++++ b/TouchGFX/generated/gui_generated/src/screen_reset_screen/Screen_RESETViewBase.cpp
+@@ -5,7 +5,6 @@
+ #include <touchgfx/canvas_widget_renderer/CanvasWidgetRenderer.hpp>
+ #include <touchgfx/Color.hpp>
+ #include <texts/TextKeysAndLanguages.hpp>
+-#include <images/BitmapDatabase.hpp>
+ 
+ Screen_RESETViewBase::Screen_RESETViewBase()
+ {
+@@ -28,10 +27,6 @@ Screen_RESETViewBase::Screen_RESETViewBase()
+     pageTable.setXY(0, 0);
+     add(pageTable);
+ 
+-    open.setXY(6, 256);
+-    open.setBitmaps(touchgfx::Bitmap(BITMAP_SIMPLE_RIGHT_ID), touchgfx::Bitmap(BITMAP_SIMPLE_LEFT_ID));
+-    add(open);
+-
+     Reseting.setXY(77, 56);
+     Reseting.setColor(touchgfx::Color::getColorFromRGB(0, 0, 0));
+     Reseting.setLinespacing(0);
+diff --git a/TouchGFX/generated/texts/cache/LanguageCpp_Gb.cache b/TouchGFX/generated/texts/cache/LanguageCpp_Gb.cache
+index 9a9f7d9..f04be43 100644
+--- a/TouchGFX/generated/texts/cache/LanguageCpp_Gb.cache
++++ b/TouchGFX/generated/texts/cache/LanguageCpp_Gb.cache
+@@ -1 +1 @@
+-{"remap":"yes","language":"GB","language_index":0,"indices":[["262","T___SINGLEUSE_QTOZ"],["206","T___SINGLEUSE_XWGZ"],["256","T___SINGLEUSE_13NH"],["276","T___SINGLEUSE_SXYA"],["103","T___SINGLEUSE_2LX0"],["145","T___SINGLEUSE_KF87"],["213","T___SINGLEUSE_F9WI"],["197","T___SINGLEUSE_YVVQ"],["226","T___SINGLEUSE_FQ8H"],["267","T_LOG"],["238","T___SINGLEUSE_6URR"],["280","T_TEMP"],["281","T_TOTAL_SMT"],["281","T_NOW_SMT"],["248","T___SINGLEUSE_HTY2"],["240","T___SINGLEUSE_234I"],["173","T___SINGLEUSE_ODTN"],["183","T___SINGLEUSE_SYMX"],["0","T___SINGLEUSE_3GH9"],["98","T___SINGLEUSE_G70R"],["138","T___SINGLEUSE_C4NX"],["272","T___SINGLEUSE_3E0M"]]}
+\ No newline at end of file
++{"remap":"yes","language":"GB","language_index":0,"indices":[["211","T___SINGLEUSE_TDMH"],["183","T___SINGLEUSE_2QJ5"],["103","T___SINGLEUSE_2LX0"],["145","T___SINGLEUSE_KF87"],["238","T___SINGLEUSE_F9WI"],["222","T___SINGLEUSE_YVVQ"],["251","T___SINGLEUSE_FQ8H"],["279","T_LOG"],["195","T___SINGLEUSE_6URR"],["288","T_TEMP"],["289","T_TOTAL_SMT"],["289","T_NOW_SMT"],["271","T___SINGLEUSE_HTY2"],["263","T___SINGLEUSE_234I"],["173","T___SINGLEUSE_ODTN"],["197","T___SINGLEUSE_SYMX"],["0","T___SINGLEUSE_3GH9"],["98","T___SINGLEUSE_G70R"],["138","T___SINGLEUSE_C4NX"],["284","T___SINGLEUSE_3E0M"]]}
+\ No newline at end of file
+diff --git a/TouchGFX/generated/texts/cache/TextKeysAndLanguages.cache b/TouchGFX/generated/texts/cache/TextKeysAndLanguages.cache
+index 73c01f4..7dbf55d 100644
+--- a/TouchGFX/generated/texts/cache/TextKeysAndLanguages.cache
++++ b/TouchGFX/generated/texts/cache/TextKeysAndLanguages.cache
+@@ -1 +1 @@
+-{"languages":["GB"],"textids":["T___SINGLEUSE_QTOZ","T___SINGLEUSE_XWGZ","T___SINGLEUSE_13NH","T___SINGLEUSE_SXYA","T___SINGLEUSE_2LX0","T___SINGLEUSE_KF87","T___SINGLEUSE_F9WI","T___SINGLEUSE_YVVQ","T___SINGLEUSE_FQ8H","T_LOG","T___SINGLEUSE_6URR","T_TEMP","T_TOTAL_SMT","T_NOW_SMT","T___SINGLEUSE_HTY2","T___SINGLEUSE_234I","T___SINGLEUSE_ODTN","T___SINGLEUSE_SYMX","T___SINGLEUSE_3GH9","T___SINGLEUSE_G70R","T___SINGLEUSE_C4NX","T___SINGLEUSE_3E0M"]}
+\ No newline at end of file
++{"languages":["GB"],"textids":["T___SINGLEUSE_TDMH","T___SINGLEUSE_2QJ5","T___SINGLEUSE_2LX0","T___SINGLEUSE_KF87","T___SINGLEUSE_F9WI","T___SINGLEUSE_YVVQ","T___SINGLEUSE_FQ8H","T_LOG","T___SINGLEUSE_6URR","T_TEMP","T_TOTAL_SMT","T_NOW_SMT","T___SINGLEUSE_HTY2","T___SINGLEUSE_234I","T___SINGLEUSE_ODTN","T___SINGLEUSE_SYMX","T___SINGLEUSE_3GH9","T___SINGLEUSE_G70R","T___SINGLEUSE_C4NX","T___SINGLEUSE_3E0M"]}
+\ No newline at end of file
+diff --git a/TouchGFX/generated/texts/cache/TextsCpp.cache b/TouchGFX/generated/texts/cache/TextsCpp.cache
+index 4891a09..7359825 100644
+--- a/TouchGFX/generated/texts/cache/TextsCpp.cache
++++ b/TouchGFX/generated/texts/cache/TextsCpp.cache
+@@ -1 +1 @@
+-{"remap":"yes","languages":["Gb"],"characters":[99,97,117,116,105,111,110,10,68,111,32,117,32,119,97,110,116,32,116,111,32,114,101,115,101,116,32,97,108,108,32,109,111,116,111,114,115,63,10,10,32,32,32,117,112,32,32,32,45,62,32,121,101,115,10,100,111,119,110,32,45,62,32,110,111,44,32,10,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,97,110,100,32,114,101,116,117,114,110,32,116,111,32,72,79,77,69,0,82,101,115,101,116,32,100,111,110,101,10,32,32,32,117,112,32,32,32,45,62,32,72,79,77,69,10,100,111,119,110,32,45,62,32,73,77,80,79,82,84,0,73,109,112,111,114,116,32,100,111,110,101,33,10,10,80,85,83,72,32,116,111,32,115,116,97,114,116,0,32,32,32,2,47,2,32,32,32,0,84,101,109,112,46,32,2,176,67,32,32,32,32,0,82,101,97,100,121,32,116,111,32,105,109,112,111,114,116,0,73,109,112,111,114,116,105,110,103,46,46,46,0,82,101,115,101,116,105,110,103,46,46,46,0,2,0,87,97,105,116,105,110,103,0,87,111,114,107,105,110,103,0,114,101,115,101,116,0,104,111,109,101,0,110,111,110,101,0,76,79,71,0,108,111,103,0,45,48,0]}
+\ No newline at end of file
++{"remap":"yes","languages":["Gb"],"characters":[99,97,117,116,105,111,110,10,68,111,32,117,32,119,97,110,116,32,116,111,32,114,101,115,101,116,32,97,108,108,32,109,111,116,111,114,115,63,10,10,32,32,32,117,112,32,32,32,45,62,32,121,101,115,10,100,111,119,110,32,45,62,32,110,111,44,32,10,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,32,97,110,100,32,114,101,116,117,114,110,32,116,111,32,72,79,77,69,0,82,101,115,101,116,32,100,111,110,101,10,32,32,32,117,112,32,32,32,45,62,32,72,79,77,69,10,100,111,119,110,32,45,62,32,73,77,80,79,82,84,0,73,109,112,111,114,116,32,100,111,110,101,33,10,10,80,85,83,72,32,116,111,32,115,116,97,114,116,0,32,32,32,2,47,2,32,32,32,0,77,79,84,79,82,32,83,112,101,101,100,32,2,0,84,101,109,112,46,32,2,176,67,32,32,32,32,0,80,114,111,103,114,101,115,115,32,2,0,82,101,97,100,121,32,116,111,32,105,109,112,111,114,116,0,73,109,112,111,114,116,105,110,103,46,46,46,0,82,101,115,101,116,105,110,103,46,46,46,0,87,97,105,116,105,110,103,0,87,111,114,107,105,110,103,0,110,111,110,101,0,76,79,71,0,45,48,0]}
+\ No newline at end of file
+diff --git a/TouchGFX/generated/texts/cache/TypedTextDatabaseCpp.cache b/TouchGFX/generated/texts/cache/TypedTextDatabaseCpp.cache
+index 3562bd0..8da9147 100644
+--- a/TouchGFX/generated/texts/cache/TypedTextDatabaseCpp.cache
++++ b/TouchGFX/generated/texts/cache/TypedTextDatabaseCpp.cache
+@@ -1 +1 @@
+-{"databases":{"DEFAULT":[[0,"LEFT","LTR"],[0,"LEFT","LTR"],[0,"LEFT","LTR"],[0,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"CENTER","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"]]},"database_list":["DEFAULT"],"fonts":{"getFont_comic_25_1bpp":0,"getFont_segoeui_23_1bpp":1},"generate_font_format":"0"}
+\ No newline at end of file
++{"databases":{"DEFAULT":[[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"CENTER","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"],[1,"LEFT","LTR"]]},"database_list":["DEFAULT"],"fonts":{"getFont_comic_25_1bpp":0,"getFont_segoeui_23_1bpp":1},"generate_font_format":"0"}
+\ No newline at end of file
+diff --git a/TouchGFX/generated/texts/include/texts/TextKeysAndLanguages.hpp b/TouchGFX/generated/texts/include/texts/TextKeysAndLanguages.hpp
+index 9691b1d..2786c64 100644
+--- a/TouchGFX/generated/texts/include/texts/TextKeysAndLanguages.hpp
++++ b/TouchGFX/generated/texts/include/texts/TextKeysAndLanguages.hpp
+@@ -12,10 +12,8 @@ enum LANGUAGES
+ 
+ enum TEXTS
+ {
+-    T___SINGLEUSE_QTOZ,
+-    T___SINGLEUSE_XWGZ,
+-    T___SINGLEUSE_13NH,
+-    T___SINGLEUSE_SXYA,
++    T___SINGLEUSE_TDMH,
++    T___SINGLEUSE_2QJ5,
+     T___SINGLEUSE_2LX0,
+     T___SINGLEUSE_KF87,
+     T___SINGLEUSE_F9WI,
+diff --git a/TouchGFX/generated/texts/src/LanguageGb.cpp b/TouchGFX/generated/texts/src/LanguageGb.cpp
+index 60b0f44..9fdcf7d 100644
+--- a/TouchGFX/generated/texts/src/LanguageGb.cpp
++++ b/TouchGFX/generated/texts/src/LanguageGb.cpp
+@@ -10,26 +10,24 @@ KEEP extern const uint32_t indicesGb[] TEXT_LOCATION_FLASH_ATTRIBUTE;
+ // Remap all strings
+ TEXT_LOCATION_FLASH_PRAGMA
+ KEEP extern const uint32_t indicesGb[] TEXT_LOCATION_FLASH_ATTRIBUTE = {
+-    262, // T___SINGLEUSE_QTOZ: "home"
+-    206, // T___SINGLEUSE_XWGZ: "import"
+-    256, // T___SINGLEUSE_13NH: "reset"
+-    276, // T___SINGLEUSE_SXYA: "log"
++    211, // T___SINGLEUSE_TDMH: "Progress <>"
++    183, // T___SINGLEUSE_2QJ5: "MOTOR Speed <>"
+     103, // T___SINGLEUSE_2LX0: "Reset done\n   up   -> HOME\ndown -> IMPORT"
+     145, // T___SINGLEUSE_KF87: "Import done!\n\nPUSH to start"
+-    213, // T___SINGLEUSE_F9WI: "Importing..."
+-    197, // T___SINGLEUSE_YVVQ: "Ready to import"
+-    226, // T___SINGLEUSE_FQ8H: "Reseting..."
+-    267, // T_LOG: "none"
+-    238, // T___SINGLEUSE_6URR: "<>"
+-    280, // T_TEMP: "-0"
+-    281, // T_TOTAL_SMT: "0"
+-    281, // T_NOW_SMT: "0"
+-    248, // T___SINGLEUSE_HTY2: "Working"
+-    240, // T___SINGLEUSE_234I: "Waiting"
++    238, // T___SINGLEUSE_F9WI: "Importing..."
++    222, // T___SINGLEUSE_YVVQ: "Ready to import"
++    251, // T___SINGLEUSE_FQ8H: "Reseting..."
++    279, // T_LOG: "none"
++    195, // T___SINGLEUSE_6URR: "<>"
++    288, // T_TEMP: "-0"
++    289, // T_TOTAL_SMT: "0"
++    289, // T_NOW_SMT: "0"
++    271, // T___SINGLEUSE_HTY2: "Working"
++    263, // T___SINGLEUSE_234I: "Waiting"
+     173, // T___SINGLEUSE_ODTN: "   <>/<>   "
+-    183, // T___SINGLEUSE_SYMX: "Temp. <>?C    "
++    197, // T___SINGLEUSE_SYMX: "Temp. <>?C    "
+     0,   // T___SINGLEUSE_3GH9: "caution\nDo u want to reset all motors?\n\n   up   -> yes\ndown -> no, \n                and return to HOME"
+     98,  // T___SINGLEUSE_G70R: "HOME"
+     138, // T___SINGLEUSE_C4NX: "IMPORT"
+-    272  // T___SINGLEUSE_3E0M: "LOG"
++    284  // T___SINGLEUSE_3E0M: "LOG"
+ };
+diff --git a/TouchGFX/generated/texts/src/Texts.cpp b/TouchGFX/generated/texts/src/Texts.cpp
+index eda5ba3..1ac788c 100644
+--- a/TouchGFX/generated/texts/src/Texts.cpp
++++ b/TouchGFX/generated/texts/src/Texts.cpp
+@@ -64,19 +64,17 @@ KEEP extern const touchgfx::Unicode::UnicodeChar texts_all_languages[] TEXT_LOCA
+     0x52, 0x65, 0x73, 0x65, 0x74, 0x20, 0x64, 0x6f, 0x6e, 0x65, 0xa, 0x20, 0x20, 0x20, 0x75, 0x70, 0x20, 0x20, 0x20, 0x2d, 0x3e, 0x20, 0x48, 0x4f, 0x4d, 0x45, 0xa, 0x64, 0x6f, 0x77, 0x6e, 0x20, 0x2d, 0x3e, 0x20, 0x49, 0x4d, 0x50, 0x4f, 0x52, 0x54, 0x0, // @103 "Reset done\n   up   -> HOME\ndown -> IMPORT"
+     0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x20, 0x64, 0x6f, 0x6e, 0x65, 0x21, 0xa, 0xa, 0x50, 0x55, 0x53, 0x48, 0x20, 0x74, 0x6f, 0x20, 0x73, 0x74, 0x61, 0x72, 0x74, 0x0, // @145 "Import done!\n\nPUSH to start"
+     0x20, 0x20, 0x20, 0x2, 0x2f, 0x2, 0x20, 0x20, 0x20, 0x0, // @173 "   <>/<>   "
+-    0x54, 0x65, 0x6d, 0x70, 0x2e, 0x20, 0x2, 0xb0, 0x43, 0x20, 0x20, 0x20, 0x20, 0x0, // @183 "Temp. <>?C    "
+-    0x52, 0x65, 0x61, 0x64, 0x79, 0x20, 0x74, 0x6f, 0x20, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x0, // @197 "Ready to import"
+-    0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x69, 0x6e, 0x67, 0x2e, 0x2e, 0x2e, 0x0, // @213 "Importing..."
+-    0x52, 0x65, 0x73, 0x65, 0x74, 0x69, 0x6e, 0x67, 0x2e, 0x2e, 0x2e, 0x0, // @226 "Reseting..."
+-    0x2, 0x0, // @238 "<>"
+-    0x57, 0x61, 0x69, 0x74, 0x69, 0x6e, 0x67, 0x0, // @240 "Waiting"
+-    0x57, 0x6f, 0x72, 0x6b, 0x69, 0x6e, 0x67, 0x0, // @248 "Working"
+-    0x72, 0x65, 0x73, 0x65, 0x74, 0x0, // @256 "reset"
+-    0x68, 0x6f, 0x6d, 0x65, 0x0, // @262 "home"
+-    0x6e, 0x6f, 0x6e, 0x65, 0x0, // @267 "none"
+-    0x4c, 0x4f, 0x47, 0x0, // @272 "LOG"
+-    0x6c, 0x6f, 0x67, 0x0, // @276 "log"
+-    0x2d, 0x30, 0x0 // @280 "-0"
++    0x4d, 0x4f, 0x54, 0x4f, 0x52, 0x20, 0x53, 0x70, 0x65, 0x65, 0x64, 0x20, 0x2, 0x0, // @183 "MOTOR Speed <>"
++    0x54, 0x65, 0x6d, 0x70, 0x2e, 0x20, 0x2, 0xb0, 0x43, 0x20, 0x20, 0x20, 0x20, 0x0, // @197 "Temp. <>?C    "
++    0x50, 0x72, 0x6f, 0x67, 0x72, 0x65, 0x73, 0x73, 0x20, 0x2, 0x0, // @211 "Progress <>"
++    0x52, 0x65, 0x61, 0x64, 0x79, 0x20, 0x74, 0x6f, 0x20, 0x69, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x0, // @222 "Ready to import"
++    0x49, 0x6d, 0x70, 0x6f, 0x72, 0x74, 0x69, 0x6e, 0x67, 0x2e, 0x2e, 0x2e, 0x0, // @238 "Importing..."
++    0x52, 0x65, 0x73, 0x65, 0x74, 0x69, 0x6e, 0x67, 0x2e, 0x2e, 0x2e, 0x0, // @251 "Reseting..."
++    0x57, 0x61, 0x69, 0x74, 0x69, 0x6e, 0x67, 0x0, // @263 "Waiting"
++    0x57, 0x6f, 0x72, 0x6b, 0x69, 0x6e, 0x67, 0x0, // @271 "Working"
++    0x6e, 0x6f, 0x6e, 0x65, 0x0, // @279 "none"
++    0x4c, 0x4f, 0x47, 0x0, // @284 "LOG"
++    0x2d, 0x30, 0x0 // @288 "-0"
+ };
+ 
+ TEXT_LOCATION_FLASH_PRAGMA
+diff --git a/TouchGFX/generated/texts/src/TypedTextDatabase.cpp b/TouchGFX/generated/texts/src/TypedTextDatabase.cpp
+index 463780e..7f97d6f 100644
+--- a/TouchGFX/generated/texts/src/TypedTextDatabase.cpp
++++ b/TouchGFX/generated/texts/src/TypedTextDatabase.cpp
+@@ -18,10 +18,8 @@ extern const touchgfx::TypedText::TypedTextData* const typedTextDatabaseArray[];
+ 
+ TEXT_LOCATION_FLASH_PRAGMA
+ const touchgfx::TypedText::TypedTextData typedText_database_DEFAULT[] TEXT_LOCATION_FLASH_ATTRIBUTE = {
+-    { 0, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
+-    { 0, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
+-    { 0, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
+-    { 0, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
++    { 1, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
++    { 1, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
+     { 1, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
+     { 1, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
+     { 1, touchgfx::LEFT, touchgfx::TEXT_DIRECTION_LTR },
+diff --git a/TouchGFX/gui/include/gui/containers/detail.hpp b/TouchGFX/gui/include/gui/containers/detail.hpp
+deleted file mode 100644
+index afbbfbd..0000000
+--- a/TouchGFX/gui/include/gui/containers/detail.hpp
++++ /dev/null
+@@ -1,16 +0,0 @@
+-#ifndef DETAIL_HPP
+-#define DETAIL_HPP
+-
+-#include <gui_generated/containers/detailBase.hpp>
+-
+-class detail : public detailBase
+-{
+-public:
+-    detail();
+-    virtual ~detail() {}
+-
+-    virtual void initialize();
+-protected:
+-};
+-
+-#endif // DETAIL_HPP
+diff --git a/TouchGFX/gui/include/gui/model/Data_Transfer.h b/TouchGFX/gui/include/gui/model/Data_Transfer.h
+index 0e1314c..7a65913 100644
+--- a/TouchGFX/gui/include/gui/model/Data_Transfer.h
++++ b/TouchGFX/gui/include/gui/model/Data_Transfer.h
+@@ -26,6 +26,13 @@
+ extern "C" {
+ #endif
+ 
++#ifndef DT_LOG_LINE_MAX_CHARS
++#define DT_LOG_LINE_MAX_CHARS 160
++#endif
++#ifndef DT_LOG_QUEUE_DEPTH
++#define DT_LOG_QUEUE_DEPTH 16
++#endif
++
+ // ======================== 消息类型枚举 ========================
+ // 命名约定：DT_xxx = System→GUI 通知, DT_CMD_xxx = GUI→System 命令
+ typedef enum {
+@@ -36,6 +43,8 @@ typedef enum {
+     DT_SMT_PROGRESS     = 0x03, // 贴片进度变更
+     DT_MOTOR_RESET_DONE = 0x04, // 电机复位完成
+     DT_CUSTOM_MSG       = 0x05, // 自定义消息（备用）
++    DT_MOTOR_SPEED      = 0x06, // 电机默认速度变更（低频）
++    DT_LOG_TEXT          = 0x07, // 系统日志文本（短文本，GUI格式化）
+ 
+     // ---- GUI → System 命令（0x10~0x2F）----
+     DT_CMD_MOTOR_MOVE   = 0x10, // 电机移动到目标坐标
+@@ -62,6 +71,10 @@ typedef struct {
+         uint8_t  status;
+         // 原始数据（通用通道）
+         uint8_t  raw[8];
++        // 短日志标签（兼容旧 custom 用法，不承载长字符串）
++        struct { uint8_t code; uint8_t param; } tag;
++        // 电机速度（mm/s 或内部单位，保持整数，避免浮点传队列）
++        uint16_t motor_speed;
+     } data;
+ } DT_Msg_t;
+ 
+@@ -102,6 +115,8 @@ void DT_NotifyDownloadStatus(uint8_t status);
+ void DT_NotifySMTProgress(uint8_t current, uint8_t total);
+ void DT_NotifyMotorResetDone(void);
+ void DT_NotifyCustom(uint8_t code, uint8_t param);
++void DT_NotifyMotorSpeed(uint16_t speed);
++void DT_NotifyLogText(uint8_t code, uint8_t param);
+ 
+ // ======================== GUI → System 命令 API ========================
+ // 由 Model::sendCommand() 调用，通常不需要手动调用
+@@ -115,4 +130,7 @@ void DT_Dispatch(const DT_Msg_t *cmd);
+ }
+ #endif
+ 
+-#endif
+\ No newline at end of file
++#endif
++
++
++
+diff --git a/TouchGFX/gui/include/gui/model/ModelListener.hpp b/TouchGFX/gui/include/gui/model/ModelListener.hpp
+index dd57bf6..1e453e1 100644
+--- a/TouchGFX/gui/include/gui/model/ModelListener.hpp
++++ b/TouchGFX/gui/include/gui/model/ModelListener.hpp
+@@ -27,6 +27,8 @@ public:
+     virtual void onNotifySMTProgress(uint8_t cur, uint8_t total) {}
+     virtual void onNotifyMotorResetDone()                  {}
+     virtual void onNotifyCustom(uint8_t code, uint8_t param) {}
++    virtual void onNotifyMotorSpeed(uint16_t speed) {}
++    virtual void onNotifyLogText(uint8_t code, uint8_t param) {}
+ 
+     void bind(Model* m)
+     {
+@@ -36,4 +38,4 @@ protected:
+     Model* model;
+ };
+ 
+-#endif
+\ No newline at end of file
++#endif
+diff --git a/TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEPresenter.hpp b/TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEPresenter.hpp
+index 1968543..2b1a7ea 100644
+--- a/TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEPresenter.hpp
++++ b/TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEPresenter.hpp
+@@ -1,4 +1,4 @@
+-#ifndef SCREEN_HOMEPRESENTER_HPP
++﻿#ifndef SCREEN_HOMEPRESENTER_HPP
+ #define SCREEN_HOMEPRESENTER_HPP
+ 
+ #include <gui/model/ModelListener.hpp>
+@@ -28,6 +28,8 @@ public:
+     virtual ~Screen_HOMEPresenter() {}
+     Model * getModel();
+     virtual void onKeyPressed(uint8_t keyId);
++    virtual void onNotifySMTProgress(uint8_t current, uint8_t total) override;
++    virtual void onNotifyMotorSpeed(uint16_t speed) override;
+ private:
+     Screen_HOMEPresenter();
+ 
+@@ -35,3 +37,4 @@ private:
+ };
+ 
+ #endif // SCREEN_HOMEPRESENTER_HPP
++
+diff --git a/TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEView.hpp b/TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEView.hpp
+index ec45a19..a5175b4 100644
+--- a/TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEView.hpp
++++ b/TouchGFX/gui/include/gui/screen_home_screen/Screen_HOMEView.hpp
+@@ -18,17 +18,25 @@ public:
+     virtual void tearDownScreen();
+     virtual void handleTickEvent(); // 每tick调用一次
+     virtual void handleFreshEvent();// 处理刷新事件函数
++    void applyMotorSpeed(uint16_t speed, bool force = false);
+ 
+     virtual void handleKeyEvent(uint8_t key); // 处理按键函数
++    virtual void handleSMTProgress(uint8_t current, uint8_t total);
++    virtual void handleMotorSpeed(uint16_t speed);
+ protected:
+-    touchgfx::Unicode::UnicodeChar wildcard1Buffer[10];
++    static const uint16_t MOTOR_SPEED_SIZE = 10;
++    touchgfx::Unicode::UnicodeChar motorSpeedBuffer[MOTOR_SPEED_SIZE];
++    static const uint16_t WILDCARD1_SIZE = 10;
++    touchgfx::Unicode::UnicodeChar wildcard1Buffer[WILDCARD1_SIZE];
+ 
+     // 缓存上次刷新的值，仅在变化时刷新
++    uint8_t  last_speed_applied;
++    uint16_t last_motor_speed;
+     uint8_t  last_if_now_SMT;
+     uint8_t  last_total_SMT;
+     uint8_t  last_now_SMT;
+     uint8_t  last_Temp;
+-    bool increase = true;
+ };
+ 
+-#endif // SCREEN_HOMEVIEW_HPP
+\ No newline at end of file
++#endif // SCREEN_HOMEVIEW_HPP
++
+diff --git a/TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGPresenter.hpp b/TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGPresenter.hpp
+index 0c33c50..0160e7c 100644
+--- a/TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGPresenter.hpp
++++ b/TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGPresenter.hpp
+@@ -1,4 +1,4 @@
+-#ifndef SCREEN_LOGPRESENTER_HPP
++﻿#ifndef SCREEN_LOGPRESENTER_HPP
+ #define SCREEN_LOGPRESENTER_HPP
+ 
+ #include <gui/model/ModelListener.hpp>
+@@ -28,6 +28,7 @@ public:
+     virtual ~Screen_LOGPresenter() {}
+     Model * getModel();
+     virtual void onKeyPressed(uint8_t keyId);
++    virtual void onNotifyLogText(uint8_t code, uint8_t param) override;
+ 
+ private:
+     Screen_LOGPresenter();
+@@ -36,3 +37,4 @@ private:
+ };
+ 
+ #endif // SCREEN_LOGPRESENTER_HPP
++
+diff --git a/TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGView.hpp b/TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGView.hpp
+index 8fb1ba4..33153d3 100644
+--- a/TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGView.hpp
++++ b/TouchGFX/gui/include/gui/screen_log_screen/Screen_LOGView.hpp
+@@ -14,13 +14,26 @@ public:
+     virtual void handleTickEvent();
+     virtual void tearDownScreen();
+     virtual void LogAddStr(const char* str);
++    bool isUserScrolledUp() const;
++    bool isNearBottom() const;
++    void scrollToBottom(bool force = false);
++    void trimOldestLines(uint16_t maxLines);
++    uint16_t countLines() const;
+ 
+     virtual void handleKeyEvent(uint8_t key);
++    virtual void handleSystemLog(uint8_t code, uint8_t param);
+ 
+ protected:
++    static const uint16_t LOG_MAX_LINES = 100;
++    static const uint16_t LOG_LINE_RESERVE = 8;
+     static const uint16_t LOG_BUF_SIZE = 2048;
+     touchgfx::Unicode::UnicodeChar logBuffer[LOG_BUF_SIZE];
+     uint16_t logBufferUsed;
++    bool m_autoFollow;
++    int16_t m_lastScrollY;
+ };
+ 
+-#endif // SCREEN_LOGVIEW_HPP
+\ No newline at end of file
++#endif // SCREEN_LOGVIEW_HPP
++
++
++
+diff --git a/TouchGFX/gui/src/containers/detail.cpp b/TouchGFX/gui/src/containers/detail.cpp
+deleted file mode 100644
+index 3d9e797..0000000
+--- a/TouchGFX/gui/src/containers/detail.cpp
++++ /dev/null
+@@ -1,11 +0,0 @@
+-#include <gui/containers/detail.hpp>
+-
+-detail::detail()
+-{
+-
+-}
+-
+-void detail::initialize()
+-{
+-    detailBase::initialize();
+-}
+diff --git a/TouchGFX/gui/src/model/Data_Transfer.c b/TouchGFX/gui/src/model/Data_Transfer.c
+index 2dd85fc..6e969ac 100644
+--- a/TouchGFX/gui/src/model/Data_Transfer.c
++++ b/TouchGFX/gui/src/model/Data_Transfer.c
+@@ -1,20 +1,20 @@
+-#include "gui/model/Data_Transfer.h"
++﻿#include "gui/model/Data_Transfer.h"
+ #include <string.h>
+ 
+-// ======================== 全局状态变量（向后兼容）====================
++// ======================== 鍏ㄥ眬鐘舵€佸彉閲忥紙鍚戝悗鍏煎锛?===================
+ uint8_t  if_now_SMT       = 1;
+ uint8_t  total_SMT        = 30;
+ uint8_t  now_SMT          = 15;
+ uint16_t Temp             = 388;
+ uint8_t  if_DOWNLOAD_READY = 0;
+ 
+-// ======================== 队列句柄 ========================
+-osMessageQueueId_t dataTransferQueue = NULL;  // System → GUI
+-osMessageQueueId_t guiCmdQueue       = NULL;  // GUI → System
++// ======================== 闃熷垪鍙ユ焺 ========================
++osMessageQueueId_t dataTransferQueue = NULL;  // System 鈫?GUI
++osMessageQueueId_t guiCmdQueue       = NULL;  // GUI 鈫?System
+ 
+-// ======================== 路由表 ========================
+-// 规则：添加 GUI→System 命令时，在此表增加一行即可。
+-// handler 和 queue 至少填一个。
++// ======================== 璺敱琛?========================
++// 瑙勫垯锛氭坊鍔?GUI鈫扴ystem 鍛戒护鏃讹紝鍦ㄦ琛ㄥ鍔犱竴琛屽嵆鍙€?
++// handler 鍜?queue 鑷冲皯濉竴涓€?
+ 
+ static void _h_motor_move(const DT_Msg_t *msg);
+ static void _h_motor_stop(const DT_Msg_t *msg);
+@@ -25,7 +25,7 @@ static void _h_heater_set(const DT_Msg_t *msg);
+ static void _h_system_reset(const DT_Msg_t *msg);
+ 
+ static DT_Route_t s_routeTable[] = {
+-    //  type                    handler              queue（handler 优先）
++    //  type                    handler              queue锛坔andler 浼樺厛锛?
+     { DT_CMD_MOTOR_MOVE,   _h_motor_move,       NULL },
+     { DT_CMD_MOTOR_STOP,   _h_motor_stop,       NULL },
+     { DT_CMD_MOTOR_HOME,   _h_motor_home,       NULL },
+@@ -33,42 +33,42 @@ static DT_Route_t s_routeTable[] = {
+     { DT_CMD_SMT_PAUSE,    _h_smt_pause,        NULL },
+     { DT_CMD_HEATER_SET,   _h_heater_set,       NULL },
+     { DT_CMD_SYSTEM_RESET, _h_system_reset,     NULL },
+-    { DT_CMD_CUSTOM,       NULL,                NULL },  // 预留，由 Model 自行处理
++    { DT_CMD_CUSTOM,       NULL,                NULL },  // 棰勭暀锛岀敱 Model 鑷澶勭悊
+ };
+ 
+ static const int s_routeCount = sizeof(s_routeTable) / sizeof(DT_Route_t);
+ 
+ void DT_Init(void)
+ {
+-    // 目前路由表为静态数组，无需动态初始化
+-    // 未来可在此注册动态路由
++    // 鐩墠璺敱琛ㄤ负闈欐€佹暟缁勶紝鏃犻渶鍔ㄦ€佸垵濮嬪寲
++    // 鏈潵鍙湪姝ゆ敞鍐屽姩鎬佽矾鐢?
+ }
+ 
+-// ======================== 路由分发 ========================
++// ======================== 璺敱鍒嗗彂 ========================
+ void DT_Dispatch(const DT_Msg_t *cmd)
+ {
+     if (cmd == NULL) return;
+ 
+     for (int i = 0; i < s_routeCount; i++) {
+         if (s_routeTable[i].type == cmd->type) {
+-            // 1. handler 优先（直接调用）
++            // 1. handler 浼樺厛锛堢洿鎺ヨ皟鐢級
+             if (s_routeTable[i].handler != NULL) {
+                 s_routeTable[i].handler(cmd);
+                 return;
+             }
+-            // 2. 队列转发（跨任务通信）
++            // 2. 闃熷垪杞彂锛堣法浠诲姟閫氫俊锛?
+             if (s_routeTable[i].queue != NULL) {
+                 osMessageQueuePut(s_routeTable[i].queue, cmd, 0, 0);
+                 return;
+             }
+-            // 3. 无 handler 无 queue — 静默忽略
++            // 3. 鏃?handler 鏃?queue 鈥?闈欓粯蹇界暐
+             return;
+         }
+     }
+-    // 未匹配 — 可通过日志输出调试
++    // 鏈尮閰?鈥?鍙€氳繃鏃ュ織杈撳嚭璋冭瘯
+ }
+ 
+-// ======================== GUI → System 命令发送 ========================
++// ======================== GUI 鈫?System 鍛戒护鍙戦€?========================
+ void DT_SendCommand(const DT_Msg_t *cmd)
+ {
+     if (guiCmdQueue != NULL) {
+@@ -76,7 +76,7 @@ void DT_SendCommand(const DT_Msg_t *cmd)
+     }
+ }
+ 
+-// ======================== System → GUI 通知发送 ========================
++// ======================== System 鈫?GUI 閫氱煡鍙戦€?========================
+ static void _DT_PutToGuiQueue(const DT_Msg_t *msg)
+ {
+     if (dataTransferQueue != NULL) {
+@@ -124,59 +124,73 @@ void DT_NotifyCustom(uint8_t code, uint8_t param)
+     _DT_PutToGuiQueue(&msg);
+ }
+ 
+-// ======================== 命令处理器（Handler）====================
+-// 每个 handler 仅做最少的参数提取 + 调用已有的系统函数。
+-// 复杂业务逻辑应在各自的任务中实现。
++void DT_NotifyMotorSpeed(uint16_t speed)
++{
++    DT_Msg_t msg = { .type = DT_MOTOR_SPEED, .data.motor_speed = speed };
++    _DT_PutToGuiQueue(&msg);
++}
++
++void DT_NotifyLogText(uint8_t code, uint8_t param)
++{
++    DT_Msg_t msg = { .type = DT_LOG_TEXT };
++    msg.data.tag.code = code;
++    msg.data.tag.param = param;
++    _DT_PutToGuiQueue(&msg);
++}
++
++// ======================== 鍛戒护澶勭悊鍣?Handler) =======================
++// 姣忎釜 handler 浠呭仛鏈€灏戠殑鍙傛暟鎻愬彇 + 璋冪敤宸叉湁鐨勭郴缁熷嚱鏁般€?
++// 澶嶆潅涓氬姟閫昏緫搴斿湪鍚勮嚜鐨勪换鍔′腑瀹炵幇銆?
+ 
+-#include "driver_motor.h"   // Motor_Init, positionMode3Run 等
+-#include "app_motion.h"      // 运动控制函数
++#include "driver_motor.h"   // Motor_Init, positionMode3Run 绛?
++#include "app_motion.h"      // 杩愬姩鎺у埗鍑芥暟
+ 
+ static void _h_motor_move(const DT_Msg_t *msg)
+ {
+     int32_t x = msg->data.move.x;
+     int32_t y = msg->data.move.y;
+     int32_t r = msg->data.move.r;
+-    // TODO: 将 x,y,r 转换为步数，通过 motion_cmd_queue 发送给 MotionTask_Func
+-    // 示例：MotionCmd_t cmd = { .cmd_type = MOTION_CMD_MOVE_TO, .target_x = x, ... };
++    // TODO: 灏?x,y,r 杞崲涓烘鏁帮紝閫氳繃 motion_cmd_queue 鍙戦€佺粰 MotionTask_Func
++    // 绀轰緥锛歁otionCmd_t cmd = { .cmd_type = MOTION_CMD_MOVE_TO, .target_x = x, ... };
+     // osMessageQueuePut(motion_cmd_queue, &cmd, 0, 0);
+ }
+ 
+ static void _h_motor_stop(const DT_Msg_t *msg)
+ {
+-    // TODO: 通过 motion_cmd_queue 发送急停命令
+-    // 参考 Task/app_test.c 中的 axis_stop() + motorSyncTrigger()
++    // TODO: 閫氳繃 motion_cmd_queue 鍙戦€佹€ュ仠鍛戒护
++    // 鍙傝€?Task/app_test.c 涓殑 axis_stop() + motorSyncTrigger()
+ }
+ 
+ static void _h_motor_home(const DT_Msg_t *msg)
+ {
+-    // TODO: 触发三轴归零序列
+-    // 参考 Motor_Init() 中的归零逻辑
++    // TODO: 瑙﹀彂涓夎酱褰掗浂搴忓垪
++    // 鍙傝€?Motor_Init() 涓殑褰掗浂閫昏緫
+ }
+ 
+ static void _h_smt_start(const DT_Msg_t *msg)
+ {
+-    smt_Start();  // 调用 Data_Transfer.c 中已有的占位函数
++    smt_Start();  // 璋冪敤 Data_Transfer.c 涓凡鏈夌殑鍗犱綅鍑芥暟
+ }
+ 
+ static void _h_smt_pause(const DT_Msg_t *msg)
+ {
+-    // TODO: 设置暂停标志，由贴片流程任务检测
++    // TODO: 璁剧疆鏆傚仠鏍囧織锛岀敱璐寸墖娴佺▼浠诲姟妫€娴?
+ }
+ 
+ static void _h_heater_set(const DT_Msg_t *msg)
+ {
+     uint16_t temp = msg->data.temp;
+-    // TODO: 通过 CAN 发送温度设置命令到加热台（CAN ID 0x10）
+-    // 参考 Drivers/ZeMCU-G4/driver_heater.c
++    // TODO: 閫氳繃 CAN 鍙戦€佹俯搴﹁缃懡浠ゅ埌鍔犵儹鍙帮紙CAN ID 0x10锛?
++    // 鍙傝€?Drivers/ZeMCU-G4/driver_heater.c
+ }
+ 
+ static void _h_system_reset(const DT_Msg_t *msg)
+ {
+-    // TODO: 软件复位，需确保各外设安全关闭
++    // TODO: 杞欢澶嶄綅锛岄渶纭繚鍚勫璁惧畨鍏ㄥ叧闂?
+     // NVIC_SystemReset();
+ }
+ 
+-// ---- 占位函数（向后兼容，待主程序替换）----
++// ---- 鍗犱綅鍑芥暟锛堝悜鍚庡吋瀹癸紝寰呬富绋嬪簭鏇挎崲锛?---
+ static uint8_t motor_reset_done = 0;
+ 
+ void motorReset_Start(void)
+@@ -195,5 +209,6 @@ int motorReset_IsDone(void)
+ 
+ void smt_Start(void)
+ {
+-    // TODO: 启动贴片流程（由贴片任务实现）
+-}
+\ No newline at end of file
++    // TODO: 鍚姩璐寸墖娴佺▼锛堢敱璐寸墖浠诲姟瀹炵幇锛?
++}
++
+diff --git a/TouchGFX/gui/src/model/Model.cpp b/TouchGFX/gui/src/model/Model.cpp
+index 78479a0..7508531 100644
+--- a/TouchGFX/gui/src/model/Model.cpp
++++ b/TouchGFX/gui/src/model/Model.cpp
+@@ -1,4 +1,4 @@
+-#include <gui/model/Model.hpp>
++﻿#include <gui/model/Model.hpp>
+ #include <gui/model/ModelListener.hpp>
+ #include <string.h>
+ 
+@@ -8,25 +8,25 @@ Model::Model() : modelListener(0)
+ 
+ void Model::tick()
+ {
+-    processQueue();  // 每帧处理 System→GUI 通知
++    processQueue();  // 姣忓抚澶勭悊 System鈫扜UI 閫氱煡
+ }
+ 
+-// ======================== System → GUI 通知处理 ========================
++// ======================== System 鈫?GUI 閫氱煡澶勭悊 ========================
+ void Model::processQueue(void)
+ {
+-    // ---- 方向1: GUI→System 命令分发 ----
++    // ---- 鏂瑰悜1: GUI鈫扴ystem 鍛戒护鍒嗗彂 ----
+     if (guiCmdQueue != NULL) {
+         DT_Msg_t cmd;
+         while (osMessageQueueGet(guiCmdQueue, &cmd, NULL, 0) == osOK) {
+-            DT_Dispatch(&cmd);  // 路由表分发到对应 handler/queue
++            DT_Dispatch(&cmd);  // 璺敱琛ㄥ垎鍙戝埌瀵瑰簲 handler/queue
+         }
+     }
+ 
+-    // ---- 方向2: System→GUI 通知处理 ----
++    // ---- 鏂瑰悜2: System鈫扜UI 閫氱煡澶勭悊 ----
+     if (dataTransferQueue == NULL || modelListener == NULL) return;
+ 
+     DT_Msg_t msg;
+-    // 循环取出所有待处理消息（非阻塞）
++    // 寰幆鍙栧嚭鎵€鏈夊緟澶勭悊娑堟伅锛堥潪闃诲锛?
+     while (osMessageQueueGet(dataTransferQueue, &msg, NULL, 0) == osOK) {
+         switch (msg.type) {
+             case DT_SMT_STATUS:
+@@ -48,44 +48,51 @@ void Model::processQueue(void)
+             case DT_CUSTOM_MSG:
+                 modelListener->onNotifyCustom(msg.data.raw[0], msg.data.raw[1]);
+                 break;
++            case DT_MOTOR_SPEED:
++                if (modelListener) modelListener->onNotifyMotorSpeed(msg.data.motor_speed);
++                break;
++            case DT_LOG_TEXT:
++                if (modelListener) modelListener->onNotifyLogText(msg.data.tag.code, msg.data.tag.param);
++                break;
+             default:
+-                // 未识别的消息类型 — 可在此添加日志
++                // 鏈瘑鍒殑娑堟伅绫诲瀷 鈥?鍙湪姝ゆ坊鍔犳棩蹇?
+                 break;
+         }
+     }
+ }
+ 
+-// ======================== GUI → System 命令发送 ========================
+-// Presenter 调用此方法，将用户操作转换为系统命令
++// ======================== GUI 鈫?System 鍛戒护鍙戦€?========================
++// Presenter 璋冪敤姝ゆ柟娉曪紝灏嗙敤鎴锋搷浣滆浆鎹负绯荤粺鍛戒护
+ //
+-// 使用示例（在 Presenter 中）：
+-//   model->sendCommand(DT_CMD_MOTOR_MOVE, 1000, 2000);  // 移动到(10.00mm, 20.00mm)
+-//   model->sendCommand(DT_CMD_HEATER_SET, 1800);          // 设置温度 180.0℃
+-//   model->sendCommand(DT_CMD_SMT_START);                  // 启动贴片
++// 浣跨敤绀轰緥锛堝湪 Presenter 涓級锛?
++//   model->sendCommand(DT_CMD_MOTOR_MOVE, 1000, 2000);  // 绉诲姩鍒?10.00mm, 20.00mm)
++//   model->sendCommand(DT_CMD_HEATER_SET, 1800);          // 璁剧疆娓╁害 180.0鈩?
++//   model->sendCommand(DT_CMD_SMT_START);                  // 鍚姩璐寸墖
+ void Model::sendCommand(DT_MsgType_t type, int32_t p1, int32_t p2)
+ {
+     DT_Msg_t cmd;
+     memset(&cmd, 0, sizeof(cmd));
+     cmd.type = type;
+ 
+-    // 根据命令类型填充参数
++    // 鏍规嵁鍛戒护绫诲瀷濉厖鍙傛暟
+     switch (type) {
+         case DT_CMD_MOTOR_MOVE:
+-            cmd.data.move.x = p1;   // x 坐标 (mm*100)
+-            cmd.data.move.y = p2;   // y 坐标 (mm*100)
+-            cmd.data.move.r = 0;    // r 角度（暂不支持）
++            cmd.data.move.x = p1;   // x 鍧愭爣 (mm*100)
++            cmd.data.move.y = p2;   // y 鍧愭爣 (mm*100)
++            cmd.data.move.r = 0;    // r 瑙掑害锛堟殏涓嶆敮鎸侊級
+             break;
+         case DT_CMD_HEATER_SET:
+-            cmd.data.temp = (uint16_t)p1;  // 目标温度 (0.1℃)
++            cmd.data.temp = (uint16_t)p1;  // 鐩爣娓╁害 (0.1鈩?
+             break;
+         case DT_CMD_CUSTOM:
+             cmd.data.raw[0] = (uint8_t)p1;
+             cmd.data.raw[1] = (uint8_t)p2;
+             break;
+-        // 无参数命令：SMT_START, SMT_PAUSE, MOTOR_STOP, MOTOR_HOME, SYSTEM_RESET
++        // 鏃犲弬鏁板懡浠わ細SMT_START, SMT_PAUSE, MOTOR_STOP, MOTOR_HOME, SYSTEM_RESET
+         default:
+             break;
+     }
+ 
+-    DT_SendCommand(&cmd);  // 放入 guiCmdQueue
+-}
+\ No newline at end of file
++    DT_SendCommand(&cmd);  // 鏀惧叆 guiCmdQueue
++}
++
+diff --git a/TouchGFX/gui/src/screen_home_screen/Screen_HOMEPresenter.cpp b/TouchGFX/gui/src/screen_home_screen/Screen_HOMEPresenter.cpp
+index b15fbe5..c73daff 100644
+--- a/TouchGFX/gui/src/screen_home_screen/Screen_HOMEPresenter.cpp
++++ b/TouchGFX/gui/src/screen_home_screen/Screen_HOMEPresenter.cpp
+@@ -1,4 +1,4 @@
+-#include <gui/screen_home_screen/Screen_HOMEView.hpp>
++﻿#include <gui/screen_home_screen/Screen_HOMEView.hpp>
+ #include <gui/screen_home_screen/Screen_HOMEPresenter.hpp>
+ 
+ Screen_HOMEPresenter::Screen_HOMEPresenter(Screen_HOMEView& v)
+@@ -24,6 +24,17 @@ Model * Screen_HOMEPresenter::getModel()
+ 
+ void Screen_HOMEPresenter::onKeyPressed(uint8_t keyId)
+ {
+-    // 调用View的更新函数，而非直接操作UI
++    // 璋冪敤View鐨勬洿鏂板嚱鏁帮紝鑰岄潪鐩存帴鎿嶄綔UI
+     view.handleKeyEvent(keyId);
+ }
++
++void Screen_HOMEPresenter::onNotifySMTProgress(uint8_t current, uint8_t total)
++{
++    view.handleSMTProgress(current, total);
++}
++
++void Screen_HOMEPresenter::onNotifyMotorSpeed(uint16_t speed)
++{
++    view.handleMotorSpeed(speed);
++}
++
+diff --git a/TouchGFX/gui/src/screen_home_screen/Screen_HOMEView.cpp b/TouchGFX/gui/src/screen_home_screen/Screen_HOMEView.cpp
+index 14d54b2..bf89fbb 100644
+--- a/TouchGFX/gui/src/screen_home_screen/Screen_HOMEView.cpp
++++ b/TouchGFX/gui/src/screen_home_screen/Screen_HOMEView.cpp
+@@ -1,10 +1,12 @@
+-#include <gui/screen_home_screen/Screen_HOMEView.hpp>
++﻿#include <gui/screen_home_screen/Screen_HOMEView.hpp>
+ #include <gui/common/FrontendApplication.hpp>
+ #include <gui/model/Data_Transfer.h>
+ 
+ 
+ Screen_HOMEView::Screen_HOMEView()
+-    : last_if_now_SMT(0xFF)
++    : last_speed_applied(0)
++    , last_motor_speed(0)
++    , last_if_now_SMT(0xFF)
+     , last_total_SMT(0xFF)
+     , last_now_SMT(0xFF)
+     , last_Temp(0xFF)
+@@ -17,13 +19,14 @@ void Screen_HOMEView::setupScreen()
+ {
+     Screen_HOMEViewBase::setupScreen();
+ 
+-    // 绑定温度文本的 wildcard 缓冲区
++    // 缁戝畾娓╁害鏂囨湰鐨?wildcard 缂撳啿鍖?
+     temperature.setWildcard(wildcard1Buffer);
+ 
+-    // 初始化完成后立即刷新一次，显示初始状态
++    // 鍒濆鍖栧畬鎴愬悗绔嬪嵆鍒锋柊涓€娆★紝鏄剧ず鍒濆鐘舵€?
++    applyMotorSpeed(last_motor_speed, true);
+     handleFreshEvent();
+ 
+-    // 更新缓存
++    // 鏇存柊缂撳瓨
+     last_if_now_SMT = if_now_SMT;
+     last_total_SMT = total_SMT;
+     last_now_SMT   = now_SMT;
+@@ -37,7 +40,7 @@ void Screen_HOMEView::tearDownScreen()
+ 
+ void Screen_HOMEView::handleTickEvent()
+ {
+-    // 仅在 Data_Transfer 数据变化时才刷新屏幕
++    // 浠呭湪 Data_Transfer 鏁版嵁鍙樺寲鏃舵墠鍒锋柊灞忓箷
+     if (if_now_SMT != last_if_now_SMT ||
+         total_SMT  != last_total_SMT  ||
+         now_SMT    != last_now_SMT    ||
+@@ -52,18 +55,47 @@ void Screen_HOMEView::handleTickEvent()
+     }
+ }
+ 
++void Screen_HOMEView::handleSMTProgress(uint8_t current, uint8_t total)
++{
++    // 高频进度不走全局变量，避免耦合旧逻辑
++    now_SMT = current;
++    total_SMT = total;
++    if_now_SMT = 1;
++}
++
++void Screen_HOMEView::handleMotorSpeed(uint16_t speed)
++{
++    applyMotorSpeed(speed, false);
++}
++
+ void Screen_HOMEView::handleKeyEvent(uint8_t key)
+ {
+-    // 将按键事件传递给 PageTable 容器
++    // 灏嗘寜閿簨浠朵紶閫掔粰 PageTable 瀹瑰櫒
+     pageTable.handleKey(key);
+ }
+ 
++void Screen_HOMEView::applyMotorSpeed(uint16_t speed, bool force)
++{
++    if (!force && speed == last_motor_speed) return;
++    last_motor_speed = speed;
++
++    touchgfx::Unicode::snprintf(motorSpeedBuffer, sizeof(motorSpeedBuffer) / sizeof(motorSpeedBuffer[0]), "%u", speed);
++    MotorSpeed.setWildcard(motorSpeedBuffer);
++    MotorSpeed.invalidate();
++    last_speed_applied = 1;
++}
++
+ void Screen_HOMEView::handleFreshEvent()
+ {
+-    // 刷新贴片进度
++    // 鍒锋柊璐寸墖杩涘害
+     Progress1.Data_Refresh();
+ 
+-    // 刷新温度数据
+-    touchgfx::Unicode::snprintf(wildcard1Buffer, 10, "%u", Temp);
++    // 鍒锋柊娓╁害鏁版嵁
++    touchgfx::Unicode::snprintf(wildcard1Buffer, sizeof(wildcard1Buffer)/sizeof(wildcard1Buffer[0]), "%u", Temp);
+     temperature.invalidate();
+-}
+\ No newline at end of file
++}
++
++
++
++
++
+diff --git a/TouchGFX/gui/src/screen_log_screen/Screen_LOGPresenter.cpp b/TouchGFX/gui/src/screen_log_screen/Screen_LOGPresenter.cpp
+index e25ba28..167082a 100644
+--- a/TouchGFX/gui/src/screen_log_screen/Screen_LOGPresenter.cpp
++++ b/TouchGFX/gui/src/screen_log_screen/Screen_LOGPresenter.cpp
+@@ -1,4 +1,4 @@
+-#include <gui/screen_log_screen/Screen_LOGView.hpp>
++﻿#include <gui/screen_log_screen/Screen_LOGView.hpp>
+ #include <gui/screen_log_screen/Screen_LOGPresenter.hpp>
+ 
+ Screen_LOGPresenter::Screen_LOGPresenter(Screen_LOGView& v)
+@@ -24,6 +24,11 @@ Model * Screen_LOGPresenter::getModel()
+ 
+ void Screen_LOGPresenter::onKeyPressed(uint8_t keyId)
+ {
+-    // 调用View的更新函数，而非直接操作UI
++    // 璋冪敤View鐨勬洿鏂板嚱鏁帮紝鑰岄潪鐩存帴鎿嶄綔UI
+     view.handleKeyEvent(keyId);
+-}
+\ No newline at end of file
++}
++
++void Screen_LOGPresenter::onNotifyLogText(uint8_t code, uint8_t param)
++{
++    view.handleSystemLog(code, param);
++}
+diff --git a/TouchGFX/gui/src/screen_log_screen/Screen_LOGView.cpp b/TouchGFX/gui/src/screen_log_screen/Screen_LOGView.cpp
+index bbb2f21..7c615dc 100644
+--- a/TouchGFX/gui/src/screen_log_screen/Screen_LOGView.cpp
++++ b/TouchGFX/gui/src/screen_log_screen/Screen_LOGView.cpp
+@@ -7,6 +7,8 @@
+ 
+ Screen_LOGView::Screen_LOGView()
+     : logBufferUsed(0)
++    , m_autoFollow(true)
++    , m_lastScrollY(0)
+ {
+     logBuffer[0] = 0;
+ }
+@@ -21,6 +23,10 @@ void Screen_LOGView::setupScreen()
+     // 将日志缓冲区绑定到 textArea1 的 wildcard
+     textArea1.setWildcard(logBuffer);
+ 
++    // 初始跟随最新日志
++    m_autoFollow = true;
++    m_lastScrollY = 0;
++
+     // 写入模拟日志
+     LogAddStr("=== PnP System Boot ===");
+     LogAddStr("Initializing peripherals...");
+@@ -35,7 +41,18 @@ void Screen_LOGView::setupScreen()
+ 
+ void Screen_LOGView::handleTickEvent()
+ {
++    // 检测用户是否手动上滑，若是则暂停自动跟随
++    const int16_t currentY = scrollableContainer1.getScrollY();
++    const int16_t maxY = scrollableContainer1.getMaxScrollY();
++    const int16_t delta = currentY - m_lastScrollY;
++
++    if (delta < -4) {
++        m_autoFollow = false;
++    } else if (maxY >= 0 && currentY >= maxY - 4) {
++        m_autoFollow = true;
++    }
+ 
++    m_lastScrollY = currentY;
+ }
+ 
+ void Screen_LOGView::tearDownScreen()
+@@ -49,10 +66,76 @@ void Screen_LOGView::handleKeyEvent(uint8_t key)
+     pageTable.handleKey(key);
+ }
+ 
++void Screen_LOGView::handleSystemLog(uint8_t code, uint8_t param)
++{
++    char line[48];
++    touchgfx::Unicode::snprintf(line, sizeof(line), "%u:%u", code, param);
++    LogAddStr(line);
++}
++
++bool Screen_LOGView::isUserScrolledUp() const
++{
++    return !m_autoFollow;
++}
++
++bool Screen_LOGView::isNearBottom() const
++{
++    return m_autoFollow;
++}
++
++void Screen_LOGView::scrollToBottom(bool force)
++{
++    if (force || m_autoFollow || isNearBottom()) {
++        scrollableContainer1.invalidate();
++        scrollableContainer1.doScroll(0, 9999);
++        m_autoFollow = true;
++    }
++}
++
++uint16_t Screen_LOGView::countLines() const
++{
++    uint16_t count = 0;
++    for (uint16_t i = 0; i < logBufferUsed; ++i) {
++        if (logBuffer[i] == '\n') {
++            count++;
++        }
++    }
++    return count;
++}
++
++void Screen_LOGView::trimOldestLines(uint16_t maxLines)
++{
++    uint16_t lines = countLines();
++    while (lines > maxLines) {
++        uint16_t removePos = 0;
++        while (removePos < logBufferUsed && logBuffer[removePos] != '\n') {
++            removePos++;
++        }
++        if (removePos < logBufferUsed) {
++            removePos++; // 包含换行符
++        }
++
++        const uint16_t remain = logBufferUsed - removePos;
++        if (remain > 0) {
++            memmove(&logBuffer[0], &logBuffer[removePos], remain * sizeof(logBuffer[0]));
++        }
++        logBufferUsed = remain;
++        logBuffer[logBufferUsed] = 0;
++        lines--;
++    }
++}
++
+ void Screen_LOGView::LogAddStr(const char* str)
+ {
++    if (str == NULL || str[0] == '\0') {
++        return;
++    }
++
+     uint16_t strLen = (uint16_t)strlen(str);
+ 
++    // 预裁剪：保留 8 行余量，避免每条新日志都触发裁剪
++    trimOldestLines(LOG_MAX_LINES + LOG_LINE_RESERVE);
++
+     // 检查缓冲区空间: 新字符串 + 换行符 + 终止符
+     if (logBufferUsed + strLen + 2 > LOG_BUF_SIZE)
+         return;
+@@ -77,7 +160,8 @@ void Screen_LOGView::LogAddStr(const char* str)
+     }
+ 
+     textArea1.invalidate();
++    scrollToBottom(false);
++}
++
++
+ 
+-    // 滚动到底部 (doScroll 会自动 clamp 到有效范围)
+-    scrollableContainer1.doScroll(0, 9999);
+-}
+\ No newline at end of file
+diff --git "a/TouchGFX/gui/\346\226\260\345\273\272 DOC \346\226\207\346\241\243.doc" "b/TouchGFX/gui/\346\226\260\345\273\272 DOC \346\226\207\346\241\243.doc"
+new file mode 100644
+index 0000000000000000000000000000000000000000..7c2ede0f8b6d2dc95995c6e1a719735798b30b99
+GIT binary patch
+literal 14848
+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
+UI88VTbmf~-?5duJ>{~AUA6u;E3;+NC
+
+literal 0
+HcmV?d00001
+
+diff --git a/TouchGFX/pnp_1.touchgfx b/TouchGFX/pnp_1.touchgfx
+index 370300d..58f82bd 100644
+--- a/TouchGFX/pnp_1.touchgfx
++++ b/TouchGFX/pnp_1.touchgfx
+@@ -23,17 +23,29 @@
+             "Name": "HOME",
+             "X": 60,
+             "Width": 66,
+-            "Height": 31,
++            "Height": 28,
+             "TextId": "__SingleUse_G70R",
+             "TextRotation": "0",
+             "AutoSize": true
+           },
++          {
++            "Type": "TextArea",
++            "Name": "MotorSpeed",
++            "X": 60,
++            "Y": 265,
++            "Width": 241,
++            "Height": 28,
++            "TextId": "__SingleUse_2QJ5",
++            "TextRotation": "0",
++            "AutoSize": true,
++            "Wildcard1": {}
++          },
+           {
+             "Type": "TextArea",
+             "Name": "temperature",
+             "X": 265,
+             "Width": 135,
+-            "Height": 31,
++            "Height": 28,
+             "TextId": "__SingleUse_SYMX",
+             "TextRotation": "0",
+             "AutoSize": true,
+@@ -46,8 +58,8 @@
+           {
+             "Type": "CustomContainerInstance",
+             "Name": "Progress1",
+-            "X": 153,
+-            "Y": 76,
++            "X": 140,
++            "Y": 40,
+             "Width": 180,
+             "Height": 180,
+             "CustomContainerDefinitionName": "circleProgress"
+@@ -60,14 +72,16 @@
+             "CustomContainerDefinitionName": "PageTable"
+           },
+           {
+-            "Type": "Button",
+-            "Name": "open",
+-            "X": 6,
+-            "Y": 256,
+-            "Width": 44,
+-            "Height": 44,
+-            "Pressed": "simple_left.png",
+-            "Released": "simple_right.png"
++            "Type": "TextArea",
++            "Name": "progress",
++            "X": 60,
++            "Y": 237,
++            "Width": 180,
++            "Height": 28,
++            "TextId": "__SingleUse_TDMH",
++            "TextRotation": "0",
++            "AutoSize": true,
++            "Wildcard1": {}
+           }
+         ],
+         "Interactions": [
+@@ -143,16 +157,6 @@
+             "Height": 300,
+             "CustomContainerDefinitionName": "PageTable"
+           },
+-          {
+-            "Type": "Button",
+-            "Name": "open",
+-            "X": 6,
+-            "Y": 256,
+-            "Width": 44,
+-            "Height": 44,
+-            "Pressed": "simple_left.png",
+-            "Released": "simple_right.png"
+-          },
+           {
+             "Type": "TextArea",
+             "Name": "Ready",
+@@ -249,16 +253,6 @@
+             "Width": 153,
+             "Height": 300,
+             "CustomContainerDefinitionName": "PageTable"
+-          },
+-          {
+-            "Type": "Button",
+-            "Name": "open",
+-            "X": 6,
+-            "Y": 256,
+-            "Width": 44,
+-            "Height": 44,
+-            "Pressed": "simple_left.png",
+-            "Released": "simple_right.png"
+           }
+         ],
+         "Interactions": []
+@@ -284,8 +278,8 @@
+             "Type": "TextArea",
+             "Name": "caution",
+             "X": 77,
+-            "Width": 307,
+-            "Height": 168,
++            "Width": 305,
++            "Height": 186,
+             "TextId": "__SingleUse_3GH9",
+             "TextRotation": "0",
+             "AutoSize": true
+@@ -297,23 +291,13 @@
+             "Height": 300,
+             "CustomContainerDefinitionName": "PageTable"
+           },
+-          {
+-            "Type": "Button",
+-            "Name": "open",
+-            "X": 6,
+-            "Y": 256,
+-            "Width": 44,
+-            "Height": 44,
+-            "Pressed": "simple_left.png",
+-            "Released": "simple_right.png"
+-          },
+           {
+             "Type": "TextArea",
+             "Name": "Reseting",
+             "X": 77,
+             "Y": 56,
+             "Width": 103,
+-            "Height": 28,
++            "Height": 31,
+             "Visible": false,
+             "TextId": "__SingleUse_FQ8H",
+             "TextRotation": "0",
+@@ -325,7 +309,7 @@
+             "X": 77,
+             "Y": 56,
+             "Width": 176,
+-            "Height": 84,
++            "Height": 93,
+             "Visible": false,
+             "TextId": "__SingleUse_2LX0",
+             "TextRotation": "0",
+@@ -352,87 +336,6 @@
+       }
+     ],
+     "CustomContainerDefinitions": [
+-      {
+-        "Name": "detail",
+-        "Y": 51,
+-        "Width": 97,
+-        "Height": 300,
+-        "Components": [
+-          {
+-            "Type": "Box",
+-            "Name": "box1",
+-            "Width": 97,
+-            "Height": 300,
+-            "Color": {
+-              "Red": 255,
+-              "Green": 255,
+-              "Blue": 255
+-            }
+-          },
+-          {
+-            "Type": "Line",
+-            "Name": "line1",
+-            "X": 94,
+-            "Width": 3,
+-            "Height": 300,
+-            "EndY": 300.0,
+-            "LineWidth": 10.0,
+-            "LineEndingStyle": "Square"
+-          },
+-          {
+-            "Type": "TextArea",
+-            "Name": "home",
+-            "Y": 14,
+-            "Width": 60,
+-            "Height": 32,
+-            "TextId": "__SingleUse_QTOZ",
+-            "TextRotation": "0",
+-            "AutoSize": true
+-          },
+-          {
+-            "Type": "TextArea",
+-            "Name": "download",
+-            "Y": 64,
+-            "Width": 76,
+-            "Height": 32,
+-            "TextId": "__SingleUse_XWGZ",
+-            "TextRotation": "0",
+-            "AutoSize": true
+-          },
+-          {
+-            "Type": "TextArea",
+-            "Name": "reset",
+-            "Y": 164,
+-            "Width": 64,
+-            "Height": 32,
+-            "TextId": "__SingleUse_13NH",
+-            "TextRotation": "0",
+-            "AutoSize": true
+-          },
+-          {
+-            "Type": "TextArea",
+-            "Name": "message",
+-            "Y": 114,
+-            "Width": 33,
+-            "Height": 32,
+-            "TextId": "__SingleUse_SXYA",
+-            "TextRotation": "0",
+-            "AutoSize": true
+-          }
+-        ],
+-        "Interactions": [
+-          {
+-            "InteractionName": "Interaction1",
+-            "Trigger": {
+-              "Type": "TriggerNone"
+-            },
+-            "Action": {
+-              "Type": "ActionCustom",
+-              "FunctionName": "function1"
+-            }
+-          }
+-        ]
+-      },
+       {
+         "Name": "PageTable",
+         "X": -50,
+@@ -461,15 +364,6 @@
+             "LineWidth": 10.0,
+             "LineEndingStyle": "Square"
+           },
+-          {
+-            "Type": "CustomContainerInstance",
+-            "Name": "detail1",
+-            "X": 56,
+-            "Width": 97,
+-            "Height": 300,
+-            "Visible": false,
+-            "CustomContainerDefinitionName": "detail"
+-          },
+           {
+             "Type": "Image",
+             "Name": "refre",
+diff --git a/TouchGFX/simulator/msvs/Application.vcxproj b/TouchGFX/simulator/msvs/Application.vcxproj
+index 97b6382..19fa52d 100644
+--- a/TouchGFX/simulator/msvs/Application.vcxproj
++++ b/TouchGFX/simulator/msvs/Application.vcxproj
+@@ -20,8 +20,6 @@
+     <ClCompile Include="..\..\gui\src\common\FrontendApplication.cpp"/>
+     <ClCompile Include="..\..\generated\gui_generated\src\common\FrontendApplicationBase.cpp"/>
+     <ClCompile Include="..\..\gui\src\model\Model.cpp"/>
+-    <ClCompile Include="..\..\gui\src\containers\detail.cpp"/>
+-    <ClCompile Include="..\..\generated\gui_generated\src\containers\detailBase.cpp"/>
+     <ClCompile Include="..\..\generated\simulator\src\video\SoftwareMJPEGDecoder.cpp"/>
+     <ClCompile Include="..\..\gui\src\containers\PageTable.cpp"/>
+     <ClCompile Include="..\..\generated\gui_generated\src\containers\PageTableBase.cpp"/>
+@@ -40,8 +38,6 @@
+     <ClCompile Include="..\..\gui\src\screen_reset_screen\Screen_RESETPresenter.cpp"/>
+     <ClCompile Include="..\..\gui\src\screen_reset_screen\Screen_RESETView.cpp"/>
+     <ClCompile Include="..\..\generated\gui_generated\src\screen_reset_screen\Screen_RESETViewBase.cpp"/>
+-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREPresenter.cpp"/>
+-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREView.cpp"/>
+   </ItemGroup>
+   <ItemGroup>
+     <None Include="$(ApplicationRoot)\assets\texts\texts.xlsx"/>
+@@ -189,8 +185,6 @@
+     <ClInclude Include="..\..\gui\include\gui\model\Model.hpp"/>
+     <ClInclude Include="..\..\gui\include\gui\model\ModelListener.hpp"/>
+     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\common\SimConstants.hpp"/>
+-    <ClInclude Include="..\..\gui\include\gui\containers\detail.hpp"/>
+-    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\containers\detailBase.hpp"/>
+     <ClInclude Include="..\..\gui\include\gui\screen_log_screen\Screen_LOGPresenter.hpp"/>
+     <ClInclude Include="..\..\gui\include\gui\screen_home_screen\Screen_HOMEPresenter.hpp"/>
+     <ClInclude Include="..\..\generated\simulator\include\simulator\video\DirectFrameBufferVideoController.hpp"/>
+@@ -211,8 +205,6 @@
+     <ClInclude Include="..\..\gui\include\gui\screen_reset_screen\Screen_RESETPresenter.hpp"/>
+     <ClInclude Include="..\..\gui\include\gui\screen_reset_screen\Screen_RESETView.hpp"/>
+     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_reset_screen\Screen_RESETViewBase.hpp"/>
+-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREPresenter.hpp"/>
+-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREView.hpp"/>
+   </ItemGroup>
+   <ItemGroup>
+     <ResourceCompile Include="$(ApplicationRoot)\generated\simulator\touchgfx.rc"/>
+diff --git a/TouchGFX/simulator/msvs/Application.vcxproj.filters b/TouchGFX/simulator/msvs/Application.vcxproj.filters
+index 7e22f5c..686789c 100644
+--- a/TouchGFX/simulator/msvs/Application.vcxproj.filters
++++ b/TouchGFX/simulator/msvs/Application.vcxproj.filters
+@@ -232,12 +232,6 @@
+     <Filter Include="Header Files\generated\gui_generated\screen_reset_screen">
+       <UniqueIdentifier>70B4A251-240E-3A2B-EF6E-8ED1C8BA974B</UniqueIdentifier>
+     </Filter>
+-    <Filter Include="Source Files\gui\screen_refre_screen">
+-      <UniqueIdentifier>8FB043E4-11F6-526D-2D56-1E2DB7E80A1F</UniqueIdentifier>
+-    </Filter>
+-    <Filter Include="Header Files\gui\screen_refre_screen">
+-      <UniqueIdentifier>1DC3B36B-1058-3971-A26D-CEFF0D054906</UniqueIdentifier>
+-    </Filter>
+   </ItemGroup>
+   <ItemGroup>
+     <ClCompile Include="$(TouchGFXReleasePath)\framework\source\platform\driver\touch\SDL2TouchController.cpp">
+@@ -267,12 +261,6 @@
+     <ClCompile Include="..\..\gui\src\model\Model.cpp">
+       <Filter>Source Files\gui\model</Filter>
+     </ClCompile>
+-    <ClCompile Include="..\..\gui\src\containers\detail.cpp">
+-      <Filter>Source Files\gui\containers</Filter>
+-    </ClCompile>
+-    <ClCompile Include="..\..\generated\gui_generated\src\containers\detailBase.cpp">
+-      <Filter>Source Files\generated\gui_generated\containers</Filter>
+-    </ClCompile>
+     <ClCompile Include="..\..\generated\simulator\src\video\SoftwareMJPEGDecoder.cpp">
+       <Filter>Source Files\generated\simulator\video</Filter>
+     </ClCompile>
+@@ -327,12 +315,6 @@
+     <ClCompile Include="..\..\generated\gui_generated\src\screen_reset_screen\Screen_RESETViewBase.cpp">
+       <Filter>Source Files\generated\gui_generated\screen_reset_screen</Filter>
+     </ClCompile>
+-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREPresenter.cpp">
+-      <Filter>Source Files\gui\screen_refre_screen</Filter>
+-    </ClCompile>
+-    <ClCompile Include="..\..\gui\src\screen_refre_screen\Screen_REFREView.cpp">
+-      <Filter>Source Files\gui\screen_refre_screen</Filter>
+-    </ClCompile>
+   </ItemGroup>
+   <ItemGroup>
+     <None Include="$(ApplicationRoot)\assets\texts\texts.xlsx">
+@@ -766,12 +748,6 @@
+     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\common\SimConstants.hpp">
+       <Filter>Header Files\generated\gui_generated\common</Filter>
+     </ClInclude>
+-    <ClInclude Include="..\..\gui\include\gui\containers\detail.hpp">
+-      <Filter>Header Files\gui\containers</Filter>
+-    </ClInclude>
+-    <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\containers\detailBase.hpp">
+-      <Filter>Header Files\generated\gui_generated\containers</Filter>
+-    </ClInclude>
+     <ClInclude Include="..\..\gui\include\gui\screen_log_screen\Screen_LOGPresenter.hpp">
+       <Filter>Header Files\gui\screen_log_screen</Filter>
+     </ClInclude>
+@@ -832,12 +808,6 @@
+     <ClInclude Include="..\..\generated\gui_generated\include\gui_generated\screen_reset_screen\Screen_RESETViewBase.hpp">
+       <Filter>Header Files\generated\gui_generated\screen_reset_screen</Filter>
+     </ClInclude>
+-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREPresenter.hpp">
+-      <Filter>Header Files\gui\screen_refre_screen</Filter>
+-    </ClInclude>
+-    <ClInclude Include="..\..\gui\include\gui\screen_refre_screen\Screen_REFREView.hpp">
+-      <Filter>Header Files\gui\screen_refre_screen</Filter>
+-    </ClInclude>
+   </ItemGroup>
+   <ItemGroup>
+     <ResourceCompile Include="$(ApplicationRoot)\generated\simulator\touchgfx.rc">
+-- 
+2.53.0.windows.1
+
