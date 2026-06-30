@@ -82,6 +82,9 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("HEAT_OFF")) {
         return HCMD_HEAT_OFF;
     }
+    if (MATCH("HEATER_QUERY")) {
+        return HCMD_HEATER_QUERY;
+    }
     if (MATCH("SET_ORIGIN")) {
         return HCMD_SET_ORIGIN;
     }

@@ -11,6 +11,7 @@
 // 16384 / 32 = 512 脉冲每毫米
 #define PULSES_PER_MM  512  
 
+//#define DEBUG_MOTOR  // cancel comment to enable motor CAN TX log
 
 
 int32_t absoluteAxis = 163840;           //绝对坐标 163840(10圈)
@@ -42,6 +43,12 @@ void Motor_Init(void) {
     motorEnable(0x02, 1);
     motorEnable(0x03, 1);
     osDelay(50);
+
+    // 2.5 设置工作电流 (mA)
+    setIWorkMode(0x01, 1400);  // X1
+    setIWorkMode(0x02, 1400);  // X2
+    setIWorkMode(0x03, 1400);  // Y
+    osDelay(20);
 
     // 3. 设置到达阈值（确保能收到 0x02 到位反馈）
     motorSetArrivalThreshold(0x01);
@@ -122,8 +129,10 @@ void motorSyncTrigger(uint8_t slaveAddr) {
     // 根据你的代码风格，可能需要设置 CAN_ID = 0 (广播)
     uint16_t broadcastId = 0; 
     CAN_Transmit_Data(&hfdcan1, broadcastId, txBuffer, 1); // 长度为1
+#ifdef DEBUG_MOTOR
 	extern void PrintDebug(const char* fmt, ...);
 	PrintDebug("[MOTOR] syncTrigger broadcast\r\n");
+#endif
 }
 
 
@@ -231,8 +240,10 @@ void positionMode1Run(uint8_t slaveAddr,uint8_t dir,uint16_t speed,uint8_t acc,u
   txBuffer[5] = (pulses >> 8)&0xFF;   //脉冲数 bit15 - bit8
   txBuffer[6] = (pulses >> 0)&0xFF;   //脉冲数 bit7 - bit0
 	
+#ifdef DEBUG_MOTOR
 extern void PrintDebug(const char* fmt, ...);
 	PrintDebug("[MOTOR] pos2run id=%d spd=%d rel=%ld\r\n", (int)slaveAddr, (int)speed, (long)pulses);
+#endif
 	CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
 }
 
@@ -256,8 +267,10 @@ void positionMode2Run(uint8_t slaveAddr,uint16_t speed,uint8_t acc,int32_t relAx
   txBuffer[5] = (relAxis >> 8)&0xFF;   //相对坐标 bit15 - bit8
   txBuffer[6] = (relAxis >> 0)&0xFF;   //相对坐标 bit7 - bit0
 	
+#ifdef DEBUG_MOTOR
 	extern void PrintDebug(const char* fmt, ...);
 	PrintDebug("[MOTOR] pos2run id=%d spd=%d rel=%ld\r\n", (int)slaveAddr, (int)speed, (long)relAxis);
+#endif
 	CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
 }
 
@@ -281,8 +294,10 @@ void positionMode3Run(uint8_t slaveAddr,uint16_t speed,uint16_t acc,int32_t absA
     txBuffer[5] = (absAxis >> 8)&0xFF;   //绝对坐标 bit15 - bit8
     txBuffer[6] = (absAxis >> 0)&0xFF;   //绝对坐标 bit7 - bit0
     // txBuffer[7] 会被 CAN_Transmit_Data 自动填充 CRC	
+#ifdef DEBUG_MOTOR
     extern void PrintDebug(const char* fmt, ...);
 	PrintDebug("[MOTOR] pos2run id=%d spd=%d rel=%ld\r\n", (int)slaveAddr, (int)speed, (long)absAxis);
+#endif
 	CAN_Transmit_Data(&hfdcan1, slaveAddr, txBuffer, 7);
 }
 

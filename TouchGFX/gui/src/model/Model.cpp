@@ -57,6 +57,9 @@ void Model::processQueue(void)
             case DT_LOG_TEXT:
                 if (modelListener) modelListener->onNotifyLogText(msg.data.tag.code, msg.data.tag.param);
                 break;
+            case DT_WIFI_STATUS:
+                if (modelListener) modelListener->onNotifyWifiStatus(msg.data.status);
+                break;
             default:
                 // 鏈瘑鍒殑娑堟伅绫诲瀷 鈥?鍙湪姝ゆ坊鍔犳棩蹇?
                 break;

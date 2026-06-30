@@ -49,6 +49,7 @@ typedef enum {
     DT_CUSTOM_MSG       = 0x05, // 自定义消息（备用）
     DT_MOTOR_SPEED      = 0x06, // 电机默认速度变更（低频）
     DT_LOG_TEXT          = 0x07, // 系统日志文本（短文本，GUI格式化）
+    DT_WIFI_STATUS       = 0x08, // WiFi 连接状态变更
 
     // ---- GUI → System 命令（0x10~0x2F）----
     DT_CMD_MOTOR_MOVE   = 0x10, // 电机移动到目标坐标
@@ -121,6 +122,7 @@ void DT_NotifyMotorResetDone(void);
 void DT_NotifyCustom(uint8_t code, uint8_t param);
 void DT_NotifyMotorSpeed(uint16_t speed);
 void DT_NotifyLogText(uint8_t code, uint8_t param);
+void DT_NotifyWifiStatus(uint8_t connected);
 
 // ======================== GUI → System 命令 API ========================
 // 由 Model::sendCommand() 调用，通常不需要手动调用

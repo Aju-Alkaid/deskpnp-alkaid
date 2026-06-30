@@ -29,6 +29,7 @@ public:
     virtual void onNotifyCustom(uint8_t code, uint8_t param) {}
     virtual void onNotifyMotorSpeed(uint16_t speed) {}
     virtual void onNotifyLogText(uint8_t code, uint8_t param) {}
+    virtual void onNotifyWifiStatus(uint8_t connected) {}
 
     void bind(Model* m)
     {

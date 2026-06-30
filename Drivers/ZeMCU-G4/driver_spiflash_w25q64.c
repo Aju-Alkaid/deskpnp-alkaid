@@ -1,4 +1,4 @@
-﻿#include "driver_spiflash_w25q64.h"
+#include "driver_spiflash_w25q64.h"
 //#include "driver_lcd.h"
 #include "driver_timer.h"
 #include "stm32g4xx_hal.h"
@@ -522,6 +522,5 @@ static void calib_set_defaults(CalibrationData_t *calib)
     calib->z_safe_angle  = CALIB_DEFAULT_Z_SAFE;
     calib->z_pick_angle  = CALIB_DEFAULT_Z_PICK;
     calib->z_place_angle = CALIB_DEFAULT_Z_PLACE;
-    calib->cam_p1_val_to_steps = CALIB_DEFAULT_CAM_P1;
-    calib->cam_p3_val_to_steps = CALIB_DEFAULT_CAM_P3;
+		
 }

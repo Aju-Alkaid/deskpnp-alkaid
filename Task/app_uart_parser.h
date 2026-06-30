@@ -25,6 +25,7 @@ typedef enum {
     HCMD_PUMP_OFF,      // 关闭气泵
     HCMD_HEAT_ON,       // 开启加热台
     HCMD_HEAT_OFF,      // 关闭加热台
+    HCMD_HEATER_QUERY,  // 查询加热台状态
     HCMD_MOVE_TO,       // 运动至指定坐标
     /* 退出调试 */
     HCMD_EXIT_DEBUG,

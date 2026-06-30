@@ -1,4 +1,4 @@
-#include "stm32g4xx_hal.h"
+﻿#include "stm32g4xx_hal.h"
 #include "fdcan.h"
 #include <string.h>
 #include "driver_can.h"

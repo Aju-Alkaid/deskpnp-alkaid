@@ -44,6 +44,7 @@ osMessageQueueId_t motor_event_queue;
 osMessageQueueId_t motion_cmd_queue;
 extern osMessageQueueId_t keyEventQueue;
 extern osMessageQueueId_t dataTransferQueue;
+extern osMessageQueueId_t guiCmdQueue;
 osMutexId_t g_debug_mutex = NULL;
 osMessageQueueId_t esp_cmd_queue;
 osMessageQueueId_t host_pkt_queue;
@@ -221,6 +222,7 @@ void MX_FREERTOS_Init(void) {
 	motion_cmd_queue = osMessageQueueNew(20, sizeof(MotionCmd_t), NULL);
 	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
 	dataTransferQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
+	guiCmdQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
 	host_pkt_queue = osMessageQueueNew(64, sizeof(HostMsg_t), NULL);
 	esp_cmd_queue = osMessageQueueNew(8, sizeof(ESP_Cmd_t), NULL);
 	
@@ -248,14 +250,15 @@ void MX_FREERTOS_Init(void) {
 	osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
 //	osThreadNew(Host_Task, NULL, &hostTask_attributes);
-	osThreadNew(StartCamTestTask, NULL, &camTestTask_attributes); //cam
+//	osThreadNew(StartCamTestTask, NULL, &camTestTask_attributes); //cam
 
 //    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
 
   
 //    hostMotionTaskHandle = osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
 
-  osThreadNew(ESP_Task, NULL, &espTask_attributes);
+//  osThreadNew(ESP_Task, NULL, &espTask_attributes);
+	osThreadNew(StartESPTestTask, NULL, &espTestTask_attributes);
 //  pickPlaceTestTaskHandle = osThreadNew(StartPickPlaceTestTask, NULL, &pickPlaceTestTask_attributes);
 
   /* USER CODE END RTOS_THREADS */

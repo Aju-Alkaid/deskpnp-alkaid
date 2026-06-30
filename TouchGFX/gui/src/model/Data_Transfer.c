@@ -159,57 +159,65 @@ void DT_NotifyLogText(uint8_t code, uint8_t param)
     _DT_PutToGuiQueue(&msg);
 }
 
-// ======================== 鍛戒护澶勭悊鍣?Handler) =======================
-// 姣忎釜 handler 浠呭仛鏈€灏戠殑鍙傛暟鎻愬彇 + 璋冪敤宸叉湁鐨勭郴缁熷嚱鏁般€?
-// 澶嶆潅涓氬姟閫昏緫搴斿湪鍚勮嚜鐨勪换鍔′腑瀹炵幇銆?
 
-#include "driver_motor.h"
-#include "app_motion.h"
+void DT_NotifyWifiStatus(uint8_t connected)
+{
+    DT_Msg_t msg; memset(&msg, 0, sizeof(msg));
+    msg.type = DT_WIFI_STATUS;
+    msg.data.status = connected;
+    _DT_PutToGuiQueue(&msg);
+}
+// ---- GUI→System 命令处理器：全部委托给主控端 bridge 层 ----
+// 这些函数由 Task/app_touchgfx_bridge.c 提供实现
+extern void Bridge_MotorMove(int32_t x, int32_t y, int32_t r);
+extern void Bridge_MotorStop(void);
+extern void Bridge_MotorHome(void);
+extern void Bridge_SMTStart(void);
+extern void Bridge_SMTPause(void);
+extern void Bridge_HeaterSet(uint16_t temp);
+extern void Bridge_SystemReset(void);
 
 static void _h_motor_move(const DT_Msg_t *msg)
 {
-    (void)msg;
-    // TODO: 灏?x,y,r 杞换涓烘ラ帮紝閫氳繃 motion_cmd_queue 鍙戦€佺粰 MotionTask_Func
-    // 绀轰緥锛歁otionCmd_t cmd = { .cmd_type = MOTION_CMD_MOVE_TO, .target_x = x, ... };
-    // osMessageQueuePut(motion_cmd_queue, &cmd, 0, 0);
+    Bridge_MotorMove(msg->data.move.x, msg->data.move.y, msg->data.move.r);
 }
 
 static void _h_motor_stop(const DT_Msg_t *msg)
 {
-    // TODO: 閫氳繃 motion_cmd_queue 鍙戦€佹€ュ仠鍛戒护
-    // 鍙傝€?Task/app_test.c 涓殑 axis_stop() + motorSyncTrigger()
+    (void)msg;
+    Bridge_MotorStop();
 }
 
 static void _h_motor_home(const DT_Msg_t *msg)
 {
-    // TODO: 瑙﹀彂涓夎酱褰掗浂搴忓垪
-    // 鍙傝€?Motor_Init() 涓殑褰掗浂閫昏緫
+    (void)msg;
+    Bridge_MotorHome();
 }
 
 static void _h_smt_start(const DT_Msg_t *msg)
 {
-    smt_Start();  // 璋冪敤 Data_Transfer.c 涓凡鏈夌殑鍗犱綅鍑芥暟
+    (void)msg;
+    Bridge_SMTStart();
 }
 
 static void _h_smt_pause(const DT_Msg_t *msg)
 {
-    // TODO: 璁剧疆鏆傚仠鏍囧織锛岀敱璐寸墖娴佺▼浠诲姟妫€娴?
+    (void)msg;
+    Bridge_SMTPause();
 }
 
 static void _h_heater_set(const DT_Msg_t *msg)
 {
-    (void)msg;
-    // TODO: 閫氳繃 CAN 鍙戦€佹俯搴辰缃懡浠ゅ埌鍔犵儹鍙帮紙CAN ID 0x10锛?
-    // 鍙傝€?Drivers/ZeMCU-G4/driver_heater.c
+    Bridge_HeaterSet(msg->data.temp);
 }
 
 static void _h_system_reset(const DT_Msg_t *msg)
 {
-    // TODO: 杞欢澶嶄綅锛岄渶纭繚鍚勫璁惧畨鍏ㄥ叧闂?
-    // NVIC_SystemReset();
+    (void)msg;
+    Bridge_SystemReset();
 }
 
-// ---- 鍗犱綅鍑芥暟锛堝悜鍚庡吋瀹癸紝寰呬富绋嬪簭鏇挎崲锛?---
+// ---- 占位函数（向后兼容，待主程序替换）----
 static uint8_t motor_reset_done = 0;
 
 void motorReset_Start(void)

@@ -416,7 +416,7 @@ static void process_p2_frame(const char *str) {
  *  Process3 帧分发 (ISR 上下文)
  *
  *  v2 changes:
- *  - Phase1: pos N:dx N:dy WITHOUT "end" -> auto-complete on 2 fields
+ *  - Phase1: pos N:dx N:dy WITH "end" (same format as Phase2)
  *  - Phase2: ok followed by N:{ao} angle frame
  *  - err3_3: non-fatal (Cam requests retry), err3_7: fatal
  * ================================================================ */
@@ -457,7 +457,7 @@ static void process_p3_frame(const char *str) {
     /* ---- "pos" — 开始位置数据序列 ---- */
     if (str[0] == 'p' && str[1] == 'o' && str[2] == 's' && str[3] == '\0') {
         if (g_p3_sub == P3_PHASE1)
-            collect_begin(2, true);    /* auto-complete, no "end" */
+            collect_begin(2, false);   /* needs "end" */
         else
             collect_begin(2, false);   /* needs "end" */
         return;
@@ -791,6 +791,10 @@ bool Vision_IsTimedOut(void) {
 void Vision_ForceIdle(void) {
     PrintDebug("[VISION] Force idle due to timeout\r\n");
     reset_all();
+}
+
+void Vision_SendEnd(void) {
+    send_frame("end");
 }
 
 uint32_t Vision_GetAlignRxCount(void) { return g_p2_align_rx_cnt; }

@@ -33,9 +33,13 @@ extern const osThreadAttr_t hostMotionTestTask_attributes;
 void StartPickPlaceTestTask(void *argument);
 extern const osThreadAttr_t pickPlaceTestTask_attributes;
 
-#endif
 
 /* ---- 摄像头通讯测试任务 ---- */
 void StartCamTestTask(void *argument);
 extern const osThreadAttr_t camTestTask_attributes;
 
+/* ---- ESP32 通信测试任务 ---- */
+void StartESPTestTask(void *argument);
+extern const osThreadAttr_t espTestTask_attributes;
+
+#endif

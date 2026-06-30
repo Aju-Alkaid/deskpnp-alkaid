@@ -58,19 +58,34 @@ static HAL_StatusTypeDef Heater_Transmit(uint8_t *data, uint8_t len, bool need_c
 void Heater_SendStart(void)
 {
     uint8_t cmd = HEATER_CMD_START;
-    Heater_Transmit(&cmd, 1, false);
+    HAL_StatusTypeDef ret = Heater_Transmit(&cmd, 1, false);
+    if (ret == HAL_OK) {
+        PrintDebug("[HEATER] START sent OK\r\n");
+    } else {
+        PrintDebug("[HEATER] START TX FAILED (err=%d)\r\n", (int)ret);
+    }
 }
 
 void Heater_SendStop(void)
 {
     uint8_t cmd = HEATER_CMD_STOP;
-    Heater_Transmit(&cmd, 1, false);
+    HAL_StatusTypeDef ret = Heater_Transmit(&cmd, 1, false);
+    if (ret == HAL_OK) {
+        PrintDebug("[HEATER] STOP sent OK\r\n");
+    } else {
+        PrintDebug("[HEATER] STOP TX FAILED (err=%d)\r\n", (int)ret);
+    }
 }
 
 void Heater_SendQuery(void)
 {
     uint8_t cmd = HEATER_CMD_QUERY;
-    Heater_Transmit(&cmd, 1, false);
+    HAL_StatusTypeDef ret = Heater_Transmit(&cmd, 1, false);
+    if (ret == HAL_OK) {
+        PrintDebug("[HEATER] QUERY sent OK\r\n");
+    } else {
+        PrintDebug("[HEATER] QUERY TX FAILED (err=%d)\r\n", (int)ret);
+    }
 }
 
 void Heater_SetTemperature(int16_t temp_0_1c)
@@ -79,7 +94,10 @@ void Heater_SetTemperature(int16_t temp_0_1c)
     data[0] = HEATER_CMD_SET_TEMP;
     data[1] = (temp_0_1c >> 8) & 0xFF;  /* 大端：高字节在前 */
     data[2] = temp_0_1c & 0xFF;         /* 低字节在后 */
-    Heater_Transmit(data, 3, true);     /* 附加 CRC */
+    HAL_StatusTypeDef ret = Heater_Transmit(data, 3, true);     /* 附加 CRC */
+    if (ret != HAL_OK) {
+        PrintDebug("[HEATER] SET_TEMP TX FAILED (err=%d)\r\n", (int)ret);
+    }
 }
 
 void Heater_SetPID(int16_t Kp, int16_t Ki, int16_t Kd)

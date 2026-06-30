@@ -1,4 +1,6 @@
-#include "app_motion.h"
+﻿#include "app_motion.h"
+
+//#define DEBUG_MOTION  // cancel comment to enable motion debug log
 #include "driver_motor.h"
 #include "driver_can.h"
 #include "cmsis_os2.h"
@@ -352,8 +354,9 @@ int safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc
 
 bool pick_component(void) {
     z_pick();
+    servo_delay_ms(300);   // Z轴完全稳定后再开泵
     nozzle_on();
-    servo_delay_ms(50);    // 真空建立
+    servo_delay_ms(500);   // 真空建立
     if (!vacuum_ok()) {
         nozzle_off();
         z_safe();
@@ -410,7 +413,9 @@ int r_axis_rotate(float angle, float speed_rpm) {
     /* 使能 TMC2209 驱动 */
     TMC_SetEnable(true);
     vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
+#ifdef DEBUG_MOTION
     PrintDebug("[R] delta=%.2f deg usteps=%ld dir=%d\r\n", (double)delta, (long)usteps, (int)dir);
+#endif
 
     if (usteps <= ramp_usteps * 2) {
         /* 小角度：降速保证足够运行时间，避免一步跳全速丢步 */
@@ -486,7 +491,9 @@ void MotionTask_Func(void *argument)
                     PrintDebug("Emergency stop! \r\n");
                     Coord_Invalidate();
                 } else if ((flags & EVENT_ALL_AXES) == EVENT_ALL_AXES) {
+#ifdef DEBUG_MOTION
                     PrintDebug("Move to (%ld, %ld) done.\r\n", cmd.target_x, cmd.target_y);
+#endif
                     Coord_UpdateXY(cmd.target_x, cmd.target_y);
                 }else {
                     // 超时处理

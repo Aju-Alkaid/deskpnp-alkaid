@@ -43,13 +43,13 @@
 
 | 资源 | 详情 |
 |------|------|
-| MCU | STM32G474VETx, HSE 16MHz → PLL 170MHz |
+| MCU | STM32G474VETx, HSE 25MHz → PLL 170MHz |
 | 调试接口 | SWD (NRST=PG10) |
 | 串口1 (USART1) | PE0(TX) / PE1(RX), 115200, DMA, 连接上位机 |
 | 串口2 (USART2) | PD5(TX) / PD6(RX), 115200, DMA, 连接 MaixCam 摄像头 |
 | 串口3 (USART3) | PB9(TX) / PB11(RX), 115200, DMA, 连接 TMC2209(R轴) |
 | LPUART1 | PC1(TX) / PC0(RX), 115200, 半双工, 预留 |
-| CAN (FDCAN1) | PA12(TX) / PA11(RX), 1Mbps, 连接 3 台 MKS SERVO42D 总线伺服电机 (ID=0x01 X1, ID=0x02 X2, ID=0x03 Y) |
+| CAN (FDCAN1) | PA12(TX) / PA11(RX), 500kbps, 连接 3 台 MKS SERVO42D 总线伺服电机 (ID=0x01 X1, ID=0x02 X2, ID=0x03 Y) |
 | SPI2 | PB13(SCK) / PB15(MOSI), CS=PD10, DC/RS=PD9, RST=PD8, 连接 LCD(ST7306) |
 | SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, 连接 W25Q64 Flash |
 | SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, 连接 ESP32 通信模块 |
@@ -61,7 +61,7 @@
 | DRV8803×2 | U12(12V 驱动): PE9(EN)/PE10(RST)/PE15(FAULT) ; 输出端口见 §10.4 |
 |  | U13(24V 驱动): PA4(EN)/PB0(RST)/PA6(IN5)/PA7(IN6)/PC4(IN7)/PC5(IN8)/PA5(FAULT) |
 | TMC2209 | UART3 通信, PD15(TMC1_EN) / PD14(TMC2_EN 预留) |
-| 加热台 | CAN ID 0x04(命令) / 0x05(状态), FDCAN1 1Mbps, 共享电机 CAN 总线 |
+| 加热台 | CAN ID 0x04(命令) / 0x05(状态), FDCAN1 500kbps, 共享电机 CAN 总线 |
 | 温度传感器 | PF9 / PA3, DS18B20 |
 | 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM, 角度越大吸嘴越低) |
 | 吸嘴气泵 | PE11 (12VO1, DRV8803 U12 OUT1 开关) |
@@ -211,7 +211,7 @@ pnp_1/
   | 1 | Host→Cam | `p3` | 启动 P3 |
   | — | Cam | Phase0：吸嘴圆检测（10帧，阈值≥7帧） | |
   | — | Cam→Host | `err3_8` | 检测到吸嘴圆 → 吸嘴空取（无元件） |
-  | 2 | Cam→Host | `pos` `N:{dx}` `N:{dy}` | Phase1 自动检测（**无 end**，dx/dy 已×1.5） |
+| 2 | Cam→Host | `pos` `N:{dx}` `N:{dy}` | Phase1 自动检测（**含 end**，dx/dy 已×1.5） |
   | 3 | Host→Cam | `go` | 移动完成 → Phase2 |
   | 4 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 未重合（|dx|>3 或 |dy|>3） |
   | 5 | 对齐完成：Cam→Host: `ok` → Cam→Host: `N:{ao}`（**角度×100，紧跟 ok**） |
@@ -224,12 +224,15 @@ pnp_1/
   | P1 Phase1 | `pos` N:dx N:dy N:{id} `end` | 像素×6.0 |
   | P1 Phase2 | `pos` N:dx N:dy `end` | 像素×6.0 |
   | P2 | `pos` N:dx N:dy `end` | 像素 |
-  | P3 Phase1 | `pos` N:dx N:dy（无 end） | 像素×1.5 |
+| P3 Phase1 | `pos` N:dx N:dy `end` | 像素×1.5 |
   | P3 Phase2 | `pos` N:dx N:dy `end` | 像素×1.5 |
 
 - **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
 ### 4.3 G4 ? MKS SERVO42D 电机 (CAN, FDCAN1)
-- **物理层：** CAN 2.0A, 1Mbps, 标准帧(11位ID)
+
+
+**P2 退出必须发送 `end` 帧：** P2 完成（VISION_DONE）或异常退出（扫描耗尽/错误放弃/超时）后，必须通过 `Vision_SendEnd()` 发送 `end` 帧通知摄像头终止 P2 会话。`app_vision.c` 提供了公开的 `Vision_SendEnd(void)` 函数，封装 `send_frame("end")`。Host_Task 的 `mark_align_step` 和 `app_test.c` 的 `cam_p2_full_test_run` 在所有 P2 退出路径均已添加此调用。
+- **物理层：** CAN 2.0A, 500kbps, 标准帧(11位ID)
 - **校验：** SUM8 CRC（ID+数据字节累加取低8位）
 - **数据长度限制：** ≤7 字节有效数据 + 1 字节 CRC = 最多8字节
 - **电机 ID：** X1=0x01, X2=0x02, Y=0x03, 广播=0x00
@@ -253,7 +256,7 @@ pnp_1/
 
 ### 4.4 G4 ↔ 加热台从机 (CAN, FDCAN1)
 
-- **物理层：** CAN 2.0A, 1Mbps, 标准帧(11位ID)，与电机共享 FDCAN1 总线
+- **物理层：** CAN 2.0A, 500kbps, 标准帧(11位ID)，与电机共享 FDCAN1 总线
 - **CAN ID：** 命令帧 `0x04`（主控→加热台），状态帧 `0x05`（加热台→主控）
 - **命令帧格式（主控→加热台）：**
 
@@ -398,7 +401,7 @@ pnp_1/
 | `LineParser_t` | app_uart_parser.h | 行解析器状态机 | buf[512], idx, complete |
 | `UART_Channel_t` | driver_uart.c(内部) | UART 通道控制块 | huart/hdmarx, 双缓冲, data_ready/is_rx_active/overflow_count |
 | `MotorState_t` | driver_motor.h | 电机状态枚举 | IDLE/SENDING/WAITING/COMPLETE/ERROR |
-| `HeaterStatus_t` | driver_heater.h | 加热台状态快照 | state, cur_temp(0.1°C), tar_temp, error, timestamp |
+| `HeaterStatus_t` | `driver_heater.h` | 加热台状态快照 | state, cur_temp(0.1°C), tar_temp, error, timestamp |
 
 ## 八、编码规范与约束
 
@@ -603,7 +606,7 @@ can_filter_mask_config() 中 HAL_FDCAN_ActivateNotification 在 HAL_FDCAN_Start 
 
 | 文件 | 改动 |
 |------|------|
-| driver_can.c | can_filter_mask_config 移除 HAL_FDCAN_ActivateNotification，仅保留滤波器配置 |
+| `driver_can.c` | can_filter_mask_config 移除 HAL_FDCAN_ActivateNotification，仅保留滤波器配置 |
 | driver_can.c | CAN_Init 中取消注释 HAL_FDCAN_Start 之后的 HAL_FDCAN_ActivateNotification |
 | app_test.c | 移除 StartCamTestTask、vMotorTestTask 中冗余的手动 HAL_FDCAN_ActivateNotification（CAN_Init 内部已处理） |
 
@@ -763,13 +766,13 @@ if (pkt.ID == HEATER_STATUS_ID && heater_rx_queue != NULL) {
 #### R 轴两步闭环矫正流程
 
 ```
-P1 检测角度 → [矫正1: r_axis_rotate(p1_angle)] → 吸取 → 移至下相机
+P1 检测角度 → 吸取 → [矫正1: r_axis_rotate(p1_angle)] → 移至下相机
   → P3 验证 → [矫正2: 若 |residual| > 阈值 → r_axis_rotate(residual)]
   → 贴装/释放
 ```
 
 **设计要点：**
-- 矫正 1（P1 后）：摄像头检测到元件偏角后**立即**旋转补偿，而非等到贴装前一次性旋转。补偿后吸取，确保元件以零偏角吸附在吸嘴上。
+- 矫正 1（吸取后）：摄像头检测到元件偏角后先吸取，待真空稳定后再旋转补偿。吸嘴带着元件旋转而非空吸嘴旋转，避免空吸嘴旋转后元件相对吸嘴滑动。Host_Task 的矫正 1 位于 pick_step 吸取成功后、进入 P3 之前；StartCamTestTask 同理。
 - 矫正 2（P3 后）：下相机验证矫正结果。若仍有残余偏角（机械公差、吸取偏移导致），执行二次精修。
 - 两次矫正使用相同的阈值 `R_CORRECTION_THRESHOLD_DEG`（0.1°）和转速 `R_SPEED_RPM`（60 RPM）。
 
@@ -789,7 +792,7 @@ static bool host_correct_r_from_vision(const VisionResult_t *r, const char *stag
 ```
 
 调用点：
-- `find_comp_step` VISION_DONE → `host_correct_r_from_vision(r, "P1")` → HOST_PICK
+- pick_step pick_component() 成功后 → host_correct_r_from_vision(Vision_GetResult(), "P1") → HOST_MOVE_TO_BOTTOM_CAM (P1 矫正已从 VISION_DONE 移至吸取后)
 - `offset_check_step` VISION_DONE → `host_correct_r_from_vision(r, "P3")` → HOST_MOVE_TO_PCB
 
 #### Host_Task 坐标映射修正
@@ -815,7 +818,7 @@ static bool host_correct_r_from_vision(const VisionResult_t *r, const char *stag
 #### StartCamTestTask 测试流程更新
 
 初始化流程对齐 Host_Task（DRV8803→舵机上电→Valve_Off→TMC→Calib_Load→舵机安全角→CAN→Motor→Vision→P0握手）。
-测试流程激活完整闭环：P1 检测 → R 矫正1 → pick_component 吸取 → 移至下相机 → P3 验证 → R 矫正2 → 释放 → P2 Mark 建系。
+测试流程激活完整闭环：P2 Mark 建系 → P1 检测 → pick_component 吸取 → R 矫正1 → 移至下相机 → P3 验证 → R 矫正2 → 释放。执行顺序为 P2→P1→P3（先建系再找元件），与 Host_Task 一致。
 
 #### 涉及文件
 
@@ -2065,7 +2068,7 @@ CSV 格式从逗号分隔动态列升级为**制表符 `\t` 分隔 15 固定列*
 ### 20.12 StartCamTestTask 角度追踪闭环
 
 - `cam_test_run()` 新增 `float *out_angle_deg` 出参，VISION_DONE 时写入视觉检测角度（°）
-- `StartCamTestTask` 测试流程改为完整闭环：P1找元件→存角度→吸取→移下相机→P3复核→存角度→R轴旋转验证→释放
+- StartCamTestTask 测试流程改为完整闭环：P2 Mark 建系 → P1 找元件 → 吸取 → R 轴矫正1 → 移下相机 → P3 复核 → R 轴矫正2 → 释放（执行顺序 P2→P1→P3，R 轴矫正位于吸取后）
 - 初始化新增：`Servo_Init`、`TMC_Init`、`DRV8803_EnableChip(2)`、`Calib_Load`、`Valve_Off`
 
 ### 20.13 app_vision.c 变量重命名
@@ -2211,7 +2214,7 @@ machine_y = rotate(csv_y, theta) + pcb_origin_y + p3_offset_y
 - SCATTER_CELLS=4 个单元格（左上/右上/左下/右下），中心偏移 ±size/4
 - 每格 SCATTER_SUBPOS=5 个子扫描位（中心+四角），偏移 ±size/8
 - scatter_init_cells() 预计算 g_scatter_subpos[4][5][2]
-- component_cell() 通过 ootprint_to_class_id() 映射元件→单元格
+- component_cell() 通过 `ootprint_to_class_id() 映射元件→单元格
 - P1 err1_5（未找到）时依次尝试 5 个子位，全部失败后才计为连续失败
 - scatter_size_steps=0（未标定）时全部退化为散料区中心
 
@@ -3181,7 +3184,7 @@ g_calib.cam_p3_val_to_steps    = 0.0f;
 | Task/app_host.c | 4 行完整标定诊断日志 + RESTORE_CALIB 处理分支 |
 | Task/app_uart_parser.h | 新增 HCMD_RESTORE_CALIB 枚举 |
 | Task/app_uart_parser.c | 新增 "RESTORE_CALIB" 命令匹配 |
-| driver_spiflash_w25q64.c | Calib_Save 写后读回验证；Calib_Load magic/CRC 失败诊断打印 |
+| `driver_spiflash_w25q64.c` | Calib_Save 写后读回验证；Calib_Load magic/CRC 失败诊断打印 |
 
 ### 28.12 文件编辑注意事项
 
@@ -3322,12 +3325,27 @@ pick_component() 依赖 vacuum_ok() 判断吸取是否成功，但因无实际�
 
 **关键映射规则（所有涉及设计坐标 → 电机坐标的地方必须遵守）：**
 
-`
+```
 设计坐标 target_x  → 物理 X 轴（左右） → Y 电机   → machine_y / marks_actual[][1]
 设计坐标 target_y  → 物理 Y 轴（上下） → X1+X2 电机 → machine_x / marks_actual[][0]
-相机 X 偏移 (r->dx) → Y 电机   (物理 X)
-相机 Y 偏移 (r->dy) → X1+X2 电机 (物理 Y)
-`
+相机 X 偏移 (r->dx) → Y 电机   (物理 X)  【取反: dy = -(r->dx * scale)】
+相机 Y 偏移 (r->dy) → X1+X2 电机 (物理 Y)  【不取反: dx = +(r->dy * scale)】
+```
+
+**方向验证（Mark 跳转实测确认）：**
+- Mark 0(5,5)→Mark 1(20,5): tdx=+15mm → 相机 X 正向 → Y 电机负向(-7680步) → 机器右移 ✓
+- Mark 0(5,5)→Mark 2(5,20): tdy=+15mm → 相机 Y 正向 → X1+X2 正向(+7680步) → 机器上移 ✓
+
+**各公式中的符号汇总：**
+
+| 环节 | dx/X1+X2 公式 | dy/Y电机 公式 |
+|------|-------------|-------------|
+| Mark 跳转 | `+(tdy * 512)` | `-(tdx * 512)` |
+| P2 偏移修正 | `-(r->dy * scale)` | `-(r->dx * scale)` |
+| P1 偏移修正 | `-(r->dy * scale)` | `-(r->dx * scale)` |
+| P3 偏移修正 | `+(r->dy * scale)` 不取反 | `-(r->dx * scale)` |
+
+> P3 的 dx 不取反是因为下相机图像左右镜像（相机朝上拍摄），X 轴自然反转。
 
 **涉及位置（共 5 处，已全部修正）：**
 
@@ -3372,3 +3390,336 @@ pick_component() 依赖 vacuum_ok() 判断吸取是否成功，但因无实际�
 |------|------|
 | Task/app_test.c | 竞态修复（2处）、P2 单位 px 化、P2 速度统一、Mark 跳转 swap、仿射建系 swap、测试坐标调整 |
 | Task/app_host.c | P2 单位 px 化、P2 速度统一、Mark 跳转 swap、仿射建系 swap、move_to_pcb_step swap |
+
+
+## 三十一、2026-06-27 会话 — 坐标系修正 + 仿射建系修复 + Host_Task 对齐
+
+### 31.1 Mark 跳转方向修正
+
+**问题：** 识别 Mark0 后本应向右跳到 Mark1，实际向左移动。根因是跳转公式中 Y 电机的符号错误——跳转用 `+(tdx * scale)`，但偏移修正用 `-(r->dx * scale)`，两者方向矛盾。经实测确认偏移修正方向正确，跳转需与之统一。
+
+**修复（app_test.c + app_host.c）：**
+```c
+// 跳转公式（修正后）
+dx = +(tdy * STEPS_PER_MM);   // 相机 Y → X1+X2，不取反
+dy = -(tdx * STEPS_PER_MM);   // 相机 X → Y 电机，取反
+```
+
+经历了两次迭代才定稿：第一次同时对 dx/dy 取反 → Y 轴反了；第二次只对 dy 取反 → 正确。
+
+### 31.2 仿射建系修复
+
+**问题：** 建系代码直接用电机坐标算 `atan2(a2x-a1x, a2y-a1y)`，但 `a2x-a1x` 是 X1+X2 差（相机 Y），`a2y-a1y` 是 Y 电机差（相机 X 取反）。参数位置错位导致实际轨迹（相机右移 15mm）被算成 ~178°。
+
+**修复（app_test.c + app_host.c）：** 先将实际 Mark 电机坐标转换为相机坐标再计算角度：
+```c
+// 电机坐标 → 相机坐标
+cam_X = -(Y_motor);    // 取反
+cam_Y = X1+X2;         // 直通
+
+// 用相机坐标计算实际角度
+actual_ang = atan2f(cam_Y_diff, cam_X_diff);
+
+// 建系完成后，origin 转回电机坐标存储
+origin_x_steps = cam_origin_Y;      // → X1+X2
+origin_y_steps = -cam_origin_X;     // → Y 电机（取反）
+```
+
+**验证结果（CamTest 实测）：** theta=0.04°, Mark3 验证误差=0.079mm。
+
+### 31.3 move_to_pcb_step 旋转公式修正
+
+**问题：** 贴装定位使用 `cy*cos-cx*sin` / `cy*sin+cx*cos` 而非标准 `(cx,cy)` 旋转，与建系 origin 的坐标系不一致。
+
+**修复（app_host.c）：** 改为标准旋转变换：
+```c
+float rcx = cx * cos_t - cy * sin_t;   // 旋转后相机 X
+float rcy = cx * sin_t + cy * cos_t;   // 旋转后相机 Y
+machine_x = (int32_t)rcy + origin_x_steps;       // 相机 Y → X1+X2
+machine_y = (int32_t)(-rcx) + origin_y_steps;    // 相机 X → Y 电机（取反）
+```
+
+### 31.4 P1/P3 偏移修正改用固定换算
+
+**问题：** `g_calib.cam_p1_val_to_steps` 和 `cam_p3_val_to_steps` 未标定时值为 0，导致偏移修正量为 0，P1/P3 完全靠相机迭代硬扛，G4 不做任何补偿移动。
+
+**背景：** 比例换算在摄像头端完成（P1 值×6.0, P3 值×1.5），G4 不需要区分上/下相机的像素比例差异，统一用一个换算系数即可。CamTest 已验证 `STEPS_PER_MM / 1000.0f = 0.512` 可正常工作。
+
+**修复（app_host.c）：**
+- `find_comp_step` P1 GOT_POS: `g_calib.cam_p1_val_to_steps` → `(STEPS_PER_MM / 1000.0f)`
+- `offset_check_step` P3 GOT_POS: `g_calib.cam_p3_val_to_steps` → `(STEPS_PER_MM / 1000.0f)`
+
+### 31.5 补加 Vision_Go 后延迟
+
+**问题：** Host_Task 的 `mark_align_step` GOT_POS 和 `offset_check_step` GOT_ERR_RETRY 在 `Vision_Go()` 后缺少 50ms 延迟。CamTest 在调试中发现此延迟可避免 go 帧与相机响应碰撞。
+
+**修复（app_host.c）：**
+- `mark_align_step` GOT_POS: `Vision_Go()` 后加 `vTaskDelay(pdMS_TO_TICKS(50))`
+- `offset_check_step` GOT_ERR_RETRY: 同上
+
+### 31.6 电机调试日志关闭
+
+将 noisy 的电机 CAN 帧日志用 `#ifdef` 包裹，默认关闭：
+
+| 文件 | 宏 | 包裹的日志 |
+|------|----|----------|
+| `driver_motor.c` | `DEBUG_MOTOR` | `[MOTOR] syncTrigger` / `pos2run` ×4 |
+| `app_motion.c` | `DEBUG_MOTION` | `[R] delta` / `Move done` ×2 |
+
+`Emergency stop!` 和 `Move timeout!` 保留（仅异常时触发，有诊断价值）。
+
+### 31.7 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| Task/app_test.c | Mark 跳转 dx 去反（2次迭代）；仿射建系相机坐标转换；`DEBUG_MOTOR` 已存在 |
+| Task/app_host.c | Mark 跳转 dx 去反；仿射建系相机坐标转换；move_to_pcb_step 标准旋转；P1/P3 固定换算；两处 vTaskDelay(50ms) |
+| Drivers/ZeMCU-G4/driver_motor.c | `DEBUG_MOTOR` 宏包裹 4 处 PrintDebug |
+| Task/app_motion.c | `DEBUG_MOTION` 宏包裹 2 处 PrintDebug |
+---
+## 三十二、TouchGFX 屏幕对接 — 主控端 bridge 层（2026-06-28）
+> **状态：已完成。** 两轮代码审查已通过，5 个问题已修复（1 P0 + 3 P1 + 1 P2）。
+### 32.1 背景
+主控端与 TouchGFX GUI 原先仅通过 `dataTransferQueue` 单向通知（主控→GUI），无 GUI→主控命令通道，且 `app_host.c` 中未调用任何 `DT_Notify*` 函数。
+目标：建立双向解耦通信，主控端通过统一 `Data_Transfer` 接口与 GUI 通信，不直接耦合 View/Presenter/Widget。
+### 32.2 TouchGFX 侧修改（4 个文件）
+| 文件 | 改动 |
+|------|------|
+| `TouchGFX/gui/include/gui/model/Data_Transfer.h` | 枚举新增 `DT_WIFI_STATUS = 0x08`；声明 `DT_NotifyWifiStatus(uint8_t connected)` |
+| `TouchGFX/gui/src/model/Data_Transfer.c` | (a) 实现 `DT_NotifyWifiStatus()`；(b) 7 个 handler 均改为 `static` 壳函数委托 `extern Bridge_*`（移除 TODO 占位、`#include "driver_motor.h"` 等旧依赖）；(c) `motorReset_Start()`/`motorReset_IsDone()`/`motor_reset_done` 保留未动（向后兼容） |
+| `TouchGFX/gui/src/model/Model.cpp` | `processQueue()` switch 新增 `case DT_WIFI_STATUS` 分发到 `onNotifyWifiStatus()` |
+| `TouchGFX/gui/include/gui/model/ModelListener.hpp` | 新增虚函数 `onNotifyWifiStatus(uint8_t connected)` |
+### 32.3 主控侧新增文件
+| 文件 | 说明 |
+|------|------|
+| `Task/app_touchgfx_bridge.h` | 对接层头文件：声明 `Bridge_Notify*`（System→GUI，9 个）和 `Bridge_*` handler（GUI→System，7 个），以及全局标志变量 |
+| `Task/app_touchgfx_bridge.c` | 对接层实现：封装 `DT_Notify*` 调用 + 实现 7 个 GUI→System 命令处理器。内部含温度/状态/进度三重去重逻辑 |
+### 32.4 主控侧修改
+| 文件 | 改动 |
+|------|------|
+| `Core/Src/app_freertos.c` | 新增 `extern guiCmdQueue` 声明 + 创建 `guiCmdQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL)` |
+| `Task/app_host.c` | 添加 `#include "app_touchgfx_bridge.h"`；初始化调用 `Bridge_Init()` + `Bridge_NotifyMotorSpeed()`；主循环每轮 `Bridge_ProcessHeaterStatus()` 温度更新；`HOST_DEBUG` 内处理 GUI 启动贴片/暂停/电机命令（消费 `motion_cmd_queue`）；各状态转换点调用进度/状态通知；`s_bridge_done_notified` 文件级静态变量控制 HOST_DONE 一次性通知 |
+### 32.5 Bridge 通知（System→GUI）调用点
+| 通知 | 触发位置 | 去重策略 | 说明 |
+|------|----------|----------|------|
+| `Bridge_NotifyMotorSpeed()` | `Host_Task` 初始化末尾 | 无（仅调一次） | 上报 PNP_SPEED_FAST |
+| `Bridge_NotifyDownloadStatus(1)` | 进入 `HOST_DOWNLOADING` | 有 | 下载开始 |
+| `Bridge_NotifyDownloadStatus(0)` | `download_done()` | 有 | 下载完成 |
+| `Bridge_NotifySMTStatus(1)` | `download_done()` | 有 | 贴片开始 |
+| `Bridge_NotifySMTStatus(0)` | `HOST_DONE` 首次（`s_bridge_done_notified` 控制） | 有 | 贴片完成 |
+| `Bridge_NotifySMTProgress()` | 每元件放置后 + 全部完成时 | **有（第二轮新增）** | 进度更新，值未变则跳过 |
+| `Bridge_ProcessHeaterStatus()` | 主循环每轮 | 有（`s_temp_valid`+值比较） | 温度去重更新 |
+| `Bridge_NotifyLog(code,param)` | 关键事件（启停/错误/暂停） | 无（事件型） | code=1下载 2完成 3电机错误 4暂停 |
+### 32.6 GUI→System 命令（7 个 handler）
+| 命令 | Bridge 函数 | 实现方式 | 执行上下文 |
+|------|-----------|----------|-----------|
+| `DT_CMD_MOTOR_MOVE` | `Bridge_MotorMove()` | 坐标(mm×100)→步数，入 `motion_cmd_queue` | TouchGFX Task → `HOST_DEBUG` 消费 |
+| `DT_CMD_MOTOR_STOP` | `Bridge_MotorStop()` | 入队 `MOTION_CMD_STOP` | 同上 |
+| `DT_CMD_MOTOR_HOME` | `Bridge_MotorHome()` | 入队 `MOTION_CMD_HOME`（移至原点 0,0） | 同上 |
+| `DT_CMD_SMT_START` | `Bridge_SMTStart()` | 置 `g_gui_smt_start_req=1`，`HOST_DEBUG` 检测后发送 `DOWNLOAD_READY` | TouchGFX Task 写标志 → Host_Task 消费 |
+| `DT_CMD_SMT_PAUSE` | `Bridge_SMTPause()` | 置 `g_gui_smt_pause_req=1`，`HOST_FIND_COMP` 检测后回 `HOST_DEBUG` | TouchGFX Task 写标志 → Host_Task 消费 |
+| `DT_CMD_HEATER_SET` | `Bridge_HeaterSet()` | 直接调用 `Heater_SetTemperature()` | TouchGFX Task（CAN 发送线程安全） |
+| `DT_CMD_SYSTEM_RESET` | `Bridge_SystemReset()` | 调用 `NVIC_SystemReset()` | TouchGFX Task |
+### 32.7 数据流
+```
+主控 (Host_Task)                    TouchGFX Task
+    │                                     │
+    ├─ Bridge_NotifyTemp() ──→ dataTransferQueue ──→ Model::processQueue() ──→ View
+    ├─ Bridge_NotifySMTStatus() ──→     同上
+    ├─ Bridge_NotifySMTProgress() ──→   同上
+    │   ...                               │
+    │                              guiCmdQueue ←── Model::sendCommand() ←── Presenter
+    │                                     │
+    └── DT_Dispatch() ←── Model::tick() ──┘
+              │
+              └── Bridge_MotorMove/Stop/Home/SMTStart/... 
+                  (委托给主控端 bridge 实现，跨任务通过队列/标志同步)
+```
+### 32.8 两轮审查修复记录（2026-06-28）
+**第一轮（结构完整性审查）：**
+| 级别 | 问题 | 位置 | 修复 |
+|------|------|------|------|
+| P0 | `motorReset_Start()`/`motorReset_IsDone()`/`motor_reset_done` 被 handler 区段替换误删，导致链接错误 | `Data_Transfer.c` | 在 `smt_Start()` 前恢复完整实现 |
+| P1 | handler 替换后残留旧注释头，形成双重标题 | `Data_Transfer.c` | 移除旧注释头，保留新 bridge 委托说明 |
+| P1 | `Bridge_MotorMove` 中 `(void)steps_x; (void)steps_y;` 纯死代码 | `app_touchgfx_bridge.c` | 直接移除 |
+| P1 | `Bridge_MotorMove` 硬编码 `300`/`25` 魔数无注释 | `app_touchgfx_bridge.c` | 注释标注对应 `PNP_SPEED`/`PNP_ACC` 语义 |
+| P2 | `s_bridge_done_notified` 缩进 8 空格（周围为 4 空格） | `app_host.c` | 统一为 4 空格 |
+**第二轮（逻辑鲁棒性审查）：**
+| 级别 | 问题 | 位置 | 修复 |
+|------|------|------|------|
+| P1 | `s_last_temp = -1` 哨兵值与合法温度 -0.1°C（int16=-1）碰撞 | `app_touchgfx_bridge.c` | 改用独立 `s_temp_valid` bool 标志 + `s_last_temp = 0` |
+| P1 | `Bridge_NotifySMTProgress` 无去重，高频下冲刷 16 深队列 | `app_touchgfx_bridge.c` | 增加 `s_last_progress_cur`/`s_last_progress_total` 去重 |
+| P1 | `Bridge_Init()` 对已初始化的 static 变量重复赋相同值，语义模糊 | `app_touchgfx_bridge.c` | 增加注释「支持运行中重初始化（如看门狗恢复）」使之成为有意的防御设计 |
+### 32.9 已知设计限制（非 Bug，文档记录）
+| 限制 | 位置 | 影响 | 缓解 |
+|------|------|------|------|
+| `safe_move_to` 阻塞调用 | `HOST_DEBUG` motion 消费 | GUI 长距离移动时 Host_Task 主循环冻结（温度/GUI 刷新暂停） | 与原 UART 调试命令行为一致；GUI 移动为低频手动操作 |
+| `Bridge_MotorMove` R 参数静默丢弃 | `app_touchgfx_bridge.c` | `MOTION_CMD_MOVE_TO` 不处理 R 轴，GUI 无法通过此路径控制旋转 | GUI 端尚未实现 R 轴控制 UI；未来需扩展为 `MOTION_CMD_R_ROTATE` |
+| 暂停检测仅 `HOST_FIND_COMP` | `app_host.c` | PICK/PLACE 中间态不响应暂停 | 在元件边界暂停是有意设计，避免半途吸嘴悬空 |
+| `Bridge_NotifyTemp` int16→uint16 强制转换 | `app_touchgfx_bridge.c` | 热电偶断开等负温异常场景下产生大数 | 加热台从机协议当前不支持负温上报，暂不影响 |
+| `motion_cmd_queue` 满时静默丢弃（timeout=0） | `app_touchgfx_bridge.c` | GUI 快速连续点按可能丢失命令 | 队列 20 深 + 每 10ms 消费一轮，人工操作难触发 |
+## 三十三、2026-06-29 会话 — G4↔G0 加热台 CAN 通信调试
+### 33.1 初始问题
+Host_Task 中测试加热台程序，`HEATER_QUERY`/`HEAT_ON`/`HEAT_OFF` 全部 TX 成功但无任何状态帧回报。从机串口也无 `CAN CMD:` 打印。
+### 33.2 G4 侧修复
+**问题 1：`heater_rx_queue` 创建时序晚于 CAN 中断使能**
+`Host_Task` 初始化顺序原为 `CAN_Init()` → `Motor_Init()` → ... → `Heater_Init()`。
+`CAN_Init()` 中 `HAL_FDCAN_Start()` 使总线激活，CAN ISR 即可触发。
+但 `heater_rx_queue` 在 `Heater_Init()` 中才创建，中间有 500ms+ 窗口期。
+CAN ISR 中路由逻辑：
+```c
+if (pkt.ID == HEATER_STATUS_ID && heater_rx_queue != NULL) {
+    osMessageQueuePut(heater_rx_queue, &pkt, 0, 0);
+}
+```
+队列为 NULL 时帧仅进入 `motor_event_queue`，`Heater_ProcessStatus()` 永远看不到。
+**修复：** 将 `Heater_Init()` 移到 `CAN_Init()` 之前调用。（Task/app_host.c）
+**问题 2：CAN 滤波器配置不准确**
+`can_filter_mask_config()` 中 `FilterID2 = 0x1FFC0000` 超出 HAL 要求的 11-bit 范围（max 0x7FF）。
+Release 编译下断言关闭，低 11 位截断为 0x000，掩码全 0 → 偶然实现全通。
+同时 CubeMX 设 `StdFiltersNbr = 0`，滤波器槽位未分配，写入落在 Message RAM 偏移 0（RxFIFO0 区域）。
+由于全局滤波器默认放行，通信未受影响。若重新生成 CubeMX 将 `StdFiltersNbr` 改为非零值，
+此 bug 会导致滤波器仅通过 ID 低 8 位为 0 的帧（0x000/0x100/...），所有通信中断。
+**修复：** 暂无（当前恰好工作）。如需修正：将 `FilterID2` 改为 `0x000`，确保 `StdFiltersNbr` ≥ 1。
+### 33.3 G4 关键硬件参数（实测确认）
+| 参数 | 文档旧值 | 实际值 | 来源 |
+|------|---------|--------|------|
+| HSE | 16 MHz | **25 MHz** | `Core/Inc/stm32g4xx_hal_conf.h:118` |
+| SYSCLK | 170 MHz | 170 MHz | PLLM=5, PLLN=68, PLLR=2: 25/5×68/2=170 |
+| PLLQ (FDCAN 时钟) | — | 170 MHz | PLLQ=2 |
+| CAN 波特率 | 1 Mbps | **500 kbps** | 170MHz÷(17×20)=500k |
+| FDCAN Prescaler | — | 17 | CubeMX |
+| FDCAN TS1/TS2 | — | 15/4 | CubeMX |
+### 33.4 涉及文件
+| 文件 | 改动 |
+|------|------|
+| Task/app_host.c | `Heater_Init()` 移到 `CAN_Init()` 之前 |
+
+---
+
+## 三十四、2026-06-30~07-01 会话 — ESP32 通信测试任务创建
+
+### 34.1 背景
+
+工程中 ESP32 仅有生产任务 `ESP_Task`（SPI4 周期数据推送），无独立的 ESP 通信链路测试任务。
+本次会话创建了 `StartESPTestTask`，涵盖硬件复位、SPI 收发、协议自检、WiFi 控制、状态查询、数据推送共 8 项测试。
+
+### 34.2 ESP 测试任务（8 项）
+
+| 编号 | 名称 | 测试内容 | 依赖硬件 |
+|------|------|----------|----------|
+| T1 | HardReset | GPIO 初始化 + 硬件复位时序（CS=HIGH, RST 100ms LOW→HIGH, 1s 等待） | 是 |
+| T2 | SPI | 心跳包 SPI4 全双工收发 3 次，检测 MISO 是否为全 0xFF（浮空=从机无响应） | 是 |
+| T3 | Protocol | 离线自检：数据包/控制包/查询包组包校验、解包模拟、FormatTemp/FormatProgress/StateToString 输出验证 | 否 |
+| T4 | WiFi ON | 发送 0x20 0x01，轮询等待 ESP 回传 WIFI_STATUS（超时 10s） | 是 |
+| T5 | WiFi OFF | 发送 0x20 0x02，清零连接标志，1.5s 后心跳确认 | 是 |
+| T6 | Fault Query | 发送 0x30 0x01，等待 FAULT 或 COMPOUND 响应（超时不判失败） | 是 |
+| T7 | WiFi Query | 发送 0x30 0x02，等待 WIFI_STATUS 响应 | 是 |
+| T8 | Data Push | 依次发送 4 种子命令（进度/状态/加热台状态/温度），验证 SPI 收发无报错 | 是 |
+
+### 34.3 任务属性与注册
+
+**`espTestTask_attributes` 定义位置：** `Task/app_test.c`（不在 app_freertos.c 中），栈 1024 字节，优先级 Normal。
+
+**启用方式：** 在 `app_freertos.c` 中添加：
+```c
+osThreadNew(StartESPTestTask, NULL, &espTestTask_attributes);
+```
+`espTestTask_attributes` 通过 `app_test.h` 的 `extern` 声明暴露，`app_freertos.c` 已包含该头文件。
+
+**启用前必须禁用：** `ESP_Task`（生产任务，同样使用 SPI4），否则两个任务争抢 SPI4 总线。`StartCamTestTask` 使用 USART2+SPI3，与 SPI4 不冲突，无需禁用。
+
+### 34.4 SPI 总线分配（纠正）
+
+本次会话纠正了一个错误认知：`StartCamTestTask` 使用 **USART2**（摄像头）和 **SPI3**（W25Q64 Flash），不使用 SPI4。
+ESP32 是 SPI4 的唯一使用者。
+
+| 外设 | 总线 | 使用者 |
+|------|------|--------|
+| ESP32 通信模块 | **SPI4** (PE2/PE5/PE6, CS=PE3) | `ESP_Task`、`StartESPTestTask` |
+| W25Q64 Flash | **SPI3** (PC10/PC11/PC12, CS=PA15) | `StartCamTestTask`（读取标定值） |
+| MaixCam 摄像头 | **USART2** (PD5/PD6) | `StartCamTestTask`、`Host_Task`（视觉通信） |
+| LCD (ST7306) | **SPI2** (PB13/PB15) | TouchGFX |
+
+### 34.5 预期输出
+
+硬件正常时预期 PASS=8 FAIL=0。若 ESP32 未焊接，T1 和 T3 仍可通过（纯 GPIO + 离线协议），PASS=2 FAIL=6。T2 是分水岭：通过说明 SPI 链路物理通，后续失败大概率是 ESP 固件侧问题。
+
+### 34.6 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| Task/app_test.h | ①修复 `#endif` 在 Cam 声明之前的 bug，移到末尾；②新增 `StartESPTestTask` 声明 + `espTestTask_attributes` extern |
+| Task/app_test.c | ①新增 3 行 `#include`（app_esp_task/protocol/driver_esp32）；②追加 `espTestTask_attributes` 定义 + `StartESPTestTask` 完整实现（~270 行） |
+| Core/Src/app_freertos.c | 未修改（用户自行添加任务创建行） |
+| Task/app_esp_test.c/h | 曾创建后删除，代码合并到 app_test.c/h 中 |
+---
+
+
+## 三十五、2026-06-30~07-01 会话 — R轴停稳、电机电流、Flash默认值、延时同步
+
+### 35.1 R 轴开环定时停稳不足 — 吸取前加延时
+
+**问题：** P1 识别成功后，`host_correct_r_from_vision` → `r_axis_rotate` 是开环定时控制（TMC2209 VACTUAL 模式）。停止后仅 `R_ACCEL_DELAY=50ms` 延时即认为停稳，TMC2209 内部加减速 + 机械惯量导致物理停稳滞后。气泵打开时 R 轴仍在微振，元件可能在吸嘴上偏移。
+
+**修复（StartCamTestTask，app_test.c）：**
+- P1 VISION_DONE 分支：`host_correct_r_from_vision` 后加 `osDelay(200)` 再 `r_axis_set_zero`（等待 R 轴物理停稳）
+- 吸取前：`osDelay(300)` 改为 `osDelay(800)`（等待电机完全停止）
+
+> 延时值为保守估计，实测后可调整。根本解决方案是在 `r_axis_rotate` 中改用到位反馈（查询 TMC2209 VACTUAL=0）而非开环定时。
+
+### 35.2 MKS SERVO42D 工作电流未初始化
+
+**问题：** `setIWorkMode()`（功能码 `0x83`）已在 driver_motor.c:338 定义，但 `Motor_Init()` 从未调用。电机保持默认 160mA，用户期望 1400mA（=1.4A）。
+
+**修复（driver_motor.c）：** `Motor_Init()` 中使能电机后插入：
+```c
+// 2.5 设置工作电流 (mA)
+setIWorkMode(0x01, 1400);  // X1
+setIWorkMode(0x02, 1400);  // X2
+setIWorkMode(0x03, 1400);  // Y
+osDelay(20);
+```
+
+> `0x83` 写入 RAM，断电恢复默认；需永久保存则额外发 `0x40`（写 Flash）。
+
+### 35.3 Flash 标定默认值补全 — 摄像头→吸嘴偏置
+
+**问题：** `calib_set_defaults()` 仅设 Z 角度和 `cam_p1/p3_val_to_steps`，`cam_to_nozzle_dx/dy_steps` 由 `memset` 归零。首次上电无 Flash 数据时偏置补偿无效。
+
+**修复：**
+
+| 文件 | 改动 |
+|------|------|
+| `app_config.h` | 新增 `CALIB_DEFAULT_NOZZLE_DX_STEPS (-5529)` / `CALIB_DEFAULT_NOZZLE_DY_STEPS (-25041)` |
+| `driver_spiflash_w25q64.c` | `calib_set_defaults` 中新增两条赋值 |
+
+
+> `CALIB_DEFAULT_CAM_P1` / `CALIB_DEFAULT_CAM_P3` 定义在 app_config.h，但当前所有 P1/P3 偏移修正实际使用硬编码 `STEPS_PER_MM / 1000.0f`，标定字段未接入。
+
+### 35.4 Host_Task 延时同步
+
+将 CamTest 中的 R 轴停稳延时同步到 Host_Task 生产流程（app_host.c）：
+
+| 位置 | 改动 |
+|------|------|
+| `find_comp_step` P1 VISION_DONE | `host_correct_r_from_vision` 后加 `osDelay(500)` → `r_axis_set_zero` |
+| `offset_check_step` P3 VISION_DONE | 同上（顺手补全） |
+| `pick_step` | `pick_component()` 前加 `osDelay(800)` |
+
+### 35.5 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| Task/app_motion.c | 无改动（R轴开环定时问题仅文档记录，根本修复待后续） |
+| Drivers/ZeMCU-G4/driver_motor.c | `Motor_Init()` 中新增 `setIWorkMode` 调用（3 轴） |
+| Task/app_config.h | 新增 `CALIB_DEFAULT_NOZZLE_DX/DY_STEPS` 宏 |
+| Drivers/ZeMCU-G4/driver_spiflash_w25q64.c | `calib_set_defaults` 新增 nozzle offset 赋值 |
+| Task/app_host.c | P1/P3 VISION_DONE 各加 `osDelay(500)`；`pick_step` 加 `osDelay(800)` |
+| Task/app_test.c | P1 VISION_DONE 加 `osDelay(200)`；吸取前 `osDelay(300→800)` |
+
+### 35.6 编辑注意事项补充
+
+- **文件换行符不一致：** 项目规范声明 UTF-8 + CRLF，但 `driver_motor.c` 实测为 LF。编辑前须字节检测确认。
+- **Base64+Node.js 路径：** 使用正斜杠（`E:/...`）传入 `node -e`，反斜杠会被转义导致 `ENOENT`。
+- **实际编辑方法：** 使用单行 `node -e` 模式（而非 AGENTS.md 开头推荐的多行拼接），PowerShell 多行拼接中换行符处理不稳定。

@@ -1,4 +1,4 @@
-﻿#ifndef __APP_CONFIG_H
+#ifndef __APP_CONFIG_H
 #define __APP_CONFIG_H
 
 #include <stdint.h>
@@ -71,8 +71,8 @@ typedef struct {
 #define CALIB_DEFAULT_Z_SAFE      78.0f
 #define CALIB_DEFAULT_Z_PICK     116.0f
 #define CALIB_DEFAULT_Z_PLACE    116.0f
-#define CALIB_DEFAULT_CAM_P1      3.277f
-#define CALIB_DEFAULT_CAM_P3      3.277f
+//#define CALIB_DEFAULT_CAM_P1      3.277f
+//#define CALIB_DEFAULT_CAM_P3      3.277f
 
 /* ---- 全局标定实例 (定义在 app_host.c) ---- */
 extern CalibrationData_t g_calib;

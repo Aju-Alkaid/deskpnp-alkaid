@@ -83,6 +83,7 @@ void CamUart_RecvCallback(uint8_t *data, int len);
 /* Timeout protection (30s default) */
 bool Vision_IsTimedOut(void);
 void Vision_ForceIdle(void);
+void Vision_SendEnd(void);
 
 /* Transition back to search mode without sending commands (pos-detect timeout recovery) */
 void Vision_BackToSearch(void);
