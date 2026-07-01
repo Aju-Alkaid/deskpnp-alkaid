@@ -49,7 +49,7 @@
 #define ESP_RESP_IDLE          0x00   /* 空闲 / 无响应               */
 #define ESP_RESP_FAULT         0xF1   /* 故障报告                    */
 #define ESP_RESP_WIFI_STATUS   0xF2   /* WiFi 状态                   */
-#define ESP_RESP_COMPOUND      0xFF   /* 复合状态                    */
+#define ESP_RESP_COMPOUND      0xFF   /* 复合状态 (与 ESP32 文档一致, 响应类型在 Byte 1) */
 #define ESP_RESP_VERSION       0xFE   /* 协议版本 (预留)             */
 
 /* ================================================================
@@ -116,7 +116,7 @@ void ESP_BuildHeartbeatPacket(uint8_t *packet);
 /**
  * @brief  提取 ESP 响应类型
  * @param  rx_buf  ESP 发来的 128 字节接收缓冲区
- * @return Byte 0: 响应类型 (ESP_RESP_IDLE / _FAULT / _WIFI_STATUS / _COMPOUND)
+ * @return Byte 1: 响应类型 (ESP_RESP_IDLE / _FAULT / _WIFI_STATUS / _COMPOUND, 文档 §4.1)
  */
 uint8_t ESP_GetResponseType(const uint8_t *rx_buf);
 

@@ -236,6 +236,11 @@ static void _process_control_cmd(ESP_Cmd_t cmd)
  * ================================================================ */
 static void _process_response(void)
 {
+    /* 防御 MISO 浮空: 有效响应的 Byte 0 固定为 0x00 (文档 §4.1) */
+    if (s_rx_buf[0] != 0x00) {
+        return;
+    }
+
     uint8_t resp_type = ESP_GetResponseType(s_rx_buf);
 
     if (resp_type == ESP_RESP_IDLE) {
@@ -292,10 +297,17 @@ static void _process_response(void)
 
 static void _handle_fault_response(const char *payload, uint8_t len)
 {
-    /* 简单解析: 取第一个逗号前的数字作为故障码 */
-    if (len > 0 && payload[0] >= '0' && payload[0] <= '9') {
-        g_esp_fault_code = (uint8_t)(payload[0] - '0');
+    /* 解析 2 字符十六进制故障码 (文档 §4.3, 如 "0A" = 故障码 10) */
+    uint8_t code = 0;
+    for (uint8_t i = 0; i < len && i < 2; i++) {
+        char c = payload[i];
+        code <<= 4;
+        if (c >= '0' && c <= '9')      code |= (uint8_t)(c - '0');
+        else if (c >= 'A' && c <= 'F') code |= (uint8_t)(c - 'A' + 10);
+        else if (c >= 'a' && c <= 'f') code |= (uint8_t)(c - 'a' + 10);
+        else break;
     }
+    g_esp_fault_code = code;
     PrintDebug("[ESP] Fault: %.*s (code=%d)\r\n",
                len, payload, g_esp_fault_code);
 }

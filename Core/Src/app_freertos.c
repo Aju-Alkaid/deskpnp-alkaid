@@ -200,6 +200,7 @@ void MX_FREERTOS_Init(void) {
 	UART_Driver_Init();
 	Event_Init();
 	Key_Init();
+	TMC_SetEnable(false);  /* ENN=HIGH, 关闭TMC2209驱动 */
   /* USER CODE END Init */
 
   /* USER CODE BEGIN RTOS_MUTEX */

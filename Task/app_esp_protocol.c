@@ -83,7 +83,8 @@ void ESP_BuildHeartbeatPacket(uint8_t *packet)
 
 uint8_t ESP_GetResponseType(const uint8_t *rx_buf)
 {
-    return rx_buf[0];
+    /* 响应类型在 Byte 1 (SUBCMD 位置), Byte 0 固定为 0x00 (见文档 §4.1) */
+    return rx_buf[1];
 }
 
 const char* ESP_GetResponsePayload(const uint8_t *rx_buf, uint8_t *out_len)

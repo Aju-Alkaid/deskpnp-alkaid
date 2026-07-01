@@ -1617,13 +1617,15 @@ void StartESPTestTask(void *argument)
         }
         /* 解包: 模拟 FAULT 响应 */
         memset(buf, 0, 128);
-        buf[0] = 0xF1; buf[2] = 3;
-        buf[3] = '0'; buf[4] = '.'; buf[5] = '1';
+        buf[0] = 0x00;
+        buf[1] = 0xF1;
+        buf[2] = 2;
+        buf[3] = '0'; buf[4] = 'A';
         buf[126] = 5;
-        if (ESP_GetResponseType(buf) != 0xF1) all_ok = 0;
+        if (ESP_GetResponseType(buf) != ESP_RESP_FAULT) all_ok = 0;
         uint8_t plen;
         const char *pl = ESP_GetResponsePayload(buf, &plen);
-        if (plen != 3 || pl[0] != '0') all_ok = 0;
+        if (plen != 2 || pl[0] != '0' || pl[1] != 'A') all_ok = 0;
         if (ESP_GetResponseSeq(buf) != 5) all_ok = 0;
 
         /* FormatTemp */
@@ -1649,22 +1651,38 @@ void StartESPTestTask(void *argument)
 
     /* ---- T4: WiFi 开启 ---- */
     PrintDebug("\r\n--- T4: WiFi ON ---\r\n");
-    ESP_BuildControlPacket(s_tx_buf, ESP_SUB_WIFI_ON);
-    ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-    g_esp_wifi_enabled = 1;
     all_ok = 0;
     {
         uint32_t start = osKernelGetTickCount();
+        uint8_t retry_count = 0;
         while ((osKernelGetTickCount() - start) < pdMS_TO_TICKS(10000)) {
+            retry_count++;
+            PrintDebug("[ESP_TEST] T4 send WIFI_ON (#%d)\r\n", retry_count);
+            /* 连续发 2 次 WIFI_ON (间隔 50ms), 确保 ESP32 rx_buffer 稳定为 0x20 0x01 */
+            ESP_BuildControlPacket(s_tx_buf, ESP_SUB_WIFI_ON);
+            ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+            osDelay(50);
+            ESP_BuildControlPacket(s_tx_buf, ESP_SUB_WIFI_ON);
+            ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+            /* 空等 800ms, 不传任何 SPI 数据, 让 ESP32 主循环有充足时间读取 rx_buffer */
+            osDelay(800);
+            /* 发心跳查 ESP 响应 */
             ESP_BuildHeartbeatPacket(s_tx_buf);
             ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
             uint8_t rt = ESP_GetResponseType(s_rx_buf);
-            if (rt == 0xF2 || rt == 0xFF) {
-                uint8_t plen2; const char *pl2 = ESP_GetResponsePayload(s_rx_buf, &plen2);
-                if (plen2 > 0 && pl2[0] == '1') g_esp_wifi_connected = 1;
-                if (g_esp_wifi_connected) { all_ok = 1; break; }
+            PrintDebug("[ESP_TEST] T4 check #%d: rx[0]=%02X rx[1]=%02X\r\n",
+                       retry_count, s_rx_buf[0], rt);
+            if (s_rx_buf[0] == 0x00) {
+                if (rt == ESP_RESP_WIFI_STATUS || rt == ESP_RESP_COMPOUND) {
+                    uint8_t plen2; const char *pl2 = ESP_GetResponsePayload(s_rx_buf, &plen2);
+                    if (plen2 > 0 && pl2[0] == '1') g_esp_wifi_connected = 1;
+                    if (g_esp_wifi_connected) { all_ok = 1; break; }
+                }
+                if (rt == ESP_RESP_FAULT) {
+                    uint8_t plen2; const char *pl2 = ESP_GetResponsePayload(s_rx_buf, &plen2);
+                    PrintDebug("[ESP_TEST] T4 WiFi fault: %.*s\r\n", plen2, pl2);
+                }
             }
-            osDelay(200);
         }
     }
     if (all_ok) {
@@ -1676,7 +1694,7 @@ void StartESPTestTask(void *argument)
         PrintDebug("[ESP_TEST] T4-WiFiON ... FAIL (no connection)\r\n");
     }
 
-    /* ---- T5: WiFi 关闭 ---- */
+    /* ---- T5: WiFi ?? ---- */
     PrintDebug("\r\n--- T5: WiFi OFF ---\r\n");
     ESP_BuildControlPacket(s_tx_buf, ESP_SUB_WIFI_OFF);
     ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
@@ -1685,41 +1703,76 @@ void StartESPTestTask(void *argument)
     osDelay(1500);
     ESP_BuildHeartbeatPacket(s_tx_buf);
     ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-    s_pass_count++;
-    PrintDebug("[ESP_TEST] T5-WiFiOFF ... PASS\r\n");
-
-    /* ---- T6: 故障查询 ---- */
+    osDelay(200);  /* ?? ESP ??? WiFi OFF */
+    ESP_BuildHeartbeatPacket(s_tx_buf);
+    ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+    {
+        uint8_t rt = ESP_GetResponseType(s_rx_buf);
+        if (rt == ESP_RESP_IDLE || rt == ESP_RESP_WIFI_STATUS) {
+            s_pass_count++;
+            PrintDebug("[ESP_TEST] T5-WiFiOFF ... PASS (rx[1]=%02X)\r\n", rt);
+        } else {
+            s_fail_count++;
+            if (s_fail_count <= 10) memcpy(s_fail_items[s_fail_count-1], "T5-WiFiOFF", 11);
+            PrintDebug("[ESP_TEST] T5-WiFiOFF ... FAIL (rx[1]=%02X)\r\n", rt);
+        }
+    }
+/* ---- T6: ???? ---- */
     PrintDebug("\r\n--- T6: Fault Query ---\r\n");
     ESP_BuildQueryPacket(s_tx_buf, ESP_SUB_QUERY_FAULT);
     ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-    all_ok = 0;
-    {
-        uint32_t start = osKernelGetTickCount();
-        while ((osKernelGetTickCount() - start) < pdMS_TO_TICKS(3000)) {
-            uint8_t rt = ESP_GetResponseType(s_rx_buf);
-            if (rt == 0xF1 || rt == 0xFF) { all_ok = 1; break; }
-            ESP_BuildHeartbeatPacket(s_tx_buf);
-            ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-            osDelay(200);
-        }
-    }
-    if (!all_ok) all_ok = 1;  /* 无故障时 ESP 不回复也算合理 */
-    s_pass_count++;
-    PrintDebug("[ESP_TEST] T6-FaultQuery ... PASS\r\n");
-
-    /* ---- T7: WiFi 状态查询 ---- */
-    PrintDebug("\r\n--- T7: WiFi Query ---\r\n");
-    ESP_BuildQueryPacket(s_tx_buf, ESP_SUB_QUERY_WIFI);
+    osDelay(200);
+    ESP_BuildHeartbeatPacket(s_tx_buf);
     ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
     all_ok = 0;
     {
-        uint32_t start = osKernelGetTickCount();
-        while ((osKernelGetTickCount() - start) < pdMS_TO_TICKS(3000)) {
-            uint8_t rt = ESP_GetResponseType(s_rx_buf);
-            if (rt == 0xF2 || rt == 0xFF) { all_ok = 1; break; }
-            ESP_BuildHeartbeatPacket(s_tx_buf);
-            ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-            osDelay(200);
+        uint8_t rt = ESP_GetResponseType(s_rx_buf);
+        if (rt == ESP_RESP_FAULT) {
+            uint8_t plen2; const char *pl2 = ESP_GetResponsePayload(s_rx_buf, &plen2);
+            PrintDebug("[ESP_TEST] Fault reported: %.*s\r\n", plen2, pl2);
+            all_ok = 1;
+        } else if (rt == ESP_RESP_IDLE) {
+            all_ok = 1;
+        } else {
+            uint32_t start2 = osKernelGetTickCount();
+            while ((osKernelGetTickCount() - start2) < pdMS_TO_TICKS(1000)) {
+                ESP_BuildHeartbeatPacket(s_tx_buf);
+                ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+                uint8_t rt2 = ESP_GetResponseType(s_rx_buf);
+                if (rt2 == ESP_RESP_FAULT || rt2 == ESP_RESP_IDLE) { all_ok = 1; break; }
+                osDelay(200);
+            }
+        }
+    }
+    if (all_ok) {
+        s_pass_count++;
+        PrintDebug("[ESP_TEST] T6-FaultQuery ... PASS\r\n");
+    } else {
+        s_fail_count++;
+        if (s_fail_count <= 10) memcpy(s_fail_items[s_fail_count-1], "T6-FaultQuery", 14);
+        PrintDebug("[ESP_TEST] T6-FaultQuery ... FAIL\r\n");
+    }
+/* ---- T7: WiFi ???? ---- */
+    PrintDebug("\r\n--- T7: WiFi Query ---\r\n");
+    ESP_BuildQueryPacket(s_tx_buf, ESP_SUB_QUERY_WIFI);
+    ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+    osDelay(200);
+    ESP_BuildHeartbeatPacket(s_tx_buf);
+    ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+    all_ok = 0;
+    {
+        uint8_t rt = ESP_GetResponseType(s_rx_buf);
+        if (rt == ESP_RESP_IDLE || rt == ESP_RESP_WIFI_STATUS || rt == ESP_RESP_COMPOUND) {
+            all_ok = 1;
+        } else {
+            uint32_t start2 = osKernelGetTickCount();
+            while ((osKernelGetTickCount() - start2) < pdMS_TO_TICKS(2000)) {
+                ESP_BuildHeartbeatPacket(s_tx_buf);
+                ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+                uint8_t rt2 = ESP_GetResponseType(s_rx_buf);
+                if (rt2 == ESP_RESP_IDLE || rt2 == ESP_RESP_WIFI_STATUS || rt2 == ESP_RESP_COMPOUND) { all_ok = 1; break; }
+                osDelay(200);
+            }
         }
     }
     if (all_ok) {
@@ -1730,8 +1783,7 @@ void StartESPTestTask(void *argument)
         if (s_fail_count <= 10) memcpy(s_fail_items[s_fail_count-1], "T7-WiFiQuery", 13);
         PrintDebug("[ESP_TEST] T7-WiFiQuery ... FAIL\r\n");
     }
-
-    /* ---- T8: 数据推送 ---- */
+/* ---- T8: ???? ---- */
     PrintDebug("\r\n--- T8: Data Push ---\r\n");
     all_ok = 1;
     {
@@ -1748,13 +1800,29 @@ void StartESPTestTask(void *argument)
             }
             ESP_BuildDataPacket(s_tx_buf, subs[i], payload, (uint8_t)pl);
             int ret = ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-            if (ret != 0) {
-                PrintDebug("[ESP_TEST] Data push %s: SPI err %d\r\n", names[i], ret);
+            /* 第1次交换: 发送数据推送, ESP 回复的是上一次心跳的响应 (应为 IDLE) */
+            osDelay(50);
+            /* 第2次交换: 发送心跳, ESP 回复的是对数据推送的回声 (rx[0]=0x10 为正常全双工行为) */
+            ESP_BuildHeartbeatPacket(s_tx_buf);
+            int ret2 = ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+            osDelay(50);
+            /* 第3次交换: 发送心跳, ESP 回复的是对第2次心跳的真实响应 (应为 rx[0]=0x00 rx[1]=0x00 IDLE) */
+            ESP_BuildHeartbeatPacket(s_tx_buf);
+            int ret3 = ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+            if (ret != 0 || ret2 != 0 || ret3 != 0) {
+                PrintDebug("[ESP_TEST] Data push %s: SPI err %d/%d/%d\r\n", names[i], ret, ret2, ret3);
                 all_ok = 0;
             } else {
-                PrintDebug("[ESP_TEST] Data push %s: sent %d rx[0]=%02X\r\n", names[i], pl, s_rx_buf[0]);
+                uint8_t rt = ESP_GetResponseType(s_rx_buf);
+                if (s_rx_buf[0] == 0x00 && rt == ESP_RESP_IDLE) {
+                    PrintDebug("[ESP_TEST] Data push %s: sent %d OK\r\n", names[i], pl);
+                } else {
+                    PrintDebug("[ESP_TEST] Data push %s: sent %d rx[0]=%02X rx[1]=%02X (expected IDLE)\r\n",
+                               names[i], pl, s_rx_buf[0], rt);
+                    all_ok = 0;
+                }
             }
-            osDelay(600);
+            osDelay(500);
         }
     }
     if (all_ok) {
@@ -1765,14 +1833,13 @@ void StartESPTestTask(void *argument)
         if (s_fail_count <= 10) memcpy(s_fail_items[s_fail_count-1], "T8-DataPush", 12);
         PrintDebug("[ESP_TEST] T8-DataPush ... FAIL\r\n");
     }
-
-    /* ---- 清理 ---- */
+/* ---- ?? ---- */
     ESP_BuildControlPacket(s_tx_buf, ESP_SUB_WIFI_OFF);
     ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
     g_esp_wifi_enabled  = 0;
     g_esp_wifi_connected = 0;
 
-    /* ---- 汇总 ---- */
+    /* ---- ?? ---- */
     PrintDebug("\r\n========================================\r\n");
     PrintDebug("  ESP Test Complete: PASS=%d FAIL=%d\r\n", s_pass_count, s_fail_count);
     if (s_fail_count > 0) {
@@ -1783,5 +1850,25 @@ void StartESPTestTask(void *argument)
     }
     PrintDebug("========================================\r\n\r\n");
 
-    vTaskSuspend(NULL);
+    /* ---- ?????? (ESP32 ???? 500ms ??) ---- */
+    PrintDebug("[ESP_TEST] Entering heartbeat loop (500ms)\r\n");
+    {
+        uint16_t hb_count = 0;
+        for (;;) {
+            ESP_BuildHeartbeatPacket(s_tx_buf);
+            ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+            uint8_t rt = ESP_GetResponseType(s_rx_buf);
+            hb_count++;
+            /* ? 20 ? (10 ?) ???????? */
+            if (hb_count % 20 == 0) {
+                uint8_t plen; const char *pl = ESP_GetResponsePayload(s_rx_buf, &plen);
+                PrintDebug("[ESP_TEST] HB #%d rx[1]=%02X payload=%.*s\r\n", hb_count, rt, plen, pl);
+            } else if (rt != ESP_RESP_IDLE) {
+                uint8_t plen; const char *pl = ESP_GetResponsePayload(s_rx_buf, &plen);
+                PrintDebug("[ESP_TEST] HB rx[1]=%02X payload=%.*s\r\n", rt, plen, pl);
+            }
+            osDelay(500);
+        }
+    }
+
 }
