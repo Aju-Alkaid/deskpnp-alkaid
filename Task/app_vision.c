@@ -101,7 +101,7 @@ static int32_t       g_tmp_dy       = 0;
 static int32_t       g_tmp_cls      = 0;
 
 /* ---- 超时保护 ---- */
-#define VISION_TIMEOUT_MS   30000
+#define VISION_TIMEOUT_MS  120000   /* 2 分钟，P2 扫描+3 个 Mark 建系 */
 static uint32_t g_vision_start_tick = 0;
 
 /* ---- 结果与错误 ---- */
@@ -463,11 +463,11 @@ static void process_p3_frame(const char *str) {
         return;
     }
 
-    /* ---- "end" (Phase2 only) ---- */
+    /* ---- "end" (Phase1/Phase2) ---- */
     if (str[0] == 'e' && str[1] == 'n' && str[2] == 'd' && str[3] == '\0') {
         if (!g_collecting) return;
         g_collecting = false;
-        if (g_p3_sub == P3_PHASE2) {
+        if (g_p3_sub == P3_PHASE1 || g_p3_sub == P3_PHASE2) {
             g_result.dx         = g_tmp_dx;
             g_result.dy         = g_tmp_dy;
             g_result.angle_x100 = 0;

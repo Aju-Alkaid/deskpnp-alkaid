@@ -54,9 +54,9 @@ extern "C" {
 typedef struct {
     TIM_HandleTypeDef *htim;                 /* 定时器句柄 */
     uint32_t           channel;              /* 定时器通道 (TIM_CHANNEL_x) */
-    uint16_t           min_pulse;            /* 0° 对应的 CCR 比较值 */
-    uint16_t           max_pulse;            /* 180° 对应的 CCR 比较值 */
-    uint16_t           mid_pulse;            /* 90° 对应的 CCR 比较值 */
+    uint32_t           min_pulse;            /* 0° 对应的 CCR 比较值 */
+    uint32_t           max_pulse;            /* 180° 对应的 CCR 比较值 */
+    uint32_t           mid_pulse;            /* 90° 对应的 CCR 比较值 */
     bool               initialized;          /* 是否已完成初始化 */
 } Servo_HandleTypeDef;
 

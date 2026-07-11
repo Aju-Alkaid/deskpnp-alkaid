@@ -153,15 +153,15 @@ const osThreadAttr_t camTestTask_attributes = {
     .stack_size = 4096,
     .priority = osPriorityNormal,
 };
-/* USER CODE END Variables */
+
 /* Definitions for KeyTask */
 
 const osThreadAttr_t keyTask_attributes = {
   .name = "KeyTask",
  .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 256
+  .stack_size = 512
 };
-
+/* USER CODE END Variables */
 /* Definitions for touchGFX */
 osThreadId_t touchGFXHandle;
 const osThreadAttr_t touchGFX_attributes = {
@@ -250,7 +250,7 @@ void MX_FREERTOS_Init(void) {
 	osThreadNew(CAN_Process_Task, NULL, &canProcTask_attr);
 	osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
-//	osThreadNew(Host_Task, NULL, &hostTask_attributes);
+	osThreadNew(Host_Task, NULL, &hostTask_attributes);
 //	osThreadNew(StartCamTestTask, NULL, &camTestTask_attributes); //cam
 
 //    mksHandle = osThreadNew(vMotorTestTask, NULL, &MKSTestTask_attributes);
@@ -258,8 +258,8 @@ void MX_FREERTOS_Init(void) {
   
 //    hostMotionTaskHandle = osThreadNew(StartHostMotionTestTask, NULL, &hostMotionTestTask_attributes);
 
-//  osThreadNew(ESP_Task, NULL, &espTask_attributes);
-	osThreadNew(StartESPTestTask, NULL, &espTestTask_attributes);
+  osThreadNew(ESP_Task, NULL, &espTask_attributes);
+//	osThreadNew(StartESPTestTask, NULL, &espTestTask_attributes);
 //  pickPlaceTestTaskHandle = osThreadNew(StartPickPlaceTestTask, NULL, &pickPlaceTestTask_attributes);
 
   /* USER CODE END RTOS_THREADS */

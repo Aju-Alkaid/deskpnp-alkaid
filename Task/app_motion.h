@@ -83,6 +83,7 @@ bool vacuum_ok(void);  /* __weak stub, override with GPIO/ADC */
 void r_axis_set_zero(void);
 int  r_axis_rotate(float angle, float speed_rpm);
 int  safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc);
+void move_set_pad_ms(uint32_t pad_ms);
 
 /* 电机异常分级 */
 typedef enum {

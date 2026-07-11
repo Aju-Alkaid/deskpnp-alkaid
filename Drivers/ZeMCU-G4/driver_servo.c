@@ -16,7 +16,7 @@ extern void PrintDebug(const char* fmt, ...);
  * ================================================================ */
 
 static Servo_HandleTypeDef servo_handles[SERVO_TIM_CHANNEL_MAX] = {0};
-static uint16_t              timer_arr = 0;  /* ARR 缓存，避免重复读 */
+static uint32_t              timer_arr = 0;  /* ARR 缓存，避免重复读 */
 
 /* ================================================================
  *  Servo_Init
@@ -30,9 +30,9 @@ void Servo_Init(TIM_HandleTypeDef *htim)
     timer_arr = htim->Init.Period;
     float pulse_per_us = (float)(timer_arr + 1)
                        / (SERVO_PWM_PERIOD_MS * 1000.0f);
-    uint16_t min_cmp = (uint16_t)(SERVO_PWM_MIN_US * pulse_per_us);
-    uint16_t max_cmp = (uint16_t)(SERVO_PWM_MAX_US * pulse_per_us);
-    uint16_t mid_cmp = (min_cmp + max_cmp) / 2;
+    uint32_t min_cmp = (uint32_t)(SERVO_PWM_MIN_US * pulse_per_us);
+    uint32_t max_cmp = (uint32_t)(SERVO_PWM_MAX_US * pulse_per_us);
+    uint32_t mid_cmp = (min_cmp + max_cmp) / 2;
 
     /* ---- 通道 2 = TIM_CHANNEL_3（TIM2→PB10 或 TIM5→PE8） ---- */
     uint8_t idx = 2;
@@ -109,7 +109,7 @@ void Servo_SetAngle(uint8_t ch, float angle)
     float    scale = (float)(servo_handles[ch].max_pulse
                            - servo_handles[ch].min_pulse)
                    / SERVO_ANGLE_RANGE;
-    uint16_t pulse = (uint16_t)(servo_handles[ch].min_pulse
+    uint32_t pulse = (uint32_t)(servo_handles[ch].min_pulse
                                 + angle * scale);
 
     __HAL_TIM_SET_COMPARE(servo_handles[ch].htim,
@@ -153,7 +153,7 @@ float Servo_GetAngle(uint8_t ch)
     if (ch >= SERVO_TIM_CHANNEL_MAX)          return -1.0f;
     if (!servo_handles[ch].initialized)       return -1.0f;
 
-    uint16_t pulse = __HAL_TIM_GET_COMPARE(servo_handles[ch].htim,
+    uint32_t pulse = __HAL_TIM_GET_COMPARE(servo_handles[ch].htim,
                                             servo_handles[ch].channel);
     float scale = (float)(servo_handles[ch].max_pulse
                         - servo_handles[ch].min_pulse)

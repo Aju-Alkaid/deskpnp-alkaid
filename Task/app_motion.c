@@ -1,4 +1,4 @@
-﻿#include "app_motion.h"
+#include "app_motion.h"
 
 //#define DEBUG_MOTION  // cancel comment to enable motion debug log
 #include "driver_motor.h"
@@ -57,6 +57,8 @@ volatile bool g_axes_error = false;
 #define STATUS_START      0x01    // 普通模式：运行开始 (未使用同步时可能收到)
 
 #define ACK_TIMEOUT_MS   2000      // 单轴到位超时 (ms)
+
+static uint32_t g_move_pad_ms = 3000;  /* move_xy_relative 安全余量，点动时临时改为 80 */
 
 /* ================================================================
  *  座标核心 — 线程安全的机器座标系单例
@@ -217,11 +219,11 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
     /* 广播同步触发: X1/X2/Y 同时执行 */
     motorSyncTrigger(0);
 
-    /* 按时长估算到位 = max(|dx|,|dy|) / (speed × PULSES_PER_REV / 60000) + 安全余量 */
+    /* 按时长估算到位 = max(|dx|,|dy|) / (speed ˇ PULSES_PER_REV / 60000) + 安全余量 */
     {
         float max_steps = fmaxf(fabsf((float)dx), fabsf((float)dy));
         float steps_per_ms = (float)speed * MKS_PULSES_PER_REV / 60000.0f;
-        uint32_t move_ms = (uint32_t)(max_steps / steps_per_ms) + 80;
+        uint32_t move_ms = (uint32_t)(max_steps / steps_per_ms) + g_move_pad_ms;
         if (move_ms < 50)  move_ms = 50;
         if (move_ms > 5000) move_ms = 5000;
         osDelay(move_ms);
@@ -350,6 +352,8 @@ int safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc
     return ret;
 }
 
+void move_set_pad_ms(uint32_t pad_ms) { g_move_pad_ms = pad_ms; }
+
 /* ---------- 组合的吸取 / 放置流程 ---------- */
 
 bool pick_component(void) {
@@ -374,7 +378,9 @@ __weak bool vacuum_ok(void) {
 void place_component(void) {
     z_place();
     nozzle_off();
-    servo_delay_ms(100);   // 释放
+    Valve_On();
+    servo_delay_ms(800);   // 电磁阀吹气辅助元件脱离
+    Valve_Off();
     z_safe();
 }
 
