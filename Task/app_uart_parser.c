@@ -85,6 +85,9 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("HEATER_QUERY")) {
         return HCMD_HEATER_QUERY;
     }
+    if (MATCH("HOLD_TEMP")) {
+        return HCMD_HOLD_TEMP;
+    }
     if (MATCH("SET_ORIGIN")) {
         return HCMD_SET_ORIGIN;
     }
@@ -147,6 +150,9 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     }
     if (MATCH("VALVE_OFF")) {
         return HCMD_VALVE_OFF;
+    }
+    if (MATCH("LIGHT")) {
+        return HCMD_LIGHT;
     }
     #undef MATCH#undef MATCH
     return HCMD_UNKNOWN;

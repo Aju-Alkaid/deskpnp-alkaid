@@ -60,10 +60,9 @@ const PowerPort_t Port_24VO3 = {
 };
 
 const PowerPort_t Port_24VO4 = {
-    .num_pins = 2,
+    .num_pins = 1,
     .pins = {
-        { .port = GPIOC, .pin = GPIO_PIN_5 },    // 开关
-        { .port = GPIOB, .pin = GPIO_PIN_2 }     // PWM
+        { .port = GPIOC, .pin = GPIO_PIN_5 },    // 开关  (PB2 已让给 KTH7823 编码器)
     }
 };
 

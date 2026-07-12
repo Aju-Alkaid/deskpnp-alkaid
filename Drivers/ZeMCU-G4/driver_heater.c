@@ -55,14 +55,16 @@ static HAL_StatusTypeDef Heater_Transmit(uint8_t *data, uint8_t len, bool need_c
 
 /* ========== 对外接口 ========== */
 
-void Heater_SendStart(void)
+bool Heater_SendStart(void)
 {
     uint8_t cmd = HEATER_CMD_START;
     HAL_StatusTypeDef ret = Heater_Transmit(&cmd, 1, false);
     if (ret == HAL_OK) {
         PrintDebug("[HEATER] START sent OK\r\n");
+        return true;
     } else {
         PrintDebug("[HEATER] START TX FAILED (err=%d)\r\n", (int)ret);
+        return false;
     }
 }
 
@@ -77,6 +79,25 @@ void Heater_SendStop(void)
     }
 }
 
+
+/*
+ * Heater_SendHold — 恒温保持（0x03，温度=0，从机自行控温）
+ */
+bool Heater_SendHold(void)
+{
+    uint8_t data[3];
+    data[0] = HEATER_CMD_SET_TEMP;
+    data[1] = 0x00;  /* 温度=0，从机忽略，自行控温 */
+    data[2] = 0x00;
+    HAL_StatusTypeDef ret = Heater_Transmit(data, 3, true);
+    if (ret == HAL_OK) {
+        PrintDebug("[HEATER] HOLD sent OK\r\n");
+        return true;
+    } else {
+        PrintDebug("[HEATER] HOLD TX FAILED (err=%d)\r\n", (int)ret);
+        return false;
+    }
+}
 void Heater_SendQuery(void)
 {
     uint8_t cmd = HEATER_CMD_QUERY;
@@ -88,7 +109,7 @@ void Heater_SendQuery(void)
     }
 }
 
-void Heater_SetTemperature(int16_t temp_0_1c)
+bool Heater_SetTemperature(int16_t temp_0_1c)
 {
     uint8_t data[3];
     data[0] = HEATER_CMD_SET_TEMP;
@@ -97,7 +118,9 @@ void Heater_SetTemperature(int16_t temp_0_1c)
     HAL_StatusTypeDef ret = Heater_Transmit(data, 3, true);     /* 附加 CRC */
     if (ret != HAL_OK) {
         PrintDebug("[HEATER] SET_TEMP TX FAILED (err=%d)\r\n", (int)ret);
+        return false;
     }
+    return true;
 }
 
 void Heater_SetPID(int16_t Kp, int16_t Ki, int16_t Kd)

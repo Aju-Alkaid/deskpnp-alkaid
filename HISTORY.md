@@ -2745,3 +2745,241 @@ void MX_FREERTOS_Init(void) {
 
 - AGENTS.md = 活地图（当前状态），HISTORY.md = 档案室（历史记录）
 - 每次代码改动后同步更新两份文档：当前状态变化 → AGENTS.md，完整记录 → HISTORY.md
+---
+
+## 三十八、2026-07-11 会话 — CAM 协议 v2→v3 迁移：单次检测 + 增益移除
+
+### 38.1 背景
+
+MaixCAM 视觉固件升级（基于 `vision_test_5/main.py` 2026-07-11 版本），协议从 v2（迭代 Phase2）迁移到 v3（单次检测 + CAM 侧预乘增益）。
+G4 固件需同步修改以匹配新协议。
+
+### 38.2 CAM 侧协议变更摘要
+
+| 项目 | 旧协议 (v2) | 新协议 (v3) |
+|------|-----------|-----------|
+| P1 对齐模式 | Phase0→Phase1→Phase2 迭代→ok+角度 | Phase0→Phase1 单次检测，pos 含全部数据 |
+| P3 对齐模式 | Phase0→Phase1→Phase2 迭代→ok+角度 | Phase0→Phase1 单次检测，pos 含全部数据 |
+| P1 pos 字段 | 3 字段（dx, dy, class_id），Phase2 补角度 | 4 字段（dx, dy, angle, class_id） |
+| P3 pos 字段 | 2 字段（dx, dy），Phase2 补角度 | 3 字段（dx, dy, angle） |
+| P1 增益 | CAM 输出 px×6.0，G4 再乘 0.512 | CAM 输出已乘 47.077 = **电机步数** |
+| P2 增益 | CAM 输出像素，G4 乘 0.512 | CAM 输出已乘 48.5 = **电机步数** |
+| P3 增益 | CAM 输出 px×1.5，G4 再乘 0.512 | CAM 输出已乘 13.5554 = **电机步数** |
+| P1 角度符号 | `angle * 100` | `-angle * 100`（取反） |
+| P3 角度符号 | `angle * 100` | `angle * 100`（不变） |
+| P3 错误码 | err3_1/3_2/3_3/3_5/3_6/3_7/3_8 | err3_1/3_5/3_8（err3_3 等移除） |
+
+详细 CAM 协议文档：`E:/聊天记录/通讯接口文档 (1).md`
+
+### 38.3 G4 固件修改
+
+#### app_vision.c — 视觉协议状态机
+
+**P1/P3 状态枚举精简：**
+- P1：删除 `P1_S2_ITERATING`、`P1_S_WAIT_ANGLE`，只保留 `P1_S_CATEGORY` / `P1_S0_WAIT_STOP` / `P1_S1_WAIT_POS`
+- P3：删除 `P3_PHASE2`、`P3_S_WAIT_ANGLE`，只保留 `P3_PHASE1`
+
+**P1 帧处理 (`process_p1_frame`)：**
+- 字段数 3→4：新增 `g_tmp_ao` 暂存角度，字段分配为 case 0=dx, 1=dy, 2=angle, 3=class_id
+- `end` 帧处理：直接设 `VISION_DONE` + `angle_valid = true`（不再设 `VISION_GOT_POS`）
+- 删除 `ok` / `P1_S_WAIT_ANGLE` 的帧分发分支
+
+**P3 帧处理 (`process_p3_frame`)：**
+- 字段数 2→3：新增 angle 字段
+- `end` 帧处理：直接设 `VISION_DONE` + `angle_valid = true`
+- 删除 `ok` / `P3_S_WAIT_ANGLE` 的帧分发分支
+- 删除 `err3_3` 可重试错误处理（新 CAM 协议不再发此码）
+- 删除 P3 Phase1 auto-complete 模式（改为依赖 `end` 帧终止）
+
+**`Vision_Go()` 简化：**
+- P1：只处理 `P1_S0_WAIT_STOP → P1_S1_WAIT_POS` 转换，Phase2 迭代分支全部删除
+- P3：改为空操作（P3 走 VISION_DONE 直接完成，不再经 GOT_STOP/GOT_POS）
+- P1/P3 分支均增加 `return` 防止穿透到 `g_state = VISION_BUSY`
+- 删除 `VISION_GOT_ERR_RETRY` 的 err3_3 重试分支（死代码）
+
+#### app_host.c — PnP 流程层
+
+**增益缩放全部移除：**
+- P2 `mark_align_step`：`* CAM_PX_TO_STEPS` → 直接使用 r->dx/r->dy
+- P1 `find_comp_step`：`* (STEPS_PER_MM / 1000.0f)` → 直接使用
+- P3 `offset_check_step`：`* (STEPS_PER_MM / 1000.0f)` → 直接使用
+- 删除 `#define CAM_PX_TO_STEPS` 宏（已无引用）
+
+**P1/P3 的 VISION_DONE 处理合并：**
+- P1：原 `VISION_GOT_POS`（偏移移动） + 原 `VISION_DONE`（cam-to-nozzle 补偿）→ 合并为一个 `VISION_DONE` case
+- P3：原 `VISION_GOT_POS`（偏移移动+累积） + 原 `VISION_DONE`（角度矫正+PCB 过渡）→ 合并为一个 `VISION_DONE` case
+- 删除 `offset_check_step` 中 `VISION_GOT_ERR_RETRY` case（死代码）
+
+**轴映射保持不变：**
+| 环节 | dx/X1+X2 | dy/Y电机 | 说明 |
+|------|---------|---------|------|
+| P1 | `-(r->dy)` | `-(r->dx)` | 两轴均取反 |
+| P2 | `-(r->dy)` | `-(r->dx)` | 两轴均取反 |
+| P3 | `+(r->dy)` | `-(r->dx)` | r->dy 不取反（下相机镜像） |
+
+### 38.4 代码审查发现与修复
+
+| 严重度 | 问题 | 位置 | 修复 |
+|--------|------|------|------|
+| 🔴 致命 | `Vision_Go` P3 else-if 块内嵌 CRLF 导致多行挤成一行 + 重复 `g_state = VISION_BUSY;` | `app_vision.c:631` | 完整重写 Vision_Go 函数 |
+| 🟡 中等 | `Vision_Go` P1 非 P1_S0_WAIT_STOP 子状态穿透到 g_state = VISION_BUSY | `app_vision.c:609` | 添加 `return` |
+| 🟢 低 | `err3_3` 处理为死代码（新 CAM 协议不再发送） | `app_vision.c` + `app_host.c` | 删除所有 err3_3 相关分支 |
+
+### 38.5 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_vision.c` | P1/P3 状态枚举精简；process_p1/p3_frame 单次检测+字段数调整+直接 VISION_DONE；Vision_Go 简化；新增 g_tmp_ao；删除 err3_3 死代码 |
+| `Task/app_host.c` | 三处增益缩放移除；P1/P3 VISION_DONE 合并；删除 CAM_PX_TO_STEPS 宏 |
+| `AGENTS.md` | §4.2 P1/P2/P3 协议描述重写；§4.2.1 轴映射表去 scale |
+| `HISTORY.md` | 新增 §38 |
+
+
+---
+
+## 三十九、2026-07-11~12 — R 轴 KTH7823 闭环控制实现
+
+### 39.1 背景
+
+原先 R 轴使用 TMC2209 VACTUAL 速度模式开环控制（定时盲估到位，R_ACCEL_DELAY=50ms），无位置反馈。
+吸取前需额外 osDelay(800) 等待物理停稳 (§35.1)。本次会话实现了 KTH7823 14-bit 磁编码器的
+PWM 输入捕获驱动 + 闭环 PID 位置控制，从根本上解决开环丢步和停稳不确定问题。
+
+### 39.2 KTH7823 规格参数
+
+| 参数 | 值 | 来源 |
+|------|-----|------|
+| 输出模式 | PWM 绝对位置 | 产品手册 |
+| PWM 频率 | 910 Hz (~1099μs 周期) | 同上 |
+| 分辨率 | 14-bit (16384 counts/rev) | 同上 |
+| 0° 脉宽 | 32/16448 占空比 (~2.14μs) | 同上 |
+| 360° 脉宽 | 16416/16448 占空比 (~1097μs) | 同上 |
+| 角度公式 | Ang = (360/16384) * [(16448 * tON) / period - 32] | 同上 |
+
+### 39.3 硬件接口
+
+KTH7823 PWM 输出 → PB2 (TIM5_CH1)。PB2 原先在 CubeMX 中配置为 24V_C1 PWM，
+同时作为 DRV8803 Port_24VO4 的 PWM 引脚。经确认：MX_TIM5_Init() 实际仅配置 CH3 (PE8 舵机)，
+CH1 虽有 AF 配置但从未使能 PWM 通道；DRV8803 驱动仅用 pins[0] (PC5 开关)，PWM 引脚引用无实际操作。
+**PB2 可安全改为输入捕获。**
+
+### 39.4 TIM5 共用：CH1 输入捕获 + CH3 舵机 PWM
+
+TIM5 同时服务于 CH3(PE8) 舵机 PWM 和 CH1(PB2) 编码器捕获。
+原 Prescaler=169 (1MHz) 对舵机完美，但对编码器 0° 脉宽仅 2 ticks，无法分辨 14-bit 数据。
+
+**解决方案：TIM5 PSC 从 169 降至 0 (170MHz)。**
+
+| 对比 | PSC=169 (旧) | PSC=0 (新) |
+|------|-------------|-----------|
+| 定时器时钟 | 1 MHz | 170 MHz |
+| 舵机 ARR (50Hz) | 19,999 | 3,399,999 |
+| 舵机 500μs/2500μs CCR | 500 / 2,500 | 85,000 / 425,000 |
+| 编码器周期 (910Hz) | ~1,099 ticks | ~186,813 ticks |
+| 编码器 0° 脉宽 | 2 ticks ❌ | ~364 ticks ✓ |
+| 编码器分辨率 | 0.07 ticks/step ❌ | ~11.4 ticks/step ✓ |
+
+TIM5 为 32-bit 定时器，ARR=3,399,999 和 CCR=425,000 均不溢出。
+舵机驱动 driver_servo.c/h 的 pulse 字段已是 uint32_t，无需修改。
+
+**CubeMX 修改：** pnp_1.ioc 中 TIM5 Prescaler=0, Period=3399999, CH1=Input Capture (Both Edges),
+CH3=PWM Generation, TIM5 IRQ 使能。重新生成后 Core/Src/tim.c 和 Core/Src/stm32g4xx_it.c 自动更新。
+
+### 39.5 软件架构
+
+`
+KTH7823 PWM (910Hz, 14-bit)
+    → PB2 (TIM5_CH1) 双边沿捕获 @170MHz
+    → ISR: 读 CCR1 + 引脚电平判边沿 → 计算 tON + period
+    → 角度公式解算 → g_kth.angle_deg + data_ready
+    → r_axis_rotate() 每 5ms 读角度
+    → PID (P=2.5, I=0.05, D=0.3, 位置式) 输出速度
+    → TMC_SetSpeed() → TMC2209 VACTUAL
+    → |error| < 0.2° 到位 → 停机 → 关断
+`
+
+**新增文件：**
+
+| 文件 | 说明 |
+|------|------|
+| Drivers/ZeMCU-G4/driver_kth7823.h | 编码器常量 (KTH7823_UNIT_*) + API 声明 |
+| Drivers/ZeMCU-G4/driver_kth7823.c | 输入捕获 ISR + 角度解算 + HAL_TIM_IC_CaptureCallback 重写 + KTH7823_WaitData |
+
+**修改文件：**
+
+| 文件 | 改动 |
+|------|------|
+| Core/Src/tim.c | CubeMX 重新生成: TIM5 PSC=0, Period=3,399,999, CH1 IC + CH3 PWM |
+| Core/Src/stm32g4xx_it.c | 新增 TIM5_IRQHandler → HAL_TIM_IRQHandler(&htim5) |
+| Drivers/ZeMCU-G4/driver_drv8803.c | Port_24VO4: num_pins=2→1, 移除 PB2 PWM 引脚引用 |
+| Task/app_config.h | 新增 R_CLOSED_KP/KI/KD/MAX_SPEED/THRESHOLD/TIMEOUT/KICK_MS/LOOP_MS |
+| Task/app_motion.c | _axis_rotate() 改为闭环 PID (static 复用); _axis_set_zero() 加 KTH7823_WaitData; 新增 #include "driver_kth7823.h" + "pid.h"; g_r_encoder_zero_offset |
+| Task/app_host.c | 新增 #include "driver_kth7823.h"; KTH7823_Init() 调用 + 错误检查; host_correct_r_from_vision 中 R_CORRECTION_THRESHOLD_DEG → R_CLOSED_THRESHOLD |
+
+**闭环 PID 参数（app_config.h）：**
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| R_CLOSED_KP | 2.5f | 比例系数 (速度/度误差) |
+| R_CLOSED_KI | 0.05f | 积分系数 |
+| R_CLOSED_KD | 0.3f | 微分系数 |
+| R_CLOSED_MAX_SPEED | 50000.0f | PID 最大速度输出 (μsteps/s) |
+| R_CLOSED_THRESHOLD | 0.2f | 到位判定阈值 (度) |
+| R_CLOSED_TIMEOUT | 3000 | 超时保护 (ms) |
+| R_CLOSED_KICK_MS | 10 | 初始开环起步时长 (ms) |
+| R_CLOSED_LOOP_MS | 5 | PID 控制周期 (ms) |
+
+### 39.6 三轮代码审计修复记录
+
+**第一轮（初始实现 → 用户自审）：**
+- CubeMX 硬件配置完成：TIM5 PSC=0, IC 配置, IRQ 使能
+- Port_24VO4 释放 PB2
+- 缺失：驱动层 driver_kth7823.c/h、闭环 _axis_rotate()、PID 参数
+
+**第二轮（实现 + 首轮审计 → 8 项修复）：**
+
+| # | 严重度 | 问题 | 修复 |
+|---|--------|------|------|
+| 1 | P1 | memset((void*)&g_kth...) 强转丢弃 volatile | 移除 memset，依赖 static 编译期零初始化 + 显式复位关键字段 |
+| 2 | P1 | GetAngle() 先清 data_ready 再读 ngle_deg | 先快照值再清标志 |
+| 3 | P1 | ICFilter=0 无硬件毛刺抑制 | KTH7823_Init 中写 CCMR1 设 IC1F=8 (~47ns) |
+| 4 | P1 | _axis_set_zero 无编码器数据等待 | 新增 KTH7823_WaitData(timeout_ms) |
+| 5 | P2 | 硬编码 GPIO_PIN_2 / GPIOB | 新增 KTH7823_PWM_PORT / KTH7823_PWM_PIN 宏 |
+| 6 | P2 | PID 首拍 D-term 尖峰 (MeasurementPrev=0) | 首次读数调用 PID_Compute 初始化历史 (丢弃输出) |
+| 7 | P2 | host_correct_r_from_vision 阈值不一致 | 统一为 R_CLOSED_THRESHOLD |
+| 8 | P2 | ngle_to_usteps 残留 doxygen 注释 | 清理 |
+
+**第三轮（深度审计 → 4 项修复）：**
+
+| # | 严重度 | 问题 | 修复 |
+|---|--------|------|------|
+| 1 | P0 | PID_Init 每次调用 osMutexNew → FreeRTOS 堆泄漏 | 改为 static PID_Controller_t r_pid，仅首次 PID_Init，后续 PID_Reset + PID_SetParams 复用 |
+| 2 | P2 | R_CLOSED_KICK_MS / R_CLOSED_LOOP_MS 定义在 app_motion.c | 移到 pp_config.h 集中管理 |
+| 3 | P3 | KTH7823_Init() 返回 void，失败无感知 | 改为返回 ool，pp_host.c 检查并打印 FAILED |
+| 4 | P1 | _axis_set_zero 忽略 KTH7823_WaitData 返回值 | 检查返回值，超时时 offset 保持 0 + 注释说明 |
+
+**第四轮（最终审计 → 2 项）：**
+
+| # | 严重度 | 问题 | 修复 |
+|---|--------|------|------|
+| 1 | Bug | _axis_set_zero 仍忽略 WaitData 返回值 (第三轮修复未正确处理) | 重新修复：if (KTH7823_WaitData(100)) { ... } |
+| 2 | Style | 多余空行 | 清理 |
+
+### 39.7 关键技术决策
+
+1. **static PID 复用：** _axis_rotate 内使用 static PID_Controller_t r_pid，首次调用 PID_Init 创建 mutex，后续调用 PID_Reset + 参数更新复用同一实例。避免每次旋转分配/泄漏 FreeRTOS mutex 对象。
+
+2. **角度解绕 (unwrap)：** PID 工作在连续空间。编码器角度 (0~360°) 被"解绕"到 setpoint ±180° 范围后再送入 PID，避免 359°→1° 跨越被误认为 358° 误差。
+
+3. **首拍尖峰消除：** PID 首次调用前用首个编码器读数喂入 PID_Compute 初始化 MeasurementPrev，消除微分项从 0 跳变到实际值产生的尖峰。该次输出丢弃。
+
+4. **ICFilter=8：** 在 KTH7823_Init 中直写 TIM5->CCMR1 覆写 CubeMX 默认值 0。8 级滤波 ~47ns @170MHz，远小于编码器最短脉宽 ~2μs，不影响测量但有效抑制电磁干扰毛刺。
+
+5. **GetAngle 读取顺序：** loat val = angle_deg; data_ready = false; return val; — 先快照再清标志，防止 ISR 在清标志与读值之间更新数据导致本轮返回旧值且丢失新数据标志。
+
+### 39.8 已知限制
+
+- PID 参数为理论值，需实机整定（通过阶跃响应调整 KP/KI/KD）
+- _axis_rotate 返回值 (-1=跳过, -2=超时) 在 Host_Task 调用点未检查，与原开环行为一致
+- R_CORRECTION_THRESHOLD_DEG (0.1°) 在 pp_config.h 仍定义但已无引用，被 R_CLOSED_THRESHOLD (0.2°) 替代
+- 编码器断线时 _axis_set_zero offset=0，后续角度即编码器原始值（非静默错误，行为可预测）

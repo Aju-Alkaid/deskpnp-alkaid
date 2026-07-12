@@ -14,6 +14,16 @@
 /* R 轴旋转速度 (RPM) — 矫正和贴装共用 */
 #define R_SPEED_RPM                 60.0f
 
+/* ---- R 轴闭环 PID 参数 (KTH7823 编码器反馈) ---- */
+#define R_CLOSED_KP             2.5f     /* 比例系数 (速度/度误差) */
+#define R_CLOSED_KI             0.05f    /* 积分系数 */
+#define R_CLOSED_KD             0.3f     /* 微分系数 */
+#define R_CLOSED_MAX_SPEED      50000.0f  /* PID 最大速度输出 (μsteps/s) */
+#define R_CLOSED_THRESHOLD      0.2f     /* 到位判定阈值 (度) */
+#define R_CLOSED_TIMEOUT        3000     /* 闭环超时保护 (ms) */
+#define R_CLOSED_KICK_MS        10       /* 初始开环起步时长 (ms) */
+#define R_CLOSED_LOOP_MS        5        /* PID 闭环控制周期 (ms) */
+
 /* ================================================================
  *  标定数据 — W25Q64 Flash 持久化
  * ================================================================ */

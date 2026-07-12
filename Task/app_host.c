@@ -1,4 +1,4 @@
-/* ================================================================
+﻿/* ================================================================
  *  app_host.c
  *  分区: §1常量 §2CSV §3辅助 §4调试命令 §5PnP step §6主循环
  * ================================================================ */
@@ -11,6 +11,7 @@
 #include "driver_servo.h"
 #include "driver_drv8803.h"
 #include "driver_tmc2209.h"
+#include "driver_kth7823.h"
 #include "driver_heater.h"
 #include "app_logger.h"
 #include "driver_spiflash_w25q64.h"
@@ -38,7 +39,6 @@ extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 #define MARK_VERIFY_ERR_MM  0.3f   /* Mark3 验证允许误差 (mm) */
 #define P2_SCAN_STEP_MM      5.0f   /* P2 网格扫描步长 (mm) */
 #define P2_SCAN_TIMEOUT       300   /* 每格位超时 (~3s, 主循环10ms/轮) */
-#define CAM_PX_TO_STEPS        (STEPS_PER_MM / 1000.0f)   /* 像素 -> 步数 */
 #define P2_MAX_ALIGN_ITER       5   /* P2 对齐迭代上限，防死循环 */
 #define Z_SERVO_CH       2            /* 舵机通道号 */
 
@@ -73,6 +73,7 @@ static bool    g_cam_ref_valid = false;
 static bool g_during_cmd = false;  /* 正在执行命令时置位，用于屏蔽回显 */
 static bool g_jog_active = false;
 static bool g_auto_heat = false;
+static bool g_light_on    = false;  /* 下补光灯状态 */
 static bool     g_error_entered   = false;
 static uint32_t g_error_start_tick = 0;  /* ERROR 30s 超时计时器 */
 /* 命令去重：连续两次相同 cmd+param 直接丢弃（中间有别的命令会复位） */
@@ -464,8 +465,8 @@ static bool handle_calib_cmd(HostParsed_t *cmd) {
         g_calib.cam_p1_val_to_steps = 0.0f;
         g_calib.cam_p3_val_to_steps = 0.0f;
         scatter_init_cells();
-        if (Calib_Save(&g_calib) == 0) { PrintDebug("[HOST] RESTORE_CALIB: saved.\r\n"); host_send("CALIB_RESTORED"); }
-        else { PrintDebug("[HOST] RESTORE_CALIB: FAILED!\r\n"); host_send("RESTORE_FAILED"); }
+        if (Calib_Save(&g_calib) == 0) { PrintDebug("[HOST] RESTORE_CALIB: saved.\r\n"); host_send("RESTORE_CALIB_OK"); }
+        else { PrintDebug("[HOST] RESTORE_CALIB: FAILED!\r\n"); host_send("RESTORE_CALIB_FAILED"); }
         return true;
     default: return false;
     }
@@ -630,8 +631,11 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         break;
 
     case HCMD_HEAT_ON:
-        Heater_SendStart();
-        PrintDebug("[HOST] HEAT_ON\r\n");
+        if (Heater_SendStart()) {
+            PrintDebug("[HOST] HEAT_ON\r\n");
+        } else {
+            PrintDebug("[HOST] HEAT_ON TX FAILED\r\n");
+        }
         break;
 
     case HCMD_HEAT_OFF:
@@ -642,6 +646,16 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
     case HCMD_HEATER_QUERY:
         Heater_SendQuery();
         PrintDebug("[HOST] HEATER_QUERY\r\n");
+        break;
+
+    case HCMD_HOLD_TEMP:
+        if (Heater_SendHold()) {
+            PrintDebug("[HOST] HOLD_TEMP\r\n");
+            host_send("HOLD_TEMP_OK");
+        } else {
+            PrintDebug("[HOST] HOLD_TEMP TX FAILED\r\n");
+            host_send("HOLD_TEMP_FAILED");
+        }
         break;
 
     case HCMD_EXIT_DEBUG:
@@ -711,6 +725,12 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
     case HCMD_VALVE_OFF:
         Valve_Off();
         PrintDebug("[HOST] VALVE_OFF\r\n");
+        break;
+
+    case HCMD_LIGHT:
+        g_light_on = !g_light_on;
+        if (g_light_on) { LowerCam_Light_On();  host_send("LIGHT_ON");  PrintDebug("[HOST] LIGHT: ON\r\n"); }
+        else            { LowerCam_Light_Off(); host_send("LIGHT_OFF"); PrintDebug("[HOST] LIGHT: OFF\r\n"); }
         break;
 
     default:
@@ -832,8 +852,8 @@ static void mark_align_step(void) {
 
         if (idx >= 0 && idx < P2_MARK_COUNT) {
             if (r->dx != 0 || r->dy != 0) {
-                int32_t dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);  // cam Y → X1+X2
-                int32_t dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);  // cam X → Y 电机
+                int32_t dx_s = -(int32_t)(r->dy);  // cam Y → X1+X2, value already in motor steps
+                int32_t dy_s = -(int32_t)(r->dx);  // cam X → Y 电机, value already in motor steps
                 safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, 100, 25);
                 PrintDebug("[HOST] Mark%ld offset: (%ld,%ld)px → move(%ld,%ld)steps\r\n",
                            (long)idx, (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
@@ -949,7 +969,7 @@ static void mark_align_step(void) {
 bool host_correct_r_from_vision(const VisionResult_t *r, const char *stage) {
     if (!r || !r->angle_valid) return false;
     float ang = (float)r->angle_x100 / 100.0f;
-    if (fabsf(ang) <= R_CORRECTION_THRESHOLD_DEG) return false;
+    if (fabsf(ang) <= R_CLOSED_THRESHOLD) return false;
     r_axis_set_zero();
     PrintDebug("[HOST] %s: R correction %.2f deg\r\n", stage, (double)ang);
     r_axis_rotate(ang, R_SPEED_RPM);
@@ -1006,38 +1026,26 @@ static void find_comp_step(void) {
         Vision_Go();
         break;
 
-    case VISION_GOT_POS: {
-        /* P1 Phase1 或 Phase2: 收到偏移数据 */
-        /* TODO: 需根据上相机实际 FOV 校准像素→步数比例 */
+    case VISION_DONE: {
+        /* P1 single-shot: apply vision offset then cam-to-nozzle compensation */
         Component_t *c = &g_components[g_comp_index];
-        int32_t dx_s = -(int32_t)(r->dy * (STEPS_PER_MM / 1000.0f)); // cam Y → X1+X2
-        int32_t dy_s = -(int32_t)(r->dx * (STEPS_PER_MM / 1000.0f)); // cam X → Y 电机
+        int32_t dx_s = -(int32_t)(r->dy); // cam Y → X1+X2, value already in motor steps
+        int32_t dy_s = -(int32_t)(r->dx); // cam X → Y 电机, value already in motor steps
 
-        /* Phase1 独有：记录角度和类别 */
-        if (r->angle_x100 != 0 || r->class_name[0] != '\0') {
-            PrintDebug("[HOST] Comp %u: cls=%s ang=%ld.%02ddeg offset(%ld,%ld)px\r\n",
-                       c->id, r->class_name,
-                       (long)(r->angle_x100 / 100), (int)(r->angle_x100 % 100),
-                       (long)r->dx, (long)r->dy);
-        } else {
-            PrintDebug("[HOST] Comp %u iter: offset(%ld,%ld)px\r\n",
-                       c->id, (long)r->dx, (long)r->dy);
-        }
+        PrintDebug("[HOST] Comp %u: cls=%s ang=%ld.%02ddeg offset(%ld,%ld)steps\r\n",
+                   c->id, r->class_name,
+                   (long)(r->angle_x100 / 100), (int)(r->angle_x100 % 100),
+                   (long)r->dx, (long)r->dy);
 
-        /* 移动 (如果偏移够大) */
+        /* 应用视觉偏移 */
         if (dx_s != 0 || dy_s != 0) {
             safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED_FINE, PNP_ACC_FINE);
         }
-        Vision_Go();
-        break;
-    }
 
-    case VISION_DONE:
-        /* P1 完成 → 摄像头→吸嘴偏置补偿 → 吸取 (R轴矫正移至吸取后) */
         g_p1_retry_count = 0;
         g_p1_scan_pos = 0;
         g_consecutive_failures = 0;
-        /* 偏置补偿: 摄像头对准了元件，吸嘴还偏着 */
+        /* 摄像头→吸嘴偏置补偿 */
         if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
             safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps,
                          Coord_Get().y - g_calib.cam_to_nozzle_dy_steps,
@@ -1049,6 +1057,8 @@ static void find_comp_step(void) {
                    g_components[g_comp_index].id);
         g_state = HOST_PICK;
         break;
+    }
+
 
     case VISION_ERROR: {
         const char *err = Vision_GetError();
@@ -1126,37 +1136,29 @@ static void offset_check_step(void) {
     }
 
     switch (vs) {
-    case VISION_GOT_ERR_RETRY:
-        /* err3_3 recoverable: resend go */
-        Vision_Go();
-        vTaskDelay(pdMS_TO_TICKS(50));
-        break;
-
-    case VISION_GOT_POS: {
-        /* TODO: 需根据下相机实际 FOV 校准像素→步数比例 */
-        int32_t dx_s = (int32_t)(r->dy * (STEPS_PER_MM / 1000.0f));  // cam Y → X1+X2，不取反
-        int32_t dy_s = -(int32_t)(r->dx * (STEPS_PER_MM / 1000.0f)); // cam X → Y 电机，取反
+    case VISION_DONE: {
+        /* P3 single-shot: apply vision offset + accumulate */
+        int32_t dx_s = (int32_t)(r->dy);  // cam Y → X1+X2，不取反, value already in motor steps
+        int32_t dy_s = -(int32_t)(r->dx); // cam X → Y 电机，取反, value already in motor steps
         if (dx_s != 0 || dy_s != 0) {
             safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
             g_p3_offset_x += dx_s;
             g_p3_offset_y += dy_s;
         }
-        Vision_Go();
-        break;
-    }
 
-    case VISION_DONE:
-        /* P3 完成 → 二次 R 轴矫正 → 计算 PCB 坐标 */
+        /* 角度矫正 + 过渡到 PCB */
         g_p3_nozzle_retry = 0;
         LowerCam_Light_Off();
         host_correct_r_from_vision(r, "P3");
-        osDelay(500);  /* R轴物理停稳 */
+        osDelay(500);
         r_axis_set_zero();
-        Vision_SendEnd();  /* 终止P3会话，防止后续P1受残留帧干扰 */
-                    Bridge_NotifySMTProgress(g_comp_index + 1, g_comp_count);
-            PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
+        Vision_SendEnd();
+        Bridge_NotifySMTProgress(g_comp_index + 1, g_comp_count);
+        PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
         g_state = HOST_MOVE_TO_PCB;
         break;
+    }
+
 
     case VISION_ERROR: {
         const char *err = Vision_GetError();
@@ -1388,7 +1390,13 @@ void Host_Task(void *argument) {
     }
     /* ENN 低有效：LOW=开启，HIGH=关闭。初始化完成后关闭，用到时再开 */
     TMC_SetEnable(false);
-
+    
+        /* KTH7823 磁编码器初始化 (R轴闭环反馈) */
+    if (!KTH7823_Init()) {
+        PrintDebug("[HOST] KTH7823 encoder init FAILED!\r\n");
+    } else {
+        PrintDebug("[HOST] KTH7823 encoder init done\r\n");
+    }
 
     
     Log_Init();

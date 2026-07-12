@@ -8,12 +8,15 @@
 #include <stdbool.h>
 #include "driver_servo.h"
 #include "driver_tmc2209.h"   
+#include "driver_kth7823.h"
 #include <math.h>   // 解决 fabsf 未声明
 #include "app_test.h"
 #include "driver_drv8803.h"
 #include "app_config.h"
 #include "driver_uart.h"
 #include "timestamp.h"
+
+#include "pid.h"
 
 extern TIM_HandleTypeDef htim5;
 
@@ -27,6 +30,9 @@ volatile MotorError_t g_motor_error_detail = MOTOR_OK;
 volatile bool s_cmd_interrupted = false;
 volatile uint32_t g_axes_done_bits = 0;
 volatile bool g_axes_error = false;
+
+/* ---- KTH7823 R 轴编码器零点偏置 (deg) ---- */
+float g_r_encoder_zero_offset = 0.0f;
 
 /* ---------- 电机地址定义 ---------- */
 #define X1_ADDR   0x01
@@ -46,7 +52,6 @@ volatile bool g_axes_error = false;
 #define R_STEPS_PER_REV (200 * R_MICROSTEPS)  // 51200 微步/圈
 #define R_ACCEL_DELAY   50                    // 加减速/停止延时（ms）
 #define R_RAMP_FRACTION 0.5f                  // 软启动斜坡起始速度比例
-
 /* MKS SERVO42D 编码器参数 */
 #define MKS_PULSES_PER_REV  16384.0f  /* 电机每圈脉冲数 */
 
@@ -385,71 +390,114 @@ void place_component(void) {
 }
 
 /**
- * @brief 将角度转换为微步数
- * @param angle 角度 (0.0 ~ 360.0)
- * @return 微步数
- */
-static int32_t angle_to_usteps(float angle) {
-    return (int32_t)(angle / 360.0f * R_STEPS_PER_REV);
-}
-
-/**
- * @brief R 轴旋转到指定角度 (开环，基于时间)
- * @param angle  目标角度 (绝对角度，0~360)
- * @param speed_rpm 转速
+ * @brief R 轴软件归零 — 记录编码器当前角度作为零点偏置
  */
 void r_axis_set_zero(void) {
+    /* 等待首个有效编码器读数, 确保零点偏置基于真实角度 */
+    if (KTH7823_WaitData(100)) {
+        g_r_encoder_zero_offset = KTH7823_GetAngle();
+    }
+    /* 超时或未初始化: offset 保持 0 (编译期零初始化), 后续角度即编码器原始值 */
     Coord_UpdateR(0.0f);
 }
 
+/**
+ * @brief R 轴闭环旋转到指定角度 (KTH7823 编码器 + PID 控制)
+ * @param angle     目标角度 (绝对角度, 0~360)
+ * @param speed_rpm 最大转速 (当前用于初始方向判断)
+ * @return 0=成功, -1=已在阈值内无需动作, -2=超时
+ */
 int r_axis_rotate(float angle, float speed_rpm) {
     MachineCoord_t c0 = Coord_Get();
     float delta = angle - c0.r;
     if (delta < -180.0f) delta += 360.0f;
-    else if (delta > 180.0f) delta -= 360.0f;   // 选择最短路径
+    else if (delta > 180.0f) delta -= 360.0f;
 
-    if (fabsf(delta) <= R_CORRECTION_THRESHOLD_DEG) return -1;  // 最小矫正阈值，无动作
+    if (fabsf(delta) <= R_CLOSED_THRESHOLD) return -1;
 
-    uint8_t  dir = (delta >= 0) ? 0 : 1;
-    int32_t  usteps = angle_to_usteps(fabsf(delta));
-    float    full_spd = speed_rpm * R_STEPS_PER_REV / 60.0f; /* µsteps/s */
-    float    ramp_spd = full_spd * R_RAMP_FRACTION;
-    uint32_t ramp_usteps = (uint32_t)(ramp_spd * R_ACCEL_DELAY / 1000.0f);
+    /* 目标角度转换到编码器空间 (加零点偏置, 归一到 0~360) */
+    float target_enc = angle + g_r_encoder_zero_offset;
+    while (target_enc >= 360.0f) target_enc -= 360.0f;
+    while (target_enc < 0.0f)   target_enc += 360.0f;
 
-    /* 使能 TMC2209 驱动 */
+    /* 使能 TMC2209, 初始方向开环起步 (快速接近目标) */
     TMC_SetEnable(true);
     vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
-#ifdef DEBUG_MOTION
-    PrintDebug("[R] delta=%.2f deg usteps=%ld dir=%d\r\n", (double)delta, (long)usteps, (int)dir);
-#endif
 
-    if (usteps <= ramp_usteps * 2) {
-        /* 小角度：降速保证足够运行时间，避免一步跳全速丢步 */
-        int32_t low = (int32_t)(usteps * 1000.0f / (R_ACCEL_DELAY * 2));
-        TMC_SetSpeed(dir ? -low : low);
-        vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY * 2));
-    } else {
-        /* 正常角度：半速斜坡 → 全速恒速 */
-        TMC_SetSpeed(dir ? -(int32_t)ramp_spd : (int32_t)ramp_spd);
-        vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY));
+    uint8_t  dir = (delta >= 0) ? 0 : 1;
+    int32_t  init_spd = (int32_t)(speed_rpm * R_STEPS_PER_REV / 60.0f * R_RAMP_FRACTION);
+    TMC_SetSpeed(dir ? -init_spd : init_spd);
+    vTaskDelay(pdMS_TO_TICKS(R_CLOSED_KICK_MS));
 
-        uint32_t remain = usteps - ramp_usteps;
-        uint32_t run_ms = (uint32_t)(remain * 1000.0f / full_spd);
-        TMC_SetSpeed(dir ? -(int32_t)full_spd : (int32_t)full_spd);
-        vTaskDelay(pdMS_TO_TICKS(run_ms));
+    /* 静态 PID 控制器 — 复用避免重复分配 FreeRTOS mutex (堆泄漏) */
+    static PID_Controller_t r_pid;
+    static bool             r_pid_inited = false;
+    if (!r_pid_inited) {
+        PID_Init(&r_pid, PID_MODE_POSITION);
+        r_pid_inited = true;
+    }
+    PID_Reset(&r_pid);
+    PID_SetParams(&r_pid, R_CLOSED_KP, R_CLOSED_KI, R_CLOSED_KD);
+    PID_SetSetpoint(&r_pid, target_enc);
+    r_pid.MaxOutput   = R_CLOSED_MAX_SPEED;
+    r_pid.MaxIntegral = R_CLOSED_MAX_SPEED * 0.5f;
+    PID_SetState(&r_pid, PID_STATE_RUN);
+
+    uint32_t t_start = HAL_GetTick();
+    int      result  = 0;
+    bool     pid_primed = false;   /* 首个有效编码器读数用于 PID 历史装入 */
+
+    while (1) {
+        /* 超时保护 */
+        if (HAL_GetTick() - t_start > R_CLOSED_TIMEOUT) {
+            result = -2;
+            break;
+        }
+
+        if (!KTH7823_IsDataReady()) {
+            vTaskDelay(pdMS_TO_TICKS(2));
+            continue;
+        }
+
+        float current_raw = KTH7823_GetAngle();
+
+        /* 解绕: 将 current 调整到 target_enc ±180° 范围, 供 PID 正确计算误差 */
+        float current_adj = current_raw;
+        float diff = target_enc - current_adj;
+        if (diff > 180.0f)       current_adj += 360.0f;
+        else if (diff < -180.0f) current_adj -= 360.0f;
+
+        /* 首个有效读数: 喂入 PID 初始化 MeasurementPrev, 消除微分尖峰 */
+        if (!pid_primed) {
+            PID_Compute(&r_pid, current_adj);
+            pid_primed = true;
+            continue;
+        }
+
+        float error = target_enc - current_adj;
+        if (fabsf(error) <= R_CLOSED_THRESHOLD) break;
+
+
+
+        float speed = PID_Compute(&r_pid, current_adj);
+
+        /* 限幅并写入 TMC2209 */
+        int32_t ispeed = (int32_t)speed;
+        if (ispeed >  (int32_t)R_CLOSED_MAX_SPEED) ispeed =  (int32_t)R_CLOSED_MAX_SPEED;
+        if (ispeed < -(int32_t)R_CLOSED_MAX_SPEED) ispeed = -(int32_t)R_CLOSED_MAX_SPEED;
+        TMC_SetSpeed(ispeed);
+
+        vTaskDelay(pdMS_TO_TICKS(R_CLOSED_LOOP_MS));
     }
 
-    /* 停止 */
+    /* 停止 + 关断 */
     TMC_SetSpeed(0);
     vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY));
-
-    /* 关闭 TMC2209 驱动 */
     TMC_SetEnable(false);
 
     Coord_UpdateR(angle);
-    return 0;
+    return result;
 }
-
 /* ---------- 任务入口 ---------- */
 void MotionTask_Func(void *argument)
 {

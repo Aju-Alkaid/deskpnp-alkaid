@@ -56,13 +56,14 @@
 | SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, 连接 W25Q64 Flash |
 | SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, 连接 ESP32 通信模块 |
 | TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) Z轴舵机 PWM (50Hz) / 32位时间戳基准 |
-| TIM5 | CH1(PB2) 24V_C1 PWM / CH3(PE8) 12V_C2 PWM (50Hz) |
+| TIM5 | CH1(PB2) KTH7823 编码器输入捕获 (170MHz) / CH3(PE8) Z轴舵机 PWM (50Hz) |
 | TIM6 | HAL 系统时基 |
 | CRC | 硬件 CRC 校验 |
 | GPIO 按键 | KEY1(PC6) / KEY2(PC7) / CW(PA8) / CCW(PC8) / PUSH(PC9), 低电平有效 |
 | DRV8803×2 | U12(12V 驱动): PE9(EN)/PE10(RST)/PE15(FAULT) ; 输出端口见 §10.4 |
 |  | U13(24V 驱动): PA4(EN)/PB0(RST)/PA6(IN5)/PA7(IN6)/PC4(IN7)/PC5(IN8)/PA5(FAULT) |
 | TMC2209 | UART3 通信, PD15(TMC1_EN) / PD14(TMC2_EN 预留) |
+| KTH7823 磁编码器 | PB2, TIM5_CH1 输入捕获 (PSC=0, 170MHz), 910Hz PWM 14-bit 绝对位置 |
 | 加热台 | CAN ID 0x04(命令) / 0x05(状态), FDCAN1 500kbps, 共享电机 CAN 总线 |
 | 温度传感器 | PF9 / PA3, DS18B20 |
 | 舵机(Z轴) | PB10, TIM2_CH3, MG995 (50Hz PWM, 角度越大吸嘴越低) |
@@ -86,6 +87,7 @@ pnp_1/
 │       ├── driver_can.c/h       # FDCAN 收发 + 滤波器 + CRC_SUM8 + 中断
 │       ├── driver_motor.c/h     # MKS 伺服电机 CAN 控制（0xF5/0xF3/0x82/0x92/0x4A/0x4B 等）
 │       ├── driver_tmc2209.c/h   # TMC2209 UART 寄存器读写 (R轴)
+│       ├── driver_kth7823.c/h   # KTH7823 磁编码器 PWM 输入捕获 + 角度解算 (R轴闭环反馈)
 │       ├── driver_servo.c/h     # MG995 舵机 PWM 控制（TIM2_CH3 / PB10）
 │       ├── driver_drv8803.c/h   # DRV8803 双芯片 8通道驱动（12V+24V）
 │       ├── driver_heater.c/h    # 加热台 CAN 通信 (CAN ID 0x04/0x05, 自有 CRC 协议, 见 §4.4)
@@ -181,7 +183,7 @@ pnp_1/
   Cam  → Host: rdy         // 握手成功（120s 超时发 err0，主控须重发 p0）
   ```
 
-- **P1 — 元件识别（上摄像头，YOLO 224×224，4 类：ccapt/cledy/cledo/crest）：**
+- **P1 — 元件识别（上摄像头，YOLO 224×224，4 类：ccapt/cledy/cledo/crest，2026-07-11 升级为单次检测）：**
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
@@ -189,58 +191,74 @@ pnp_1/
   | 2 | Cam→Host | `rdy` | **询问类别** |
   | 3 | Host→Cam | `cls` | 类别指令 |
   | 4 | Host→Cam | `N:{class_id}` | 0=ccapt, 1=cledy, 2=cledo, 3=crest |
-  | — | — | — | 映射规则：`LED*`→cledo(2), `C0*`/`R0*`→ccapt(0), 其他→cledo(fallback) |
+  | — | — | — | 映射规则：`LED*`→cledo(2), `C0*`/`R0*`→ccapt(0), 其他→ccapt(fallback) |
   | 5 | Host→Cam | `end` | 结束类别询问 |
   | 6 | Cam 开始 Phase0 搜索 | | |
 
-  - **Phase0（搜索）：** Cam→Host: `stp`（目标锁定）→ Host→Cam: `go`（停机确认）
-  - **Phase1（精测）：** Cam→Host: `pos` `N:{dx}` `N:{dy}` `N:{id}` `end`（3 字段，**无角度**。dx/dy 已×6.0）
-  - **Phase2（迭代修正≤5轮）：**
-    - Host→Cam: `go` → Cam→Host: `pos` `N:{dx}` `N:{dy}` `end`（未对齐）
-    - 对齐完成：Cam→Host: `ok` → Cam→Host: `N:{ao}`（**角度×100，紧跟 ok**）
-  - **错误：** `err1_1`~`err1_9`。`err1_5/err1_8/err1_9/err1_1/err1_4` 每元件最多重试 3 次，其他错误直接跳过当前元件
+  - **Phase0（搜索）：** Cam→Host: `stp`（连续3帧锁定确认）→ Host→Cam: `go`（停机确认）
+  - **Phase1（单次检测，无 Phase2）：** Cam 采集 20 帧位置+角度，MAD 去野值 + 圆形均值滤波 → 一次性发送：
+    ```
+    Cam→Host: "pos"
+    Cam→Host: "N:{dx * 47.077}"     // X 偏差，**已是电机步数**
+    Cam→Host: "N:{dy * 47.077}"     // Y 偏差，**已是电机步数**
+    Cam→Host: "N:{final_ao}"        // final_ao = -angle * 100（百分之一度）
+    Cam→Host: "N:{class_id}"        // 0=ccapt 1=cledy 2=cledo 3=crest
+    Cam→Host: "end"
+    ```
+    共 **4 字段**（dx, dy, angle, class_id）。角度×100，紧跟 pos 一次性返回，无需 Phase2。
+  - **关键参数：** `p1_initial_gain = 47.077`（像素→电机步数），`INIT_FRAMES = 20`，`HUNT_LOCK_FRAMES = 3`
+  - **错误：** `err1_1`（初始化失败）、`err1_3`（Phase0 超时）、`err1_4`（相机读取失败>50次）、`err1_5`（未检测到目标）。`err1_5/err1_1/err1_4` 每元件最多重试 3 次
 
-- **P2 — Mark 点建系（上摄像头 224×224，中心 90% 裁剪）：**
+- **P2 — Mark 多点寻标对位（上摄像头 448×448，Canny 边缘检测，2026-07-11 更新增益）：**
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
-  | 1 | Host→Cam | `p2` | 启动 P2，IDLE 态 |
-  | 2 | Host→Cam | `go` | 开始搜索（多态命令） |
-  | 3 | Cam→Host | `stp` | Mark 锁定（10帧稳定，漂移<1.5px） |
-  | 4 | Host→Cam | `go` | 确认停机 → 精确测位 |
-  | 5 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 偏移 **像素** |
-  | 6 | Host→Cam | `go` | 移动完成 → 迭代归零 |
-  | 7 | Cam→Host | `ok` | 连续30帧对齐（|offset|≤0.3px） |
+  | 1 | Host→Cam | `p2` | 启动 P2 |
+  | 2 | Cam→Host | `rdy` | 就绪 |
+  | 3 | Host→Cam | `go` | 开始搜索（逐个 Mark 循环） |
+  | 4 | Cam→Host | `stp` | Mark 锁定（8帧稳定确认） |
+  | 5 | Host→Cam | `go` | 确认停机 → 精确测位 |
+  | 6 | Cam→Host | `pos` `N:{dx*48.5}` `N:{dy*48.5}` `end` | 偏移 **已是电机步数** |
+  | 7 | Host→Cam | `go` | 移动完成 → 迭代归零 |
+  | 8 | Cam→Host | `ok` | 对准完成（10帧平均，|offset|≤4.0px） |
+  | — | — | — | 未对准 → 回到步骤 6（新 pos），最多 7 轮迭代 |
   | — | — | — | 非末 Mark 的 ok → 自动切 P2_WAIT_GO，等 Host 发 go 搜索下一个 |
   | — | — | — | 末 Mark 的 ok → VISION_DONE |
   | — | Host→Cam | `end` | 随时终止 |
-  - **错误：** `err2_1`~`err2_4`
+  - **关键参数：** `p2_dxdy_gain = 48.5`（像素→电机步数），`p2_target_count = 3`，`p2_align_max_iter = 7`，`p2_align_th = 4.0px`
+  - **错误：** `err2_1`（空闲超时）、`err2_3`（pos_detect 未检测到 Mark）、`err2_4`（对准迭代超 7 次）
   - **P2 退出必须发送 `end` 帧：** P2 完成或异常退出后，必须通过 `Vision_SendEnd()` 发送 `end` 帧通知摄像头终止 P2 会话。Host_Task 的 `mark_align_step` 和 `app_test.c` 的 `cam_p2_full_test_run` 在所有 P2 退出路径均已添加此调用。
 
-- **P3 — 下相机对准验证（下摄像头 640×480，Canny 边缘检测）：**
+- **P3 — 下相机单次检测对位（下摄像头 640×480，YOLO model_286344，2026-07-11 升级为单次检测）：**
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
   | 1 | Host→Cam | `p3` | 启动 P3 |
-  | — | Cam | Phase0：吸嘴圆检测（10帧，阈值≥7帧） | |
+  | — | Cam | Phase0：吸嘴检查（YOLO 连续 6 帧检测吸嘴圆） | |
   | — | Cam→Host | `err3_8` | 检测到吸嘴圆 → 吸嘴空取（无元件） |
-| 2 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | Phase1 自动检测（dx/dy 已×1.5） |
-  | 3 | Host→Cam | `go` | 移动完成 → Phase2 |
-  | 4 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 未重合（|dx|>3 或 |dy|>3） |
-  | 5 | 对齐完成：Cam→Host: `ok` → Cam→Host: `N:{ao}`（**角度×100，紧跟 ok**） |
-  - **错误码：** `err3_1`/`err3_2`（致命），`err3_3`（**可重试**—Cam 收到非 go，Host 重发 go），`err3_5`/`err3_6`/`err3_7`（致命），`err3_8`（**吸嘴空取**—Phase0 检测到吸嘴圆，不可降级贴装，主控回退重新吸取）
+  | 2 | Cam→Host | `pos` + 数据包 + `end` | Phase1 单次检测，**已是电机步数**： |
+  | — | — | — | `N:{dx * 13.5554}` — X 偏差 |
+  | — | — | — | `N:{dy * 13.5554}` — Y 偏差 |
+  | — | — | — | `N:{final_ao}` — final_ao = angle * 100（百分之一度） |
+  | — | — | — | 共 **3 字段**（dx, dy, angle）。角度一次返回，无 Phase2 迭代。 |
+  - **关键参数：** `p3_dx_gain = p3_dy_gain = 13.5554`（像素→电机步数），`avg_frames = 10`，`p3_nozzle_check_frames = 6`
+  - **错误码：** `err3_1`（下相机初始化失败）、`err3_5`（YOLO 检测帧数不足）、`err3_8`（**吸嘴空取**—不可降级贴装，主控回退重新吸取）
+  - **模型：** P3 使用 `model_286344.mud`（cap/res/led），P1/P2 使用 `model_284490.mud`（cCapt/cLedy/cLedo/cRest），程序自动切换。
 
 - **pos 格式汇总：**
 
-  | 进程/阶段 | 帧序列 | 单位 |
-  |----------|--------|------|
-  | P1 Phase1 | `pos` N:dx N:dy N:{id} `end` | 像素×6.0 |
-  | P1 Phase2 | `pos` N:dx N:dy `end` | 像素×6.0 |
-  | P2 | `pos` N:dx N:dy `end` | 像素 |
-| P3 Phase1 | `pos` N:dx N:dy `end` | 像素×1.5 |
-  | P3 Phase2 | `pos` N:dx N:dy `end` | 像素×1.5 |
+  | 进程 | 帧序列 | 字段数 | 单位 | 增益 |
+  |------|--------|--------|------|------|
+  | P1 | `pos` N:dx N:dy N:ao N:cls `end` | 4 | **电机步数** | 47.077 |
+  | P2 | `pos` N:dx N:dy `end` | 2 | **电机步数** | 48.5 |
+  | P3 | `pos` N:dx N:dy N:ao `end` | 3 | **电机步数** | 13.5554 |
 
-- **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
+  > **重要变更（2026-07-11）：** CAM 端已将像素值预乘增益，输出的 N: 值**直接是电机步数**。
+  > G4 固件端**不再做任何缩放**，仅进行轴映射（cam X→Y电机取反，cam Y→X1+X2）。
+  > P1/P3 改为**单次检测**，Phase1 直接返回全部数据（含角度），不再有 Phase2 迭代对齐。
+  > 角度符号：P1 `-angle*100`（取反），P3 `angle*100`（不取反）。
+  > 详细协议参见上位机文档 `E:/聊天记录/通讯接口文档 (1).md`。
+- **固件侧实现：**- **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
 
 ### 4.2.1 物理轴约定（设计坐标 → 电机坐标映射）
 
@@ -266,9 +284,11 @@ pnp_1/
 | 环节 | dx/X1+X2 公式 | dy/Y电机 公式 |
 |------|-------------|-------------|
 | Mark 跳转 | `+(tdy * 512)` | `-(tdx * 512)` |
-| P2 偏移修正 | `-(r->dy * scale)` | `-(r->dx * scale)` |
-| P1 偏移修正 | `-(r->dy * scale)` | `-(r->dx * scale)` |
-| P3 偏移修正 | `+(r->dy * scale)` 不取反 | `-(r->dx * scale)` |
+| P2 偏移修正 | `-(r->dy)` | `-(r->dx)` |
+| P1 偏移修正 | `-(r->dy)` | `-(r->dx)` |
+| P3 偏移修正 | `+(r->dy)` 不取反 | `-(r->dx)` |
+
+> **2026-07-11 更新：** CAM 端已预乘增益（P1=47.077, P2=48.5, P3=13.5554），G4 端直接使用 r->dx/r->dy 值，不再乘 scale。上表已移除 `* scale`。
 
 > P3 的 dx 不取反是因为下相机图像左右镜像（相机朝上拍摄），X 轴自然反转。
 
@@ -968,6 +988,57 @@ P1/P2/P3 视觉 step 函数使用独立的摄像头→电机映射（§9.14, §9
 | `AGENTS.md` | §9.17 新增，HISTORY.md §27.8 坐标映射条目修正 |
 
 
+### 9.18 R 轴 KTH7823 闭环控制（2026-07-11~12）
+
+**背景：** 原先 R 轴使用 TMC2209 VACTUAL 速度模式开环控制（定时盲估到位），无位置反馈。
+新增 KTH7823 14-bit 磁编码器实现闭环 PID 位置控制。
+
+**硬件：** KTH7823 PWM 输出 (910Hz, 14-bit) → PB2 (TIM5_CH1 输入捕获, PSC=0, 170MHz)。
+PB2 原先为 DRV8803 Port_24VO4 的 PWM 引脚，已让出（Port_24VO4 改为仅开关模式）。
+
+**TIM5 共用：** CH1=输入捕获 (KTH7823) + CH3=PWM 输出 (舵机)。
+PSC 从 169 降至 0 → 舵机 ARR 从 19999 变为 3,399,999，舵机驱动 pulse 字段已用 uint32_t 适配。
+
+**软件架构：**
+
+| 层 | 文件 | 职责 |
+|----|------|------|
+| 驱动层 | driver_kth7823.c/h | PWM 双边沿输入捕获 ISR + 角度公式解算 (910Hz 更新率) |
+| 控制层 | pp_motion.c _axis_rotate() | 闭环 PID (位置式, static 复用) + 解绕 (unwrap) 角度处理 |
+| 配置层 | pp_config.h | R_CLOSED_KP/KI/KD/MAX_SPEED/THRESHOLD/TIMEOUT/KICK_MS/LOOP_MS |
+
+**闭环流程：** _axis_rotate(target) → TMC2209 使能 → 初始方向开环起步 10ms →
+PID 循环 (5ms 周期): 读编码器角度 → 解绕到 target±180° → PID 计算速度 → TMC_SetSpeed →
+|error|<0.2° 到位停机 → TMC2209 关断。
+
+**r_axis_set_zero：** 调用 KTH7823_WaitData(100ms) 等待首个有效编码器读数，记录为 g_r_encoder_zero_offset。后续所有角度 = 编码器原始值 - offset → 软件可任意指定零点。
+
+**关键设计决策：**
+- PID 实例为函数内 static，仅首次 PID_Init，后续 PID_Reset + PID_SetParams 复用，避免 FreeRTOS mutex 堆泄漏
+- 输入滤波器 ICFilter=8 (~47ns @170MHz)，在 KTH7823_Init 中直接写 TIM5->CCMR1 覆写 CubeMX 默认值 0
+- GetAngle() 先快照 ngle_deg 再清 data_ready，避免 ISR 并发导致的数据不一致
+- 首次编码器读数用于 PID 历史装入 (MeasurementPrev)，消除首拍 D-term 尖峰
+- 3s 超时保护 → 返回 -2，防止编码器断线时死循环阻塞 PnP 流程
+
+**新增文件：** Drivers/ZeMCU-G4/driver_kth7823.c/h
+
+**修改文件：**
+
+| 文件 | 改动 |
+|------|------|
+| Core/Src/tim.c | TIM5 PSC=0, Period=3,399,999, CH1 IC + CH3 PWM |
+| Core/Src/stm32g4xx_it.c | TIM5_IRQHandler (CubeMX 生成) |
+| Drivers/ZeMCU-G4/driver_drv8803.c | Port_24VO4 移除 PB2, num_pins=1 |
+| Task/app_config.h | 新增 8 个 R_CLOSED_* PID 参数常量 |
+| Task/app_motion.c | _axis_rotate() 闭环 PID; _axis_set_zero() 编码器零点 |
+| Task/app_host.c | KTH7823_Init() 调用 + 错误检查; host_correct_r_from_vision 阈值统一 |
+
+**已知限制：**
+- PID 参数 (KP=2.5, KI=0.05, KD=0.3) 为理论值，需实机整定
+- _axis_rotate 返回值未在调用方检查（与原开环行为一致，PnP 状态机暂无 R 轴超时恢复路径）
+- R_CORRECTION_THRESHOLD_DEG (0.1°) 仍定义但已无引用，被 R_CLOSED_THRESHOLD (0.2°) 统一替代
+
+
 ### 10.1 常用 GPIO 引脚速查
 | 功能 | 引脚 | 备注 |
 |------|------|------|
@@ -979,7 +1050,7 @@ P1/P2/P3 视觉 step 函数使用独立的摄像头→电机映射（§9.14, §9
 | 舵机 PWM (Z轴) | PB10 | TIM2_CH3 (50Hz) |
 | 12V_C1 PWM | PA0 | TIM2_CH1 |
 | 12V_C2 PWM | PE8 | TIM5_CH3 (50Hz) |
-| 24V_C1 PWM | PB2 | TIM5_CH1 |
+| KTH7823 编码器 | PB2 | TIM5_CH1 (输入捕获) |
 | 24V_C2 PWM | PB1 | |
 | SPI2_SCK/MOSI | PB13/PB15 | LCD |
 | SPI2_CS/DC/RST | PD10/PD9/PD8 | LCD 控制 |
@@ -1039,7 +1110,7 @@ P1/P2/P3 视觉 step 函数使用独立的摄像头→电机映射（§9.14, §9
 | `Port_24VO1` | PA6 | — | — | 24V 输出 |
 | `Port_24VO2` | PA7 | — | — | 24V 输出 |
 | `Port_24VO3` | PC4 | PB1 | TIM3_CH4 | 24V PWM 输出 |
-| `Port_24VO4` | PC5 | PB2 | TIM5_CH1 | 24V PWM 输出 |
+| `Port_24VO4` | PC5 | — | — | 24V 开关输出 (PB2 已让给 KTH7823) |
 
 > **芯片级引脚**（固定，不属于输出端口）：
 > U12(12V): PE9(EN) / PE10(RST) / PE15(FAULT)

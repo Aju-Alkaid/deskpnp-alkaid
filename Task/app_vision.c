@@ -1,4 +1,4 @@
-#include "app_vision.h"
+﻿#include "app_vision.h"
 #include "app_host.h"
 #include "app_test.h"
 #include "driver_uart.h"
@@ -23,20 +23,16 @@ typedef enum {
 } FrameState_t;
 
 /* ================================================================
- *  Process1 internal sub-states
+ *  Process1 internal sub-states (2026-07-11: single-shot, no Phase2)
  *
  *  P1_S_CATEGORY   -> sent "p1", waiting for "rdy" (category query)
  *  P1_S0_WAIT_STOP -> sent cls+N:id+end, waiting for "stp" (Phase0)
- *  P1_S1_WAIT_POS  -> sent "go", waiting for initial pos (Phase1: dx,dy,id)
- *  P1_S2_ITERATING -> sent "go", waiting for iter pos or "ok" (Phase2)
- *  P1_S_WAIT_ANGLE -> received "ok", waiting for N:{ao} angle frame
+ *  P1_S1_WAIT_POS  -> sent "go", waiting for pos (dx,dy,angle,class_id)
  * ================================================================ */
 typedef enum {
     P1_S_CATEGORY,       /* waiting for "rdy" after "p1" */
     P1_S0_WAIT_STOP,     /* Phase 0: waiting for "stp" */
-    P1_S1_WAIT_POS,      /* Phase 1: waiting for initial pos */
-    P1_S2_ITERATING,     /* Phase 2: iterative alignment */
-    P1_S_WAIT_ANGLE,     /* waiting for angle frame after "ok" */
+    P1_S1_WAIT_POS,      /* Phase 1: single-shot, 4 fields */
 } P1_State_t;
 
 /* ================================================================
@@ -55,9 +51,7 @@ typedef enum {
  *  Process3 内部子状态
  * ================================================================ */
 typedef enum {
-    P3_PHASE1,
-    P3_PHASE2,
-    P3_S_WAIT_ANGLE,
+    P3_PHASE1,           /* Phase 1: single-shot detect (includes angle) */
 } P3_State_t;
 
 /* ================================================================
@@ -76,7 +70,6 @@ static VisionCmd_t   g_active_cmd   = VCMD_P1;
 
 /* ---- Process1 子状态 ---- */
 static P1_State_t    g_p1_sub       = P1_S0_WAIT_STOP;
-static int           g_p1_iter      = 0;
 static int           g_p1_class_id  = -1;
 
 /* ---- Process2 子状态 ---- */
@@ -85,7 +78,6 @@ static int           g_p2_mark_idx  = 0;    /* 当前 Mark 序号 (0-based) */
 
 /* ---- Process3 子状态 ---- */
 static P3_State_t    g_p3_sub       = P3_PHASE1;
-static int           g_p3_iter      = 0;
 static int           g_p3_retry_cnt = 0;
 static int           g_p2_iter      = 0;  /* P2 aligning 迭代计数 */
 
@@ -99,6 +91,7 @@ static bool          g_collect_auto_end = false;
 static int32_t       g_tmp_dx       = 0;
 static int32_t       g_tmp_dy       = 0;
 static int32_t       g_tmp_cls      = 0;
+static int32_t       g_tmp_ao       = 0;
 
 /* ---- 超时保护 ---- */
 #define VISION_TIMEOUT_MS  120000   /* 2 分钟，P2 扫描+3 个 Mark 建系 */
@@ -161,12 +154,10 @@ static void reset_all(void) {
     g_state        = VISION_IDLE;
     g_active_cmd   = VCMD_P1;
     g_p1_sub       = P1_S0_WAIT_STOP;
-    g_p1_iter      = 0;
     g_p1_class_id  = -1;
     g_p2_sub       = P2_IDLE;
     g_p2_mark_idx  = 0;
     g_p3_sub       = P3_PHASE1;
-    g_p3_iter      = 0;
     g_p3_retry_cnt = 0;
     g_p2_iter      = 0;
     g_p2_total_rx  = 0;
@@ -186,6 +177,7 @@ static void collect_begin(int expected, bool auto_end) {
     g_tmp_dx  = 0;
     g_tmp_dy  = 0;
     g_tmp_cls = 0;
+    g_tmp_ao  = 0;
 }
 
 /* 安全拷贝字符串到固定大小 buffer */
@@ -218,10 +210,10 @@ static void fill_class_id(int32_t id) {
 /* ================================================================
  *  Process1 帧分发 (ISR context)
  *
- *  v2 changes:
- *  - Category query: "p1" -> wait "rdy" -> send cls N:id end
- *  - Phase1 pos: 3 fields (dx, dy, class_id), no angle
- *  - Phase2 ok: followed by N:{ao} angle frame
+ *  2026-07-11 single-shot protocol:
+ *  - Category query: "p1" -> wait "rdy" -> cls + N:id + end
+ *  - Phase1 pos: 4 fields (dx, dy, angle, class_id) -> VISION_DONE
+ *  - No Phase2 iterative alignment; angle included in pos packet
  * ================================================================ */
 static void process_p1_frame(const char *str) {
     /* ---- 错误帧优先级最高 ---- */
@@ -235,9 +227,6 @@ static void process_p1_frame(const char *str) {
     /* ---- Category query: waiting for "rdy" ---- */
     if (g_p1_sub == P1_S_CATEGORY) {
         if (str[0] == 'r' && str[1] == 'd' && str[2] == 'y' && str[3] == '\0') {
-            /* Cam asks which category.
-             * Defer the reply to task context (Vision_ClsReply).
-             * We CANNOT send UART frames from ISR context. */
             g_state = VISION_GOT_CATEGORY_QUERY;
         }
         return;
@@ -250,36 +239,14 @@ static void process_p1_frame(const char *str) {
         return;
     }
 
-    /* ---- "ok" ---- */
-    if (str[0] == 'o' && str[1] == 'k' && str[2] == '\0') {
-        g_collecting = false;
-        if (g_p1_sub == P1_S2_ITERATING) {
-            g_p1_sub = P1_S_WAIT_ANGLE;   /* wait for angle next */
-        }
-        return;
-    }
-
-    /* ---- Angle frame after "ok" ---- */
-    if (g_p1_sub == P1_S_WAIT_ANGLE) {
-        int32_t val;
-        if (parse_number_frame(str, &val)) {
-            g_result.angle_x100  = val;
-            g_result.angle_valid = true;
-            g_state = VISION_DONE;
-        }
-        return;
-    }
-
-    /* ---- "pos" — 开始位置数据序列 ---- */
+    /* ---- "pos" (4 fields: dx,dy,angle,class_id) ---- */
     if (str[0] == 'p' && str[1] == 'o' && str[2] == 's' && str[3] == '\0') {
         if (g_p1_sub == P1_S1_WAIT_POS)
-            collect_begin(3, false);   /* dx, dy, class_id */
-        else
-            collect_begin(2, false);   /* dx, dy */
+            collect_begin(4, false);   /* dx, dy, angle, class_id */
         return;
     }
 
-    /* ---- "end" — 位置数据序列结束 ---- */
+    /* ---- "end" -> VISION_DONE (single-shot, includes angle) ---- */
     if (str[0] == 'e' && str[1] == 'n' && str[2] == 'd' && str[3] == '\0') {
         if (!g_collecting) return;
         g_collecting = false;
@@ -287,30 +254,23 @@ static void process_p1_frame(const char *str) {
         if (g_p1_sub == P1_S1_WAIT_POS) {
             g_result.dx         = g_tmp_dx;
             g_result.dy         = g_tmp_dy;
-            g_result.angle_x100 = 0;
-            g_result.angle_valid = false;
+            g_result.angle_x100 = g_tmp_ao;
+            g_result.angle_valid = true;
             fill_class_id(g_tmp_cls);
-            g_state = VISION_GOT_POS;
-        } else {
-            g_result.dx         = g_tmp_dx;
-            g_result.dy         = g_tmp_dy;
-            g_result.angle_x100 = 0;
-            g_result.angle_valid = false;
-            g_result.class_id   = -1;
-            g_result.class_name[0] = '\0';
-            g_state = VISION_GOT_POS;
+            g_state = VISION_DONE;
         }
         return;
     }
 
-    /* ---- 收集模式：处理数据字段 ---- */
+    /* ---- 收集模式 (0=dx, 1=dy, 2=angle, 3=class_id) ---- */
     if (g_collecting) {
         int32_t val;
         if (parse_number_frame(str, &val)) {
             switch (g_collect_cnt) {
             case 0: g_tmp_dx  = val; break;
             case 1: g_tmp_dy  = val; break;
-            case 2: g_tmp_cls = val; break;
+            case 2: g_tmp_ao  = val; break;
+            case 3: g_tmp_cls = val; break;
             default: break;
             }
         }
@@ -415,93 +375,55 @@ static void process_p2_frame(const char *str) {
 /* ================================================================
  *  Process3 帧分发 (ISR 上下文)
  *
- *  v2 changes:
- *  - Phase1: pos N:dx N:dy WITH "end" (same format as Phase2)
- *  - Phase2: ok followed by N:{ao} angle frame
- *  - err3_3: non-fatal (Cam requests retry), err3_7: fatal
+ *  2026-07-11 single-shot protocol:
+ *  - Phase1 pos: 3 fields (dx, dy, angle) -> VISION_DONE
+ *  - err3_3: defensive retain (Cam may still send on protocol violation)
+ *  - No Phase2 iterative alignment; angle included in pos packet
  * ================================================================ */
 static void process_p3_frame(const char *str) {
-    /* ---- Error: err3_3 is recoverable ---- */
+    /* ---- Error frame handling ---- */
     if (str[0] == 'e' && str[1] == 'r' && str[2] == 'r') {
         g_collecting = false;
-        if (str[3] == '3' && str[4] == '_' && str[5] == '3' && str[6] == '\0') {
-            g_state = VISION_GOT_ERR_RETRY;
-            g_p3_retry_cnt++;
-            return;
-        }
         g_state = VISION_ERROR;
         save_error(str);
         return;
     }
 
-    /* ---- Angle frame after "ok" ---- */
-    if (g_p3_sub == P3_S_WAIT_ANGLE) {
-        int32_t val;
-        if (parse_number_frame(str, &val)) {
-            g_result.angle_x100  = val;
+    /* ---- "pos" (3 fields: dx,dy,angle) ---- */
+    if (str[0] == 'p' && str[1] == 'o' && str[2] == 's' && str[3] == '\0') {
+        if (g_p3_sub == P3_PHASE1)
+            collect_begin(3, false);   /* dx, dy, angle */
+        return;
+    }
+
+    /* ---- "end" -> VISION_DONE (single-shot, includes angle) ---- */
+    if (str[0] == 'e' && str[1] == 'n' && str[2] == 'd' && str[3] == '\0') {
+        if (!g_collecting) return;
+        g_collecting = false;
+        if (g_p3_sub == P3_PHASE1) {
+            g_result.dx         = g_tmp_dx;
+            g_result.dy         = g_tmp_dy;
+            g_result.angle_x100 = g_tmp_ao;
             g_result.angle_valid = true;
+            g_result.class_id   = -1;
+            g_result.class_name[0] = '\0';
             g_state = VISION_DONE;
         }
         return;
     }
 
-    /* ---- "ok" ---- */
-    if (str[0] == 'o' && str[1] == 'k' && str[2] == '\0') {
-        g_collecting = false;
-        if (g_p3_sub == P3_PHASE2) {
-            g_p3_sub = P3_S_WAIT_ANGLE;   /* wait for angle next */
-        }
-        return;
-    }
-
-    /* ---- "pos" — 开始位置数据序列 ---- */
-    if (str[0] == 'p' && str[1] == 'o' && str[2] == 's' && str[3] == '\0') {
-        if (g_p3_sub == P3_PHASE1)
-            collect_begin(2, false);   /* needs "end" */
-        else
-            collect_begin(2, false);   /* needs "end" */
-        return;
-    }
-
-    /* ---- "end" (Phase1/Phase2) ---- */
-    if (str[0] == 'e' && str[1] == 'n' && str[2] == 'd' && str[3] == '\0') {
-        if (!g_collecting) return;
-        g_collecting = false;
-        if (g_p3_sub == P3_PHASE1 || g_p3_sub == P3_PHASE2) {
-            g_result.dx         = g_tmp_dx;
-            g_result.dy         = g_tmp_dy;
-            g_result.angle_x100 = 0;
-            g_result.angle_valid = false;
-            g_result.class_id   = -1;
-            g_result.class_name[0] = '\0';
-            g_state = VISION_GOT_POS;
-        }
-        return;
-    }
-
-    /* ---- 收集模式：处理 "N:xxx" 数据字段 ---- */
+    /* ---- 收集模式 (0=dx, 1=dy, 2=angle) ---- */
     if (g_collecting) {
         int32_t val;
         if (parse_number_frame(str, &val)) {
             switch (g_collect_cnt) {
             case 0: g_tmp_dx = val; break;
             case 1: g_tmp_dy = val; break;
+            case 2: g_tmp_ao = val; break;
             default: break;
             }
         }
         g_collect_cnt++;
-
-        /* P3 Phase1 auto-complete: 2 numbers -> done */
-        if (g_collect_auto_end && g_collect_cnt >= g_collect_exp) {
-            g_collecting = false;
-            g_result.dx         = g_tmp_dx;
-            g_result.dy         = g_tmp_dy;
-            g_result.angle_x100 = 0;
-            g_result.angle_valid = false;
-            g_result.class_id   = -1;
-            g_result.class_name[0] = '\0';
-            g_state = VISION_GOT_POS;
-        }
     }
 }
 
@@ -621,7 +543,6 @@ void Vision_Start(VisionCmd_t cmd, int class_id) {
     case VCMD_P1:
         g_p1_class_id = class_id;
         g_p1_sub      = P1_S_CATEGORY;
-        g_p1_iter     = 0;
         g_state       = VISION_BUSY;
         send_frame("p1");
         PrintDebug("[VISION] -> Cam: p1 (P1 start, class=%d)\r\n", class_id);
@@ -637,7 +558,6 @@ void Vision_Start(VisionCmd_t cmd, int class_id) {
 
     case VCMD_P3:
         g_p3_sub       = P3_PHASE1;
-        g_p3_iter      = 0;
         g_p3_retry_cnt = 0;
         g_state        = VISION_BUSY;
         send_frame("p3");
@@ -651,7 +571,7 @@ void Vision_Start(VisionCmd_t cmd, int class_id) {
 }
 
 void Vision_Go(void) {
-    /* P2 首次 go: IDLE → 发 "go" 开始搜索 */
+    /* P2 first go: IDLE -> send "go" to start search */
     if (g_active_cmd == VCMD_P2 && g_state == VISION_IDLE && g_p2_sub == P2_IDLE) {
         send_frame("go");
         g_p2_sub = P2_SEARCHING;
@@ -669,64 +589,46 @@ void Vision_Go(void) {
         return;
     }
 
-    /* err3_3 retry: resend go */
-    if (g_state == VISION_GOT_ERR_RETRY) {
-        send_frame("go");
-        g_state = VISION_BUSY;
-        PrintDebug("[VISION] -> Cam: go (P3 err3_3 retry #%d)\r\n", g_p3_retry_cnt);
-        return;
-    }
-
+    /* Guard: only GOT_STOP or GOT_POS states proceed past here */
     if (g_state != VISION_GOT_STOP && g_state != VISION_GOT_POS) return;
 
     send_frame("go");
+    g_state = VISION_BUSY;   /* ★ must precede branches: P1/P3 return early */
 
     if (g_active_cmd == VCMD_P1) {
         if (g_p1_sub == P1_S0_WAIT_STOP) {
             g_p1_sub = P1_S1_WAIT_POS;
             PrintDebug("[VISION] -> Cam: go (P1 Phase1)\r\n");
-        } else if (g_p1_sub == P1_S1_WAIT_POS) {
-            g_p1_sub  = P1_S2_ITERATING;
-            g_p1_iter = 0;
-            PrintDebug("[VISION] -> Cam: go (P1 Phase2 iter=0)\r\n");
-        } else if (g_p1_sub == P1_S2_ITERATING) {
-            g_p1_iter++;
-            PrintDebug("[VISION] -> Cam: go (P1 iter=%d)\r\n", g_p1_iter);
         }
+        /* P1 single-shot: no Phase2 */
+        return;
     }
     else if (g_active_cmd == VCMD_P2) {
         if (g_p2_sub == P2_WAIT_GO) {
-            /* 中间 "ok" 后 → 发 "go" 搜索下一个 Mark */
             g_p2_sub = P2_SEARCHING;
             PrintDebug("[VISION] -> Cam: go (P2 search mark %d)\r\n", g_p2_mark_idx);
         } else if (g_p2_sub == P2_SEARCHING) {
-            /* stp → go: 进入精确测位 */
             g_p2_sub = P2_POS_DETECT;
             PrintDebug("[VISION] -> Cam: go (P2 pos-detect mark %d)\r\n", g_p2_mark_idx);
         } else if (g_p2_sub == P2_POS_DETECT) {
-            /* pos → go: 进入迭代归零 */
             g_p2_sub = P2_ALIGNING;
             g_p2_iter = 0;
             PrintDebug("[VISION] -> Cam: go (P2 aligning mark %d), waiting...\r\n", g_p2_mark_idx);
         } else if (g_p2_sub == P2_ALIGNING) {
-            /* 迭代对齐: 发 go 继续迭代, 最多5轮 */
             g_p2_iter++;
             PrintDebug("[VISION] -> Cam: go (P2 align iter %d, mark %d)\r\n", g_p2_iter, g_p2_mark_idx);
         }
     }
     else if (g_active_cmd == VCMD_P3) {
-        if (g_p3_sub == P3_PHASE1) {
-            g_p3_sub  = P3_PHASE2;
-            g_p3_iter = 0;
-            PrintDebug("[VISION] -> Cam: go (P3 Phase2 iter=0)\r\n");
-        } else if (g_p3_sub == P3_PHASE2) {
-            g_p3_iter++;
-            PrintDebug("[VISION] -> Cam: go (P3 iter=%d)\r\n", g_p3_iter);
-        }
+        /* P3 single-shot: no Phase2 */
+        return;
     }
 
+    /* P2 falls through to here, but all paths set g_state above */
     g_state = VISION_BUSY;
 }
+
+
 
 /* P1 category reply: send cls + N:{id} + end (MUST be called from task context) */
 void Vision_ClsReply(void) {

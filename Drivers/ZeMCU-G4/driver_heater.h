@@ -1,8 +1,9 @@
-﻿#ifndef __DRIVER_HEATER_H
+#ifndef __DRIVER_HEATER_H
 #define __DRIVER_HEATER_H
 
 #include <stdint.h>
 #include "cmsis_os.h"
+#include <stdbool.h>
 
 /* ========== CAN ID 定义（加热台从机协议） ========== */
 #define HEATER_CMD_ID       0x04   /* 主控 → 加热台 命令帧 */
@@ -40,10 +41,11 @@ typedef struct {
 
 /* ========== 函数声明 ========== */
 void Heater_Init(void);
-void Heater_SendStart(void);
+bool Heater_SendStart(void);
 void Heater_SendStop(void);
 void Heater_SendQuery(void);
-void Heater_SetTemperature(int16_t temp_0_1c);         /* 手动设定温度，单位 0.1°C */
+bool Heater_SendHold(void);              /* 0x03 恒温保持，从机自行控温 */
+bool Heater_SetTemperature(int16_t temp_0_1c);         /* 手动设定温度，单位 0.1°C */
 void Heater_SetPID(int16_t Kp, int16_t Ki, int16_t Kd); /* 设定 PID，单位 0.001 */
 void Heater_ProcessStatus(void);                       /* 任务中调用，处理接收到的状态帧 */
 HeaterStatus_t Heater_GetCurrentStatus(void);          /* 获取最新状态快照 */

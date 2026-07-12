@@ -26,6 +26,7 @@ typedef enum {
     HCMD_HEAT_ON,       // 开启加热台
     HCMD_HEAT_OFF,      // 关闭加热台
     HCMD_HEATER_QUERY,  // 查询加热台状态
+    HCMD_HOLD_TEMP,     // 恒温保持模式
     HCMD_MOVE_TO,       // 运动至指定坐标
     /* 退出调试 */
     HCMD_EXIT_DEBUG,
@@ -52,6 +53,7 @@ typedef enum {
     HCMD_HOME,                // 回到原点
     HCMD_VALVE_ON,            // 开启电磁阀
     HCMD_VALVE_OFF,           // 关闭电磁阀
+    HCMD_LIGHT,               // 切换下补光灯
 
     /* 未知命令 */
     HCMD_UNKNOWN
