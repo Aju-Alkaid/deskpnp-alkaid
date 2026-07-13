@@ -42,6 +42,12 @@ typedef enum {
     TMC_REG_TPWMTHRS      = 0x13,
     TMC_REG_RAMPMODE      = 0x20,
     TMC_REG_VACTUAL       = 0x22,
+    TMC_REG_XACTUAL       = 0x21,
+    TMC_REG_AMAX          = 0x23,
+    TMC_REG_DMAX          = 0x24,
+    TMC_REG_VMAX          = 0x25,
+    TMC_REG_VSTART        = 0x26,
+    TMC_REG_VSTOP         = 0x27,
     TMC_REG_SGTHRS        = 0x40,
     TMC_REG_SG_RESULT     = 0x41,
     TMC_REG_COOLCONF      = 0x42,
@@ -93,6 +99,13 @@ typedef enum {
 #define TMC_MUTEX_WAIT_TIME    100         // ms
 #define TMC_ENABLE_DELAY_MS    50          /* ENN 拉低后上电稳定延时 */
 
+/* ---- R 轴位置模式斜坡默认值 ---- */
+#define TMC_RAMP_VMAX     50000   /* 定位最大速度 (μsteps/s) */
+#define TMC_RAMP_AMAX     5000    /* 最大加速度 (μsteps/s²) */
+#define TMC_RAMP_DMAX     5000    /* 最大减速度 (μsteps/s²) */
+#define TMC_RAMP_VSTART   200     /* 启动速度 (μsteps/s) */
+#define TMC_RAMP_VSTOP    200     /* 停止速度 (μsteps/s) */
+
 /* ========== 错误码 ========== */
 typedef enum {
     TMC_ERR_NONE = 0,
@@ -113,6 +126,11 @@ void            TMC_SetCurrent_Raw(uint8_t run_current, uint8_t hold_current, ui
 void            TMC_SetMicrosteps(uint16_t steps);
 void            TMC_SetChopperMode(bool use_spreadcycle);
 void            TMC_SetSpeed(int32_t velocity);
+void            TMC_ConfigRamp(uint32_t vmax, uint32_t amax, uint32_t dmax, uint32_t vstart, uint32_t vstop);
+void            TMC_EnsureRampConfigured(void);
+int             TMC_MoveToPosition(int32_t target_usteps);
+bool            TMC_WaitPosition(int32_t target, uint32_t timeout_ms);
+TMC_Error_t     TMC_ReadXActual(int32_t *xactual);
 TMC_Error_t     TMC_GetStatus(uint8_t *status);
 TMC_Error_t     TMC_GetSGResult(uint16_t *sg_value);
 

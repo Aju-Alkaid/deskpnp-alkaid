@@ -271,8 +271,71 @@ TMC_Error_t TMC_GetSGResult(uint16_t *sg_value) {
     return ret;
 }
 
+/* ---------- 位置模式 (RAMPMODE=0) ---------- */
+
+void TMC_ConfigRamp(uint32_t vmax, uint32_t amax, uint32_t dmax, uint32_t vstart, uint32_t vstop) {
+    TMC_WriteReg(TMC_REG_VMAX,   vmax);
+    TMC_WriteReg(TMC_REG_AMAX,   amax);
+    TMC_WriteReg(TMC_REG_DMAX,   dmax);
+    TMC_WriteReg(TMC_REG_VSTART, vstart);
+    TMC_WriteReg(TMC_REG_VSTOP,  vstop);
+    PrintDebug("[TMC] Ramp: VMAX=%lu AMAX=%lu DMAX=%lu VSTART=%lu VSTOP=%lu\r\n",
+               vmax, amax, dmax, vstart, vstop);
+}
+
+TMC_Error_t TMC_ReadXActual(int32_t *xactual) {
+    if (xactual == NULL) return TMC_ERR_INVALID_PARAM;
+    uint32_t val;
+    TMC_Error_t ret = TMC_ReadReg(TMC_REG_XACTUAL, &val);
+    if (ret == TMC_ERR_NONE) *xactual = (int32_t)val;
+    return ret;
+}
+
+int TMC_MoveToPosition(int32_t target_usteps) {
+    /* 先清零 VACTUAL 再切模式，防止速度模式残留值被误认为目标位置 */
+    TMC_WriteReg(TMC_REG_VACTUAL, 0);
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    if (TMC_WriteReg(TMC_REG_RAMPMODE, 0) != TMC_ERR_NONE) {
+        PrintDebug("[TMC] MoveToPos: RAMPMODE=0 write FAILED\r\n");
+        return -1;
+    }
+    vTaskDelay(pdMS_TO_TICKS(2));
+
+    /* 定位模式下 VACTUAL = 目标位置 (s32) */
+    if (TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)target_usteps) != TMC_ERR_NONE) {
+        PrintDebug("[TMC] MoveToPos: VACTUAL write FAILED\r\n");
+        return -1;
+    }
+    PrintDebug("[TMC] MoveToPos: target=%ld\r\n", (long)target_usteps);
+    return 0;
+}
+
+bool TMC_WaitPosition(int32_t target, uint32_t timeout_ms) {
+    uint32_t t0 = HAL_GetTick();
+    while (HAL_GetTick() - t0 < timeout_ms) {
+        int32_t xactual;
+        if (TMC_ReadXActual(&xactual) == TMC_ERR_NONE) {
+            if ((xactual - target) >= -2 && (xactual - target) <= 2) return true;  /* ±2 µsteps 容差 */
+        }
+        vTaskDelay(pdMS_TO_TICKS(5));
+    }
+    PrintDebug("[TMC] WaitPosition timeout: target=%ld\r\n", (long)target);
+    return false;
+}
+
+static bool g_ramp_configured = false;
+
+void TMC_EnsureRampConfigured(void) {
+    if (!g_ramp_configured) {
+        TMC_ConfigRamp(TMC_RAMP_VMAX, TMC_RAMP_AMAX, TMC_RAMP_DMAX, TMC_RAMP_VSTART, TMC_RAMP_VSTOP);
+        g_ramp_configured = true;
+    }
+}
+
 /* ========== 初始化 ========== */
 bool TMC_Init(void) {
+    g_ramp_configured = false;  /* 每次初始化重置斜坡配置标志 */
     if (g_tmc_mutex == NULL) {
         g_tmc_mutex = xSemaphoreCreateMutex();
         if (g_tmc_mutex == NULL) return false;
@@ -372,6 +435,7 @@ bool TMC_Init(void) {
     if (TMC_WriteReg(TMC_REG_RAMPMODE, 1) != TMC_ERR_NONE)
         PrintDebug("[TMC] RAMPMODE write FAILED\r\n");
 
+        g_ramp_configured = false;  /* 重配斜坡，确保位置模式寄存器重新写入 */
     TMC_SetEnable(false);   /* 初始化完成后关闭驱动，用到时再开 */
     return true;
 }

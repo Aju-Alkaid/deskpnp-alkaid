@@ -16,7 +16,6 @@
 #include "driver_uart.h"
 #include "timestamp.h"
 
-#include "pid.h"
 
 extern TIM_HandleTypeDef htim5;
 
@@ -47,11 +46,6 @@ float g_r_encoder_zero_offset = 0.0f;
 
 // 吸嘴气泵由 DRV8803 12VO1 (PE11) 控制，见 driver_drv8803.h Pump_On/Off
 
-// R 轴参数（需根据实测调整）
-#define R_MICROSTEPS    256
-#define R_STEPS_PER_REV (200 * R_MICROSTEPS)  // 51200 微步/圈
-#define R_ACCEL_DELAY   50                    // 加减速/停止延时（ms）
-#define R_RAMP_FRACTION 0.5f                  // 软启动斜坡起始速度比例
 /* MKS SERVO42D 编码器参数 */
 #define MKS_PULSES_PER_REV  16384.0f  /* 电机每圈脉冲数 */
 
@@ -402,101 +396,83 @@ void r_axis_set_zero(void) {
 }
 
 /**
- * @brief R 轴闭环旋转到指定角度 (KTH7823 编码器 + PID 控制)
+ * @brief R 轴两层闭环旋转 (TMC2209 位置模式 + KTH7823 编码器验证)
  * @param angle     目标角度 (绝对角度, 0~360)
- * @param speed_rpm 最大转速 (当前用于初始方向判断)
- * @return 0=成功, -1=已在阈值内无需动作, -2=超时
+ * @param speed_rpm 保留参数，当前未使用（位置模式由硬件控制速度）
+ * @return 0=成功, -1=已在阈值内无需动作, -2=硬件定位超时
  */
 int r_axis_rotate(float angle, float speed_rpm) {
+    (void)speed_rpm;  /* 位置模式下不需要速度参数 */
+
     MachineCoord_t c0 = Coord_Get();
     float delta = angle - c0.r;
     if (delta < -180.0f) delta += 360.0f;
     else if (delta > 180.0f) delta -= 360.0f;
 
-    if (fabsf(delta) <= R_CLOSED_THRESHOLD) return -1;
+    if (fabsf(delta) <= R_VERIFY_THRESHOLD) return -1;
 
-    /* 目标角度转换到编码器空间 (加零点偏置, 归一到 0~360) */
-    float target_enc = angle + g_r_encoder_zero_offset;
-    while (target_enc >= 360.0f) target_enc -= 360.0f;
-    while (target_enc < 0.0f)   target_enc += 360.0f;
+    /* 角度差 → μsteps */
+    int32_t delta_usteps = R_DEG_TO_USTEPS(delta);
+    if (delta_usteps == 0) return -1;
 
-    /* 使能 TMC2209, 初始方向开环起步 (快速接近目标) */
+    /* 使能 TMC2209, 配置斜坡（仅首次） */
     TMC_SetEnable(true);
     vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
+    TMC_EnsureRampConfigured();
 
-    uint8_t  dir = (delta >= 0) ? 0 : 1;
-    int32_t  init_spd = (int32_t)(speed_rpm * R_STEPS_PER_REV / 60.0f * R_RAMP_FRACTION);
-    TMC_SetSpeed(dir ? -init_spd : init_spd);
-    vTaskDelay(pdMS_TO_TICKS(R_CLOSED_KICK_MS));
-
-    /* 静态 PID 控制器 — 复用避免重复分配 FreeRTOS mutex (堆泄漏) */
-    static PID_Controller_t r_pid;
-    static bool             r_pid_inited = false;
-    if (!r_pid_inited) {
-        PID_Init(&r_pid, PID_MODE_POSITION);
-        r_pid_inited = true;
+    /* ---- 第一层: TMC2209 硬件位置模式定位 ---- */
+    int32_t xactual;
+    if (TMC_ReadXActual(&xactual) != TMC_ERR_NONE) {
+        TMC_SetEnable(false);
+        return -2;
     }
-    PID_Reset(&r_pid);
-    PID_SetParams(&r_pid, R_CLOSED_KP, R_CLOSED_KI, R_CLOSED_KD);
-    PID_SetSetpoint(&r_pid, target_enc);
-    r_pid.MaxOutput   = R_CLOSED_MAX_SPEED;
-    r_pid.MaxIntegral = R_CLOSED_MAX_SPEED * 0.5f;
-    PID_SetState(&r_pid, PID_STATE_RUN);
+    int32_t target = xactual + delta_usteps;
 
-    uint32_t t_start = HAL_GetTick();
-    int      result  = 0;
-    bool     pid_primed = false;   /* 首个有效编码器读数用于 PID 历史装入 */
+    if (TMC_MoveToPosition(target) != 0) {
+        TMC_SetEnable(false);
+        return -2;
+    }
 
-    while (1) {
-        /* 超时保护 */
-        if (HAL_GetTick() - t_start > R_CLOSED_TIMEOUT) {
-            result = -2;
-            break;
-        }
+    if (!TMC_WaitPosition(target, R_POS_TIMEOUT_MS)) {
+        TMC_SetEnable(false);
+        return -2;
+    }
 
-        if (!KTH7823_IsDataReady()) {
-            vTaskDelay(pdMS_TO_TICKS(2));
-            continue;
-        }
+    /* ---- 第二层: KTH7823 编码器验证 + 微调 (最多 R_VERIFY_MAX_ITER 次) ---- */
+    for (int iter = 0; iter < R_VERIFY_MAX_ITER; iter++) {
+        if (!KTH7823_WaitData(100)) break;
 
-        float current_raw = KTH7823_GetAngle();
+        float current_enc = KTH7823_GetAngle();
 
-        /* 解绕: 将 current 调整到 target_enc ±180° 范围, 供 PID 正确计算误差 */
-        float current_adj = current_raw;
+        /* 目标编码器角度 */
+        float target_enc = angle + g_r_encoder_zero_offset;
+        while (target_enc >= 360.0f) target_enc -= 360.0f;
+        while (target_enc < 0.0f)   target_enc += 360.0f;
+
+        /* 解绕 */
+        float current_adj = current_enc;
         float diff = target_enc - current_adj;
         if (diff > 180.0f)       current_adj += 360.0f;
         else if (diff < -180.0f) current_adj -= 360.0f;
 
-        /* 首个有效读数: 喂入 PID 初始化 MeasurementPrev, 消除微分尖峰 */
-        if (!pid_primed) {
-            PID_Compute(&r_pid, current_adj);
-            pid_primed = true;
-            continue;
-        }
-
         float error = target_enc - current_adj;
-        if (fabsf(error) <= R_CLOSED_THRESHOLD) break;
+        if (fabsf(error) <= R_VERIFY_THRESHOLD) break;
 
+        /* 微调: 误差 → μsteps, 小步定位 */
+        int32_t fine_usteps = R_DEG_TO_USTEPS(error);
+        if (fine_usteps == 0) break;
 
-
-        float speed = PID_Compute(&r_pid, current_adj);
-
-        /* 限幅并写入 TMC2209 */
-        int32_t ispeed = (int32_t)speed;
-        if (ispeed >  (int32_t)R_CLOSED_MAX_SPEED) ispeed =  (int32_t)R_CLOSED_MAX_SPEED;
-        if (ispeed < -(int32_t)R_CLOSED_MAX_SPEED) ispeed = -(int32_t)R_CLOSED_MAX_SPEED;
-        TMC_SetSpeed(ispeed);
-
-        vTaskDelay(pdMS_TO_TICKS(R_CLOSED_LOOP_MS));
+        if (TMC_ReadXActual(&xactual) != TMC_ERR_NONE) break;
+        target = xactual + fine_usteps;
+        if (TMC_MoveToPosition(target) != 0) break;
+        if (!TMC_WaitPosition(target, R_POS_TIMEOUT_MS)) break;
     }
 
-    /* 停止 + 关断 */
-    TMC_SetSpeed(0);
-    vTaskDelay(pdMS_TO_TICKS(R_ACCEL_DELAY));
+    /* 关闭驱动 */
     TMC_SetEnable(false);
 
     Coord_UpdateR(angle);
-    return result;
+    return 0;
 }
 /* ---------- 任务入口 ---------- */
 void MotionTask_Func(void *argument)
