@@ -3188,3 +3188,71 @@ VACTUAL>0 使 MSCNT 递增, 但电机物理旋转方向取决于相序接线。
 - KTH7823 驱动文件保留但未编译引用, 若将来需要可恢复
 - MSCNT_TEST 在 5000Hz 下触发共振, 测试时应使用其他速度
 - R_PID_KP=4.0 为理论值, 可能需要实机微调
+
+
+### 42. P2 编码器定位与坐标系统一（2026-07-16）
+
+#### 42.1 问题背景
+
+P2 扫描使用 MKS 速度模式(0xF6)。旧方案用时间估算停止位置，误差 2mm+。
+引入 31H CAN 编码器真值读取后，发现 P2_ENC_RATIO 标定严重错误
+(100/679 ≈ 0.147)，实际硬件比值接近 1:1（10000步 → ~10004 encoder 单位）。
+
+旧 ratio 导致 encoder 坐标系被压缩到电机脉冲坐标系的 1/6.79，
+建系后散料区、下相机等绝对坐标移动整体偏移约 15mm
+(7680步，恰好一个 Mark 间距)。
+
+#### 42.2 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_config.h` | P2_ENC_RATIO_NUM/DEN: 100/679 → 10000/10004（CALIB_ENC标定） |
+| `Task/app_motion.c` | `p2_stop_and_read_pos()` 重写：enc_detect→停止→enc_stop→overshoot回退(clamp ±3mm)→算real_x |
+| `Task/app_motion.c` | `p2_scan_step_y` 补回 Coord_UpdateXY |
+| `Task/app_host.c` | VISION_BUSY: 列起点读31H基准; VISION_GOT_STOP: 调用 p2_stop_and_read_pos |
+| `Task/app_host.c` | 新增 HCMD_CALIB_ENC：读enc0→positionMode2Run 10000步→读enc1→输出精确ratio |
+| `Task/app_uart_parser.h` | 枚举新增 HCMD_CALIB_ENC |
+| `Task/app_uart_parser.c` | MATCH("CALIB_ENC") → HCMD_CALIB_ENC |
+| `Drivers/ZeMCU-G4/driver_motor.c` | Motor_Init 显式 setWorkMStep 锁定 256 微步 |
+
+#### 42.3 p2_stop_and_read_pos 流程
+
+```
+收到stp → 读enc_detect(X1+X2)           // 31H, 电机仍在速度模式
+       → axis_stop + motorSyncTrigger + osDelay(200)
+       → 读enc_stop(X1+X2)              // 停止后编码器
+       → overshoot_enc = enc_stop - enc_detect
+       → back_steps = -P2_ENC2STEP(overshoot_enc), clamp ±1500步(≈3mm)
+       → positionMode2Run(X1+X2, back_steps)  // 位置模式回退
+       → real_x = coord_start + P2_ENC2STEP(enc_detect - enc_start)
+       → 返回 real_x
+```
+
+#### 42.4 CALIB_ENC 命令
+
+发送 `CALIB_ENC`（需在 HOST_DEBUG 状态）：
+1. 读 encoder0 (X1+X2)
+2. positionMode2Run 10000 步
+3. 读 encoder1
+4. 输出 ratio = (enc1-enc0)/10000
+
+6次标定结果：9999, 10009, 10008, 9997, 10007, 10001 — 平均 10003.5。
+采用 10000/10004。
+
+#### 42.5 根因分析
+
+旧 P2_ENC_RATIO(100/679) 将 encoder 坐标压缩到 1/6.79。
+`safe_move_to` 用 Coord 算相对位移时，Coord 值(encoder系)和电机脉冲坐标系不一致：
+```
+safe_move_to(scatter):  dx = scatter_target - Coord.x
+  Coord.x 用 encoder 比值算 → 值偏小(压缩了6.79倍)
+  → 算出的 dx 偏大 → 电机多走了 ≈15mm → 散料区偏了
+```
+修复后 ratio=1:1，Coord 和电机脉冲坐标系统一。
+实测 delta = (12,6) 步 ≈ 0.02mm。
+
+#### 42.6 已知限制
+
+- MKS 速度模式不更新内部位置计数器，绝对移动(HOME/send_axis_abs)可能不准。PnP 自动流程全用相对移动(safe_move_to → positionMode2Run)不受影响。
+- overshoot 回退用位置模式相对移动。正常 overshoot 仅 5-9 步(≈0.01mm)，上限 3mm 防编码器异常。
+- P2_ENC_RATIO 依赖机械参数固定，更换电机/驱动器后需重新 CALIB_ENC 标定。

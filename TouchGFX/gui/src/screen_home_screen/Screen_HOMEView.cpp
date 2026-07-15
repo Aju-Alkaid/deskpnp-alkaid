@@ -6,10 +6,6 @@
 Screen_HOMEView::Screen_HOMEView()
     : last_speed_applied(0)
     , last_motor_speed(0)
-    , last_if_now_SMT(0xFF)
-    , last_total_SMT(0xFF)
-    , last_now_SMT(0xFF)
-    , last_Temp(0xFF)
 
 {
 
@@ -23,14 +19,8 @@ void Screen_HOMEView::setupScreen()
     temperature.setWildcard(wildcard1Buffer);
 
     // 鍒濆鍖栧畬鎴愬悗绔嬪嵆鍒锋柊涓€娆★紝鏄剧ず鍒濆鐘舵€?
-    applyMotorSpeed(last_motor_speed, true);
-    handleFreshEvent();
-
-    // 鏇存柊缂撳瓨
-    last_if_now_SMT = if_now_SMT;
-    last_total_SMT = total_SMT;
-    last_now_SMT   = now_SMT;
-    last_Temp      = Temp;
+    touchgfx::Unicode::snprintf(wildcard1Buffer, sizeof(wildcard1Buffer)/sizeof(wildcard1Buffer[0]), "--");
+    temperature.invalidate();
 }
 
 void Screen_HOMEView::tearDownScreen()
@@ -40,28 +30,16 @@ void Screen_HOMEView::tearDownScreen()
 
 void Screen_HOMEView::handleTickEvent()
 {
-    // 浠呭湪 Data_Transfer 鏁版嵁鍙樺寲鏃舵墠鍒锋柊灞忓箷
-    if (if_now_SMT != last_if_now_SMT ||
-        total_SMT  != last_total_SMT  ||
-        now_SMT    != last_now_SMT    ||
-        Temp       != last_Temp)
-    {
-        handleFreshEvent();
-
-        last_if_now_SMT = if_now_SMT;
-        last_total_SMT  = total_SMT;
-        last_now_SMT    = now_SMT;
-        last_Temp       = Temp;
-    }
+    // 通知驱动模式：所有显示更新由 Presenter 回调驱动，不再轮询全局变量
 }
 
 void Screen_HOMEView::handleSMTProgress(uint8_t current, uint8_t total)
 {
-    // 高频进度不走全局变量，避免耦合旧逻辑
-    now_SMT = current;
-    total_SMT = total;
-    if_now_SMT = 1;
+    (void)current;
+    (void)total;
+    Progress1.Data_Refresh();
 }
+
 
 void Screen_HOMEView::handleMotorSpeed(uint16_t speed)
 {
@@ -89,13 +67,24 @@ void Screen_HOMEView::handleFreshEvent()
 {
     // 鍒锋柊璐寸墖杩涘害
     Progress1.Data_Refresh();
+}
 
-    // 鍒锋柊娓╁害鏁版嵁
-    touchgfx::Unicode::snprintf(wildcard1Buffer, sizeof(wildcard1Buffer)/sizeof(wildcard1Buffer[0]), "%u", Temp);
+void Screen_HOMEView::handleTemp(uint16_t temp)
+{
+    touchgfx::Unicode::snprintf(wildcard1Buffer, sizeof(wildcard1Buffer)/sizeof(wildcard1Buffer[0]), "%u", temp);
     temperature.invalidate();
 }
 
+void Screen_HOMEView::handleSMTStatus(uint8_t is_smt)
+{
+    if (!is_smt) {
+        // 璐寸墖缁撴潫锛氳繘搴﹀綊闆?
+        Progress1.Data_Refresh();
+    }
+}
 
-
-
-
+void Screen_HOMEView::handleWifiStatus(uint8_t connected)
+{
+    // 棰勭暀锛歐iFi 鐘舵€佸浘鏍囧垏鎹?
+    (void)connected;
+}

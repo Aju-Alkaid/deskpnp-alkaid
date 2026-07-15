@@ -1471,7 +1471,8 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
                 osDelay(500);  /* 等待真空稳定, 避免移动时元件脱落 */
 
                 /* R轴矫正: P1识别完成，吸取稳定后再旋转 */
-                host_correct_r_from_vision(Vision_GetResult(), "P1");
+                host_start_r_correction(Vision_GetResult(), "P1");
+                while (r_axis_state() == R_BUSY) { r_axis_poll(); osDelay(1); }
                 osDelay(500);
                 r_axis_set_zero();
 
@@ -1525,7 +1526,8 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
                         case VISION_DONE:
                             p3_angle = r->angle_valid ? (float)r->angle_x100 / 100.0f : 0.0f;
                             PrintDebug("[CAM_TEST] P3 DONE, residual angle=%.2f deg\r\n", (double)p3_angle);
-                            host_correct_r_from_vision(r, "P3");
+                            host_start_r_correction(r, "P3");
+                            while (r_axis_state() == R_BUSY) { r_axis_poll(); osDelay(1); }
                             r_axis_set_zero();
                             p3_done = true;
                             p3_ok = true;

@@ -98,7 +98,7 @@ extern PCBFrame_t g_pcb_frame;
 /* 散料区子扫描位: [cell][subpos][x/y] */
 extern int32_t g_scatter_subpos[4][5][2];
 void scatter_init_cells(void);
-bool host_correct_r_from_vision(const VisionResult_t *r, const char *stage);
+bool host_start_r_correction(const VisionResult_t *r, const char *stage);
 
 void Host_UartRecvCallback(uint8_t *data, int len);
 void Host_Task(void *argument);

@@ -94,8 +94,11 @@ static inline void z_place(void) {}
 static inline bool pick_component(void) { return false; }
 static inline void place_component(void) {}
 static inline bool vacuum_ok(void) { return false; }
+typedef enum { R_IDLE, R_BUSY, R_DONE, R_STALL, R_STUCK, R_TIMEOUT } R_State_t;
 static inline void r_axis_set_zero(void) {}
-static inline int  r_axis_rotate(float angle, float speed_rpm) { (void)angle; (void)speed_rpm; return 0; }
+static inline void r_axis_start(float angle, float speed_rpm) { (void)angle; (void)speed_rpm; }
+static inline void r_axis_poll(void) {}
+static inline R_State_t r_axis_state(void) { return R_IDLE; }
 static inline int  safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc) { (void)target_x; (void)target_y; (void)speed; (void)acc; return 0; }
 static inline void axis_stop(int32_t addr) { (void)addr; }
 static inline void disable_sync_stop(void) {}

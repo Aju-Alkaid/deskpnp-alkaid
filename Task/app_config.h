@@ -5,6 +5,17 @@
 
 /* ---- 共享运动控制常量 ---- */
 #define STEPS_PER_MM     512.0f
+
+/* ---- MKS 编码器→步数转换 (14-bit encoder, 256 microstep) ---- */
+#define ENC_PER_REV       16384     /* 14-bit 磁编码器, counts/rev */
+#define STEP_PER_REV      51200     /* 200全步×256微步, steps/rev */
+#define ENC2STEP(x)       ((int32_t)((int64_t)(x) * STEP_PER_REV / ENC_PER_REV))
+
+/* ---- P2 31H 编码器→步数比 (实测标定: enc_delta / motor_step_delta) ---- */
+/* 48-bit encoder: enc_units/motor_step = 10712/1578 = 6.79 */
+#define P2_ENC_RATIO_NUM  10000
+#define P2_ENC_RATIO_DEN  10004
+#define P2_ENC2STEP(x)    ((int32_t)((int64_t)(x) * P2_ENC_RATIO_NUM / P2_ENC_RATIO_DEN))
 #define JOG_MAX_STEPS    8388607
 #define X1_ADDR          0x01
 #define X2_ADDR          0x02

@@ -1,4 +1,4 @@
-﻿/* ================================================================
+/* ================================================================
  *  app_host.c
  *  分区: §1常量 §2CSV §3辅助 §4调试命令 §5PnP step §6主循环
  * ================================================================ */
@@ -37,7 +37,7 @@ extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 
 #define MARK_VERIFY_ERR_MM  0.3f   /* Mark3 验证允许误差 (mm) */
 #define P2_SCAN_STEP_MM      5.0f   /* P2 横向步进宽度 (mm) */
-#define P2_SCAN_SPEED        40     /* P2 连续扫描速度 (RPM), Cam 需要低速识别 */
+#define P2_SCAN_SPEED        15     /* P2 连续扫描速度 (RPM), Cam 需要低速识别 */
 #define P2_SCAN_ACC          15     /* P2 连续扫描加速度 */
 #define P2_SCAN_TIMEOUT       300   /* P2 非扫描模式超时 (~3s, 对齐/跳转等待) */
 #define P2_SCAN_COL_PAD_MS   500    /* 每列额外延时 (ms), 补偿加减速段 */
@@ -91,7 +91,7 @@ static float        g_last_param = 0.0f;
 static LineParser_t g_parser;
 
 /* Mark 对齐累计偏移 */
-static int32_t g_mark_offsets[P2_MARK_COUNT][2];  /* 3个Mark的(dx, dy) mm*10000 */
+static int32_t g_mark_offsets[P2_MARK_COUNT][2];  /* 3个Mark的(dx, dy) 电机步数 */
 
 static int32_t g_mark_count_done = 0;
 
@@ -129,6 +129,8 @@ static int32_t  g_p2_col_start_x = 0;       /* 当前列起点 X1 电机坐标 (
 static uint32_t g_p2_col_start_tick = 0;    /* 当前列开始时刻 (tick) */
 static uint32_t g_p2_col_time_ticks = 0;    /* 当前列预估总时长 (tick) */
 static uint32_t g_p2_last_pos_update = 0;   /* 上次位置估算更新时刻 (tick) */
+static int32_t  g_p2_enc_start_x1 = 0;       /* 列起点 X1 31H 编码器值 */
+static int32_t  g_p2_enc_start_x2 = 0;       /* 列起点 X2 31H 编码器值 */
 
 /* 散料区子扫描位: [cell][subpos][x/y] */
 int32_t g_scatter_subpos[SCATTER_CELLS][SCATTER_SUBPOS][2];
@@ -627,13 +629,13 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         break;
 
     case HCMD_SET_R_AXIS:
-        /* R 轴旋转角度 (0~360) */
+        /* R 轴旋转角度 (0~360), 非阻塞启动 */
         {
             float angle = cmd->param;
             if (angle < 0.0f) angle = 0.0f;
             if (angle > 360.0f) angle = 360.0f;
-            r_axis_rotate(angle, R_SPEED_RPM);
-            PrintDebug("[HOST] SET_R_AXIS %.1f deg\r\n", angle);
+            r_axis_start(angle, R_SPEED_RPM);
+            PrintDebug("[HOST] SET_R_AXIS %.1f deg (started)\r\n", angle);
         }
         break;
 
@@ -755,6 +757,32 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         else            { LowerCam_Light_Off(); host_send("LIGHT_OFF"); PrintDebug("[HOST] LIGHT: OFF\r\n"); }
         break;
 
+    case HCMD_CALIB_ENC: {
+        int32_t enc0_x1, enc0_x2, enc1_x1, enc1_x2;
+        g_enc_ready[X1_ADDR]=false; readRealTimeLocation(X1_ADDR);
+        {uint32_t _t=osKernelGetTickCount(); while(!g_enc_ready[X1_ADDR]&&(osKernelGetTickCount()-_t)<100){osDelay(2);}}
+        enc0_x1=g_enc_ready[X1_ADDR]?g_enc_pos[X1_ADDR]:0;
+        g_enc_ready[X2_ADDR]=false; readRealTimeLocation(X2_ADDR);
+        {uint32_t _t=osKernelGetTickCount(); while(!g_enc_ready[X2_ADDR]&&(osKernelGetTickCount()-_t)<100){osDelay(2);}}
+        enc0_x2=g_enc_ready[X2_ADDR]?g_enc_pos[X2_ADDR]:0;
+        g_axes_done_bits=0; g_axes_error=false;
+        motorSyncEnable(1); osDelay(5);
+        positionMode2Run(X1_ADDR,100,50,10000); positionMode2Run(X2_ADDR,100,50,10000);
+        motorSyncTrigger(0); osDelay(2000);
+        g_enc_ready[X1_ADDR]=false; readRealTimeLocation(X1_ADDR);
+        {uint32_t _t=osKernelGetTickCount(); while(!g_enc_ready[X1_ADDR]&&(osKernelGetTickCount()-_t)<100){osDelay(2);}}
+        enc1_x1=g_enc_ready[X1_ADDR]?g_enc_pos[X1_ADDR]:0;
+        g_enc_ready[X2_ADDR]=false; readRealTimeLocation(X2_ADDR);
+        {uint32_t _t=osKernelGetTickCount(); while(!g_enc_ready[X2_ADDR]&&(osKernelGetTickCount()-_t)<100){osDelay(2);}}
+        enc1_x2=g_enc_ready[X2_ADDR]?g_enc_pos[X2_ADDR]:0;
+        int32_t d1=enc1_x1-enc0_x1,d2=enc1_x2-enc0_x2,avg=(d1+d2)/2;
+        PrintDebug("[CALIB] enc0=(%ld,%ld) enc1=(%ld,%ld) dx=(%ld,%ld) avg=%ld\r\n",(long)enc0_x1,(long)enc0_x2,(long)enc1_x1,(long)enc1_x2,(long)d1,(long)d2,(long)avg);
+        PrintDebug("[CALIB] P2_ENC_RATIO: #define P2_ENC_RATIO_NUM 10000\r\n");
+        PrintDebug("[CALIB]               #define P2_ENC_RATIO_DEN %ld\r\n",(long)avg);
+        break;
+    }
+
+
     default:
         break;
     }
@@ -798,6 +826,23 @@ static void mark_align_step(void) {
                 g_p2_col_start_tick = osKernelGetTickCount();
                 g_p2_last_pos_update = g_p2_col_start_tick;
 
+                /* 读取 31H 编码器基准值 (连读两次, 第一次冲刷可能残留的旧响应) */
+                g_enc_ready[X1_ADDR] = false; readRealTimeLocation(X1_ADDR);
+                { uint32_t _t0 = osKernelGetTickCount();
+                  while (!g_enc_ready[X1_ADDR] && (osKernelGetTickCount() - _t0) < 100) { osDelay(2); } }
+                /* 第二次读: 确保拿到列起点真值 */
+                g_enc_ready[X1_ADDR] = false; readRealTimeLocation(X1_ADDR);
+                { uint32_t _t0 = osKernelGetTickCount();
+                  while (!g_enc_ready[X1_ADDR] && (osKernelGetTickCount() - _t0) < 100) { osDelay(2); } }
+                g_p2_enc_start_x1 = g_enc_ready[X1_ADDR] ? g_enc_pos[X1_ADDR] : 0;
+                g_enc_ready[X2_ADDR] = false; readRealTimeLocation(X2_ADDR);
+                { uint32_t _t0 = osKernelGetTickCount();
+                  while (!g_enc_ready[X2_ADDR] && (osKernelGetTickCount() - _t0) < 100) { osDelay(2); } }
+                g_enc_ready[X2_ADDR] = false; readRealTimeLocation(X2_ADDR);
+                { uint32_t _t0 = osKernelGetTickCount();
+                  while (!g_enc_ready[X2_ADDR] && (osKernelGetTickCount() - _t0) < 100) { osDelay(2); } }
+                g_p2_enc_start_x2 = g_enc_ready[X2_ADDR] ? g_enc_pos[X2_ADDR] : 0;
+
                 uint8_t dir = (g_p2_col & 1) ? P2_SCAN_DIR_DOWN : P2_SCAN_DIR_UP;
                 p2_scan_start(dir, P2_SCAN_SPEED, P2_SCAN_ACC);
 
@@ -805,6 +850,7 @@ static void mark_align_step(void) {
                 int32_t col_h = g_calib.heat_platform_x_max - g_calib.heat_platform_x_min;
                 if (col_h < 0) col_h = -col_h;
                 float spms = (float)P2_SCAN_SPEED * 16384.0f / 60000.0f;
+                /* col_h/spms 结果为 ms, 直接与 tick 比较; 依赖 TICK_RATE_HZ=1000 */
                 g_p2_col_time_ticks = (uint32_t)((float)col_h / spms) + pdMS_TO_TICKS(P2_SCAN_COL_PAD_MS);
 
                 PrintDebug("[HOST] P2 scan col %ld/%ld dir=%d est=%ldms\r\n",
@@ -864,15 +910,18 @@ static void mark_align_step(void) {
 
     case VISION_GOT_STOP:
         if (g_p2_scanning) {
-            p2_scan_stop();
             g_p2_scanning = false;
-            {
+            int32_t real_x = p2_stop_and_read_pos(g_p2_enc_start_x1, g_p2_enc_start_x2, g_p2_col_start_x);
+            if (real_x >= 0) {
+                Coord_UpdateXY(real_x, Coord_Get().y);
+                PrintDebug("[HOST] P2 stop col %ld real_x=%ld\r\n", (long)g_p2_col, (long)real_x);
+            } else {
+                /* 31H read failed, fallback to estimate */
                 uint32_t elapsed = osKernelGetTickCount() - g_p2_col_start_tick;
                 int32_t sign = ((g_p2_col & 1) ? P2_SCAN_DIR_DOWN : P2_SCAN_DIR_UP) == P2_SCAN_DIR_UP ? 1 : -1;
                 int32_t est_x = p2_scan_estimate_x(g_p2_col_start_x, sign, P2_SCAN_SPEED, elapsed);
                 Coord_UpdateXY(est_x, Coord_Get().y);
-                PrintDebug("[HOST] P2 stop col %ld est_x=%ld(tick=%ld)\r\n",
-                           (long)g_p2_col, (long)est_x, (long)elapsed);
+                PrintDebug("[HOST] P2 stop col %ld est_x=%ld (31H FAIL)\r\n", (long)g_p2_col, (long)est_x);
             }
         }
         g_mark_scanning = false;
@@ -921,8 +970,8 @@ static void mark_align_step(void) {
                            (long)idx, (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
             }
             /* Mark真实坐标 = 摄像头位置 = 吸嘴 - cam_to_nozzle (cam_to_nozzle为负值,减负得正) */
-            g_marks_actual[idx][0] = Coord_Get().x + 6503 ;//-g_calib.cam_to_nozzle_dx_steps;
-            g_marks_actual[idx][1] = Coord_Get().y + 24270 ;//-g_calib.cam_to_nozzle_dy_steps;
+            g_marks_actual[idx][0] = Coord_Get().x - g_calib.cam_to_nozzle_dx_steps;
+            g_marks_actual[idx][1] = Coord_Get().y - g_calib.cam_to_nozzle_dy_steps;
             g_mark_offsets[idx][0] = r->dx;
             g_mark_offsets[idx][1] = r->dy;
             g_mark_count_done = idx + 1;
@@ -988,6 +1037,21 @@ static void mark_align_step(void) {
         PrintDebug("[HOST] Mark3 verify: err=%.3fmm %s\r\n", err_mm,
                    g_pcb_frame.valid ? "OK" : "FAIL");
 
+        /* 诊断: 比较 Coord 和 建系推算位置 */
+        {
+            MachineCoord_t cc = Coord_Get();
+            /* 用 frame 反算 Mark2 相机应该在哪 */
+            float ltx = g_marks[2].target_x * STEPS_PER_MM;
+            float lty = g_marks[2].target_y * STEPS_PER_MM;
+            float rcx = ltx * cos_t - lty * sin_t;
+            float rcy = ltx * sin_t + lty * cos_t;
+            int32_t frame_x = (int32_t)rcy + g_pcb_frame.origin_x_steps + g_calib.cam_to_nozzle_dx_steps;
+            int32_t frame_y = (int32_t)(-rcx) + g_pcb_frame.origin_y_steps + g_calib.cam_to_nozzle_dy_steps;
+            PrintDebug("[DIAG] After P2: Coord=(%ld,%ld) frame_Mark2_cam=(%ld,%ld) delta=(%ld,%ld)\r\n",
+                       (long)cc.x, (long)cc.y, (long)frame_x, (long)frame_y,
+                       (long)(cc.x - frame_x), (long)(cc.y - frame_y));
+        }
+
         if (g_mark_count_done >= 3) {
             g_mark_avg_dx = (g_mark_offsets[0][0] + g_mark_offsets[1][0] + g_mark_offsets[2][0]) / 3;
             g_mark_avg_dy = (g_mark_offsets[0][1] + g_mark_offsets[1][1] + g_mark_offsets[2][1]) / 3;
@@ -998,6 +1062,17 @@ static void mark_align_step(void) {
         if (g_comp_count > 0) {
             { int cl = component_cell(&g_components[0]);
               g_p1_scan_pos = 0;
+              PrintDebug("[DIAG] marks_actual[0]=(%ld,%ld) [1]=(%ld,%ld) [2]=(%ld,%ld)\r\n",
+                         (long)g_marks_actual[0][0],(long)g_marks_actual[0][1],
+                         (long)g_marks_actual[1][0],(long)g_marks_actual[1][1],
+                         (long)g_marks_actual[2][0],(long)g_marks_actual[2][1]);
+              PrintDebug("[DIAG] Coord cam=(%ld,%ld) scatter_target=(%ld,%ld)\r\n",
+                         (long)Coord_Get().x,(long)Coord_Get().y,
+                         (long)(g_scatter_subpos[cl][0][0]+g_calib.cam_to_nozzle_dx_steps),
+                         (long)(g_scatter_subpos[cl][0][1]+g_calib.cam_to_nozzle_dy_steps));
+              PrintDebug("[DIAG] dx=%ld dy=%ld\r\n",
+                         (long)(g_scatter_subpos[cl][0][0]+g_calib.cam_to_nozzle_dx_steps-Coord_Get().x),
+                         (long)(g_scatter_subpos[cl][0][1]+g_calib.cam_to_nozzle_dy_steps-Coord_Get().y));
               safe_move_to(g_scatter_subpos[cl][0][0] + g_calib.cam_to_nozzle_dx_steps, g_scatter_subpos[cl][0][1] + g_calib.cam_to_nozzle_dy_steps,
                            PNP_SPEED, PNP_ACC); }
             Vision_Start(VCMD_P1, footprint_to_class_id(g_components[0].footprint));
@@ -1049,17 +1124,15 @@ static void mark_align_step(void) {
     }
 }
 
-/* ---- R 轴角度矫正辅助：从视觉结果提取角度，超过阈值则执行 r_axis_rotate ---- */
-bool host_correct_r_from_vision(const VisionResult_t *r, const char *stage) {
+/* ---- R 轴角度矫正辅助：从视觉结果提取角度，超过阈值则启动非阻塞旋转 ---- */
+bool host_start_r_correction(const VisionResult_t *r, const char *stage) {
     if (!r || !r->angle_valid) return false;
     float ang = (float)r->angle_x100 / 100.0f;
     if (fabsf(ang) <= R_CORRECTION_THRESHOLD_DEG) return false;
-    r_axis_set_zero();
     PrintDebug("[HOST] %s: R correction %.2f deg\r\n", stage, (double)ang);
-    r_axis_rotate(ang, R_SPEED_RPM);
+    r_axis_start(ang, R_SPEED_RPM);
     return true;
 }
-
 /* 找元件一步 (HOST_FIND_COMP 时调用) */
 static void find_comp_step(void) {
     VisionState_t vs = Vision_GetState();
@@ -1205,6 +1278,32 @@ static void find_comp_step(void) {
 
 /* 偏移检测一步 (HOST_OFFSET_CHECK 时调用) */
 static void offset_check_step(void) {
+    static int phase = 0;
+
+    /* ---- Phase 1: 等待 R 轴旋转完成 ---- */
+    if (phase == 1) {
+        R_State_t rs = r_axis_state();
+        if (rs == R_DONE) {
+            osDelay(500);
+            r_axis_set_zero();
+            Vision_SendEnd();
+            Bridge_NotifySMTProgress(g_comp_index + 1, g_comp_count);
+            PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
+            phase = 0;
+            g_state = HOST_MOVE_TO_PCB;
+            return;
+        } else if (rs == R_STALL || rs == R_STUCK || rs == R_TIMEOUT) {
+            PrintDebug("[HOST] P3: R correction FAILED (state=%d)\r\n", (int)rs);
+            Vision_SendEnd();
+            phase = 0;
+            g_state = HOST_ERROR;
+            return;
+        }
+        /* R_BUSY: 继续等待 */
+        return;
+    }
+
+    /* ---- Phase 0: 正常视觉轮询 ---- */
     VisionState_t vs = Vision_GetState();
     const VisionResult_t *r = Vision_GetResult();
 
@@ -1229,10 +1328,14 @@ static void offset_check_step(void) {
             g_p3_offset_y += dy_s;
         }
 
-        /* 角度矫正 + 过渡到 PCB */
+        /* 角度矫正: 启动非阻塞旋转，完成后过渡到 PCB */
         g_p3_nozzle_retry = 0;
         LowerCam_Light_Off();
-        host_correct_r_from_vision(r, "P3");
+        if (host_start_r_correction(r, "P3")) {
+            phase = 1;
+            return;   /* 等待 r_axis_poll 完成旋转 */
+        }
+        /* 无需矫正，直接过渡 */
         osDelay(500);
         r_axis_set_zero();
         Vision_SendEnd();
@@ -1291,22 +1394,48 @@ static void offset_check_step(void) {
  * ================================================================ */
 
 static void pick_step(void) {
+    static int phase = 0;
+
     Component_t *c = &g_components[g_comp_index];
+
+    /* ---- Phase 1: 等待 R 轴旋转完成 ---- */
+    if (phase == 1) {
+        R_State_t rs = r_axis_state();
+        if (rs == R_DONE) {
+            osDelay(500);  /* 机械停稳 */
+            r_axis_set_zero();
+            phase = 0;
+            g_state = HOST_MOVE_TO_BOTTOM_CAM;
+            return;
+        } else if (rs == R_STALL || rs == R_STUCK || rs == R_TIMEOUT) {
+            PrintDebug("[HOST] PICK: R correction FAILED (state=%d)\r\n", (int)rs);
+            phase = 0;
+            g_state = HOST_ERROR;
+            return;
+        }
+        /* R_BUSY: 继续等待 r_axis_poll 推进 */
+        return;
+    }
+
+    /* ---- Phase 0: 吸取元件 ---- */
     PrintDebug("[HOST] PICK comp %u\r\n", c->id);
-    osDelay(PICK_DELAY_MS);  /* 等待R轴完全停止后再吸取 */
     if (!pick_component()) {
         PrintDebug("[HOST] Pick FAILED, restarting P1\r\n");
         int cl = component_cell(c); g_p1_scan_pos = 0;
         safe_move_to(g_scatter_subpos[cl][0][0] + g_calib.cam_to_nozzle_dx_steps, g_scatter_subpos[cl][0][1] + g_calib.cam_to_nozzle_dy_steps, PNP_SPEED, PNP_ACC);
         Vision_Start(VCMD_P1, footprint_to_class_id(c->footprint));
         g_state = HOST_FIND_COMP;
-    } else {
-        /* R轴矫正: P1识别完成，吸取后旋转 */
-        host_correct_r_from_vision(Vision_GetResult(), "P1");
-        osDelay(500);
-        r_axis_set_zero();
-        g_state = HOST_MOVE_TO_BOTTOM_CAM;
+        return;
     }
+
+    /* R轴矫正: P1识别完成，吸取后旋转。无矫正则直接过渡 */
+    if (host_start_r_correction(Vision_GetResult(), "P1")) {
+        phase = 1;
+        return;   /* 等待 r_axis_poll 完成旋转 */
+    }
+    /* 无需矫正，直接过渡 */
+    r_axis_set_zero();
+    g_state = HOST_MOVE_TO_BOTTOM_CAM;
 }
 
 static void move_to_bottom_step(void) {
@@ -1318,6 +1447,31 @@ static void move_to_bottom_step(void) {
 }
 
 static void move_to_pcb_step(void) {
+    static int     phase = 0;
+    static int32_t saved_mx, saved_my;
+
+    /* ---- Phase 1: 等待 R 轴旋转完成，然后 XY 移动 ---- */
+    if (phase == 1) {
+        R_State_t rs = r_axis_state();
+        if (rs == R_DONE) {
+            PrintDebug("[HOST] MOVE_TO_PCB: current=(%ld,%ld) target=(%ld,%ld)\r\n",
+                       (long)Coord_Get().x, (long)Coord_Get().y,
+                       (long)saved_mx, (long)saved_my);
+            safe_move_to(saved_mx, saved_my, PNP_SPEED_FAST, PNP_ACC);
+            phase = 0;
+            g_state = HOST_PLACE;
+            return;
+        } else if (rs == R_STALL || rs == R_STUCK || rs == R_TIMEOUT) {
+            PrintDebug("[HOST] MOVE_TO_PCB: R rotation FAILED (state=%d)\r\n", (int)rs);
+            phase = 0;
+            g_state = HOST_ERROR;
+            return;
+        }
+        /* R_BUSY: 继续等待 */
+        return;
+    }
+
+    /* ---- Phase 0: 计算坐标 + 启动 R 旋转 ---- */
     Component_t *c = &g_components[g_comp_index];
     int32_t cx = (int32_t)(c->target_x * STEPS_PER_MM);
     int32_t cy = (int32_t)(c->target_y * STEPS_PER_MM);
@@ -1330,17 +1484,19 @@ static void move_to_pcb_step(void) {
         machine_x = (int32_t)rcy + g_pcb_frame.origin_x_steps + g_p3_offset_x;
         machine_y = (int32_t)(-rcx) + g_pcb_frame.origin_y_steps + g_p3_offset_y;
     } else {
-        machine_x = cy + (int32_t)(g_mark_avg_dy / 1000.0f * STEPS_PER_MM);
-        machine_y = cx + (int32_t)(g_mark_avg_dx / 1000.0f * STEPS_PER_MM);
+        /* g_mark_avg_dx/dy 已是电机步数, 直接加 */
+        machine_x = cy + g_mark_avg_dy;
+        machine_y = cx + g_mark_avg_dx;
     }
-    /* g_marks_actual已存真实机器坐标，建系原点也是真实机器坐标系，吸嘴直接走到目标即可 */
     PrintDebug("[HOST] MOVE_TO_PCB comp %u -> machine(%ld,%ld)\r\n", c->id, (long)machine_x, (long)machine_y);
-    r_axis_rotate(-c->target_angle, R_SPEED_RPM);
-    PrintDebug("[HOST] MOVE_TO_PCB: current=(%ld,%ld) target=(%ld,%ld)\r\n",
-               (long)Coord_Get().x, (long)Coord_Get().y,
-               (long)machine_x, (long)machine_y);
-    safe_move_to(machine_x, machine_y, PNP_SPEED_FAST, PNP_ACC);
-    g_state = HOST_PLACE;
+
+    /* 保存目标坐标，Phase 1 使用 */
+    saved_mx = machine_x;
+    saved_my = machine_y;
+
+    /* 启动 R 轴旋转到贴装角度 */
+    r_axis_start(-c->target_angle, R_SPEED_RPM);
+    phase = 1;
 }
 
 static void place_step(void) {
@@ -1502,6 +1658,9 @@ void Host_Task(void *argument) {
 
     /* ===== 主循环 ===== */
     for (;;) {
+        /* ---- 0. R 轴状态机推进（非阻塞） ---- */
+        r_axis_poll();
+
         /* ---- 1. 驱动 UART DMA 接收 ---- */
         UART_Driver_Process();
 

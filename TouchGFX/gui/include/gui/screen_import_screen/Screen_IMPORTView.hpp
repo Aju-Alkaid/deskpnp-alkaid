@@ -14,8 +14,9 @@ public:
     virtual void handleTickEvent();
 
     virtual void handleKeyEvent(uint8_t key);
+    virtual void handleDownloadStatus(uint8_t status);
 protected:
-    uint8_t lastDownloadState;
+    uint8_t m_downloadStatus;
 };
 
 #endif // SCREEN_IMPORTVIEW_HPP

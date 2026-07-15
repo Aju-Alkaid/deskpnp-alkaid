@@ -30,6 +30,9 @@ public:
     virtual void onKeyPressed(uint8_t keyId) override;
     virtual void onNotifySMTProgress(uint8_t current, uint8_t total) override;
     virtual void onNotifyMotorSpeed(uint16_t speed) override;
+    virtual void onNotifyTemp(uint16_t temp) override;
+    virtual void onNotifySMTStatus(uint8_t is_smt) override;
+    virtual void onNotifyWifiStatus(uint8_t connected) override;
 private:
     Screen_HOMEPresenter();
 

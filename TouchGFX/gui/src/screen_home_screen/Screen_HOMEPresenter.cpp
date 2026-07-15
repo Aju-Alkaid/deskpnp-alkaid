@@ -38,3 +38,18 @@ void Screen_HOMEPresenter::onNotifyMotorSpeed(uint16_t speed)
     view.handleMotorSpeed(speed);
 }
 
+void Screen_HOMEPresenter::onNotifyTemp(uint16_t temp)
+{
+    view.handleTemp(temp);
+}
+
+void Screen_HOMEPresenter::onNotifySMTStatus(uint8_t is_smt)
+{
+    view.handleSMTStatus(is_smt);
+}
+
+void Screen_HOMEPresenter::onNotifyWifiStatus(uint8_t connected)
+{
+    view.handleWifiStatus(connected);
+}
+

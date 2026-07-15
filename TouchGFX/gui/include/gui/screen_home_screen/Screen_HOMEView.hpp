@@ -23,6 +23,9 @@ public:
     virtual void handleKeyEvent(uint8_t key); // 处理按键函数
     virtual void handleSMTProgress(uint8_t current, uint8_t total);
     virtual void handleMotorSpeed(uint16_t speed);
+    virtual void handleTemp(uint16_t temp);
+    virtual void handleSMTStatus(uint8_t is_smt);
+    virtual void handleWifiStatus(uint8_t connected);
 protected:
     static const uint16_t MOTOR_SPEED_SIZE = 10;
     touchgfx::Unicode::UnicodeChar motorSpeedBuffer[MOTOR_SPEED_SIZE];
@@ -32,10 +35,6 @@ protected:
     // 缓存上次刷新的值，仅在变化时刷新
     uint8_t  last_speed_applied;
     uint16_t last_motor_speed;
-    uint8_t  last_if_now_SMT;
-    uint8_t  last_total_SMT;
-    uint8_t  last_now_SMT;
-    uint8_t  last_Temp;
 };
 
 #endif // SCREEN_HOMEVIEW_HPP

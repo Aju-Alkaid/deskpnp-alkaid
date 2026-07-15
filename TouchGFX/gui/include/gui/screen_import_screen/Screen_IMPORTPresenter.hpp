@@ -28,6 +28,7 @@ public:
     virtual ~Screen_IMPORTPresenter() {}
     Model * getModel();
     virtual void onKeyPressed(uint8_t keyId) override;
+    virtual void onNotifyDownloadStatus(uint8_t status) override;
 
 private:
     Screen_IMPORTPresenter();

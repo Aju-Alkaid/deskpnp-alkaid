@@ -38,6 +38,12 @@ void Motor_Init(void) {
     setWorkMode(0x03, SR_vFOC);  // Y
     osDelay(50);                 // 等待生效
 
+    // 1.5 显式设置细分 256 (200全步×256=51200步/圈)
+    setWorkMStep(0x01, 8);  // X1: 8→256细分
+    setWorkMStep(0x02, 8);  // X2
+    setWorkMStep(0x03, 8);  // Y
+    osDelay(50);
+
     // 2. 使能所有电机
     motorEnable(0x01, 1);
     motorEnable(0x02, 1);

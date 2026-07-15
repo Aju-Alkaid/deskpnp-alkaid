@@ -69,6 +69,16 @@ extern osMessageQueueId_t motor_event_queue;   // 与 CAN 中断共用
 extern osEventFlagsId_t evtAxesDone;
 
 
+/* ---- R 轴非阻塞状态 ---- */
+typedef enum {
+    R_IDLE,           /* 空闲，可接受新指令 */
+    R_BUSY,           /* 旋转中 */
+    R_DONE,           /* 旋转成功完成 */
+    R_STALL,          /* 堵转 (SG_RESULT) */
+    R_STUCK,          /* 硬件卡死 (stst) */
+    R_TIMEOUT         /* 超时 */
+} R_State_t;
+
 /* ---- Z轴+吸嘴+R轴 动作（供 Host_Task 直接调用）---- */
 void nozzle_on(void);
 void nozzle_off(void);
@@ -82,10 +92,11 @@ void place_component(void);
 bool vacuum_ok(void);  /* __weak stub, override with GPIO/ADC */
 void r_axis_set_zero(void);
 float r_axis_calibrate(void);
-int  r_axis_rotate(float angle, float speed_rpm);
+void r_axis_start(float angle, float speed_rpm);       /* 启动非阻塞旋转 */
+void r_axis_poll(void);                                 /* 每轮主循环调用，推进状态机 */
+R_State_t r_axis_state(void);                           /* 查询当前状态 */
 int  safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc);
 void move_set_pad_ms(uint32_t pad_ms);
-
 /* 电机异常分级 */
 typedef enum {
     MOTOR_OK = 0,
@@ -95,6 +106,10 @@ typedef enum {
 
 extern volatile bool g_motor_error;
 extern volatile MotorError_t g_motor_error_detail;
+extern volatile int32_t g_enc_pos[4];    /* 31H encoder stash (ID 1-3) */
+extern volatile bool    g_enc_ready[4];
+extern volatile uint32_t g_axes_done_bits;  /* CAN ISR → 运动到位标志 */
+extern volatile bool     g_axes_error;      /* CAN ISR → 堵转/限位标志 */
 
 /* ---- XY 运动控制（从 app_test.c 迁移）---- */
 void axis_stop(int32_t addr);
@@ -106,6 +121,7 @@ void p2_scan_start(uint8_t dir, uint16_t speed, uint8_t acc);
 void p2_scan_stop(void);
 int32_t p2_scan_estimate_x(int32_t start_x, int32_t sign, uint16_t speed, uint32_t elapsed_ms);
 void p2_scan_step_y(int32_t dy_steps, uint16_t speed, uint8_t acc);
+int32_t p2_stop_and_read_pos(int32_t enc_start_x1, int32_t enc_start_x2, int32_t coord_start_x);
 
 extern volatile bool s_cmd_interrupted;
 

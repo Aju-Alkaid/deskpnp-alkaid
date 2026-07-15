@@ -146,6 +146,7 @@ pnp_1/
   - HOME — 回零（移动至原点）
   - VALVE_ON — 开电磁阀
   - VALVE_OFF — 关电磁阀
+  - CALIB_ENC — P2 编码器比例标定（位置模式移动10000步，测量 encoder delta，输出精确 P2_ENC_RATIO）
   - RESUME — 从 WAIT_REFILL / ERROR 恢复
   - ABORT — 中止当前 PnP 流程，回 HOST_DEBUG
   - **标定命令：** SET_SCATTER_AREA / SET_SCATTER_SIZE <mm> / SET_PCB_AREA_MIN / SET_PCB_AREA_MAX / SET_BOTTOM_CAM / SET_Z_SAFE / SET_Z_PICK / SET_Z_PLACE / SET_R_ZERO / SAVE_CALIB / RESTORE_CALIB
@@ -228,6 +229,8 @@ pnp_1/
   - **关键参数：** `p2_dxdy_gain = 48.5`（像素→电机步数），`p2_target_count = 3`，`p2_align_max_iter = 7`，`p2_align_th = 4.0px`
   - **错误：** `err2_1`（空闲超时）、`err2_3`（pos_detect 未检测到 Mark）、`err2_4`（对准迭代超 7 次）
   - **P2 退出必须发送 `end` 帧：** P2 完成或异常退出后，必须通过 `Vision_SendEnd()` 发送 `end` 帧通知摄像头终止 P2 会话。Host_Task 的 `mark_align_step` 和 `app_test.c` 的 `cam_p2_full_test_run` 在所有 P2 退出路径均已添加此调用。
+
+- **P2 编码器定位（2026-07-16 更新）：** 扫描停止后通过 31H CAN 指令读取 MKS 电机编码器真值，替代旧的时间估算方式。`p2_stop_and_read_pos()` 流程：收到 stp → 立即读编码器(enc_detect) → 停止电机 → 读编码器(enc_stop) → 计算 overshoot → 位置模式回退(上限3mm) → 返回修正坐标。编码器→步数转换使用 `P2_ENC2STEP(x) = x * P2_ENC_RATIO_NUM / P2_ENC_RATIO_DEN`，默认 `10000/10004`（通过 `CALIB_ENC` 命令标定）。
 
 - **P3 — 下相机单次检测对位（下摄像头 640×480，YOLO model_286344，2026-07-11 升级为单次检测）：**
 
@@ -560,6 +563,9 @@ pnp_1/
 | `P2_SCAN_COL_PAD_MS` | 500 ms | 每列额外延时，补偿加减速段 |
 | `P2_SCAN_POS_UPDATE_MS` | 100 ms | Coord 位置估算更新间隔 |
 | `P2_SCAN_DIR_UP` / `DOWN` | 0 / 1 | speedModeRun 方向位，方向反了就交换 |
+| `P2_ENC_RATIO_NUM` | 10000 | 编码器→步数分子 (CALIB_ENC 标定) |
+| `P2_ENC_RATIO_DEN` | 10004 | 编码器→步数分母 (10000步≈10004 enc) |
+| `P2_ENC2STEP(x)` | — | 编码器单位→电机步数转换宏 |
 
 **蛇形扫描顺序（与离散网格一致）：**
 ```
@@ -570,9 +576,9 @@ pnp_1/
 周而复始。单列耗时 ≈ col_h / (speed*PULSES_PER_REV/60000) + PAD ≈ 4.7s。
 ```
 
-**Cam 检测到 Mark 时：** `VISION_GOT_STOP` → `p2_scan_stop()` 立即停 X1+X2 → 时间估算停止位置 (elapsed*speed) → `Coord_UpdateXY` → `Vision_Go()` → 进入对齐迭代。
+**Cam 检测到 Mark 时（2026-07-16 更新）：** `VISION_GOT_STOP` → `p2_stop_and_read_pos()` 读31H编码器真值 → overshoot回退(上限3mm) → `Coord_UpdateXY` → `Vision_Go()` → 进入对齐迭代。编码器→步数使用 `P2_ENC2STEP` 宏，比值 `P2_ENC_RATIO_NUM/P2_ENC_RATIO_DEN = 10000/10004`（CALIB_ENC 标定）。
 
-**位置精度：** 时间估算误差 ≤ 2.1mm (@100ms 更新间隔)，Cam P2 FOV ≈ 9.2mm (448px / 48.5 steps/px)，误差在捕获范围内。P2 对齐迭代进一步精修。
+**位置精度：** 31H 编码器定位精度取决于 `P2_ENC_RATIO` 标定精度。当前 10000/10004 误差 <0.04%。P2 对齐迭代进一步精修残留偏差。
 
 **X2 状态：** CAN ID 0x02 的到位响应不可靠，全程使用时间估算代替到位信号。`p2_scan_step_y` 也是阻塞式时长估算。
 

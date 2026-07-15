@@ -27,3 +27,8 @@ void Screen_IMPORTPresenter::onKeyPressed(uint8_t keyId)
     // 调用View的更新函数，而非直接操作UI
     view.handleKeyEvent(keyId);
 }
+
+void Screen_IMPORTPresenter::onNotifyDownloadStatus(uint8_t status)
+{
+    view.handleDownloadStatus(status);
+}

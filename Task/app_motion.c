@@ -28,6 +28,10 @@ volatile bool s_cmd_interrupted = false;
 volatile uint32_t g_axes_done_bits = 0;
 volatile bool g_axes_error = false;
 
+/* ---- 31H encoder position stash (P2 stop-and-read) ---- */
+volatile int32_t g_enc_pos[4] = {0};  /* ID 1-3 */
+volatile bool    g_enc_ready[4] = {false};
+
 /* ---------- 电机地址定义 ---------- */
 #define X1_ADDR   0x01
 #define X2_ADDR   0x02
@@ -380,116 +384,185 @@ void place_component(void) {
 
 /* ========== R轴 时间积分开环 (TMC2209 VACTUAL 速度模式, 无编码器) ========== */
 
+/* ---- 内部子状态 ---- */
+typedef enum {
+    R_SUB_IDLE,
+    R_SUB_EN_DELAY,     /* 等待 TMC 使能稳定 (50ms) */
+    R_SUB_INIT,          /* RAMPMODE 方向 + 初始速度 (5ms) */
+    R_SUB_RUNNING,       /* PID 闭环调速 (每 8ms 一轮) */
+    R_SUB_STOP           /* 停转 + 去使能 (20ms) */
+} R_Sub_t;
+
+/* ---- 模块级状态 ---- */
+static R_State_t g_r_state = R_IDLE;
+static R_Sub_t   g_r_sub   = R_SUB_IDLE;
+static uint32_t  g_r_deadline;       /* 当前子阶段截止时间 (ms tick) */
+static int32_t   g_r_target;         /* 目标微步数 */
+static int32_t   g_r_position;       /* 时间积分估算位置 (usteps) */
+static int32_t   g_r_spd_cmd;        /* 当前速度指令 (Hz, 有符号) */
+static int32_t   g_r_max_spd;        /* 最大速度限制 */
+static int32_t   g_r_stable;         /* 到位连续稳定计数 */
+static uint32_t  g_r_t0;             /* 旋转开始时间 (超时用) */
+static float     g_r_cmd_angle;      /* 成功后 Coord_UpdateR 用 */
+
 void r_axis_set_zero(void) {
-    PrintDebug("[R] Zero set (time-integration ref)`r`n");
+    PrintDebug("[R] Zero set (time-integration ref)\r\n");
 }
 
 float r_axis_calibrate(void) {
     return 0.0f;
 }
 
-int r_axis_rotate(float angle, float speed_rpm) {
-    int32_t target = R_DEG_TO_USTEPS(angle);
-    if (target == 0) {
-        Coord_UpdateR(angle);
-        return 0;
+void r_axis_start(float angle, float speed_rpm) {
+    if (g_r_state == R_BUSY) {
+        PrintDebug("[R] BUSY: start ignored during rotation\r\n");
+        return;
     }
 
-    int32_t max_spd = (int32_t)(speed_rpm * R_STEPS_PER_REV / 60.0f);
-    if (max_spd > R_MAX_SPEED) max_spd = R_MAX_SPEED;
-    if (max_spd < R_MIN_SPEED) max_spd = R_MIN_SPEED;
+    g_r_target    = R_DEG_TO_USTEPS(angle);
+    g_r_cmd_angle = angle;
+
+    if (g_r_target == 0) {
+        Coord_UpdateR(angle);
+        g_r_state = R_DONE;
+        g_r_sub   = R_SUB_IDLE;
+        return;
+    }
+
+    g_r_max_spd = (int32_t)(speed_rpm * R_STEPS_PER_REV / 60.0f);
+    if (g_r_max_spd > R_MAX_SPEED) g_r_max_spd = R_MAX_SPEED;
+    if (g_r_max_spd < R_MIN_SPEED) g_r_max_spd = R_MIN_SPEED;
+
+    g_r_position = 0;
+    g_r_spd_cmd  = (g_r_target >= 0) ? R_MIN_SPEED : -R_MIN_SPEED;
+    g_r_stable   = 0;
+    g_r_t0       = HAL_GetTick();
 
     TMC_SetEnable(true);
-    vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
-
-    /* 首轮用 TMC_SetSpeed 初始化 RAMPMODE 方向 */
-    int32_t init_spd = (target >= 0) ? R_MIN_SPEED : -R_MIN_SPEED;
-    TMC_SetSpeed(init_spd);
-    vTaskDelay(pdMS_TO_TICKS(5));
-
-    int32_t  position   = 0;       /* 时间积分估算位置 (usteps) */
-    int32_t  spd_cmd    = init_spd;
-    int      stable     = 0;
-    uint32_t t_prev     = HAL_GetTick();
-    uint32_t t0         = t_prev;
-
-    while (1) {
-        vTaskDelay(pdMS_TO_TICKS(R_POLL_INTERVAL_MS));
-
-        /* ---- 积分: 上一周期速度 × 实际耗时 ---- */
-        uint32_t t_now  = HAL_GetTick();
-        int32_t  dt_ms  = (int32_t)(t_now - t_prev);
-        t_prev = t_now;
-        position += (spd_cmd * dt_ms) / 1000;
-
-        /* ---- DRV_STATUS.stst 硬件卡死判定 ---- */
-        uint32_t drv;
-        if (TMC_GetDRVStatus(&drv) == TMC_ERR_NONE) {
-            if ((drv & (1u << 31)) && spd_cmd != 0) {
-                TMC_SetSpeedDirect(0);
-                TMC_SetEnable(false);
-                PrintDebug("[R] STUCK: stst=1 while VACTUAL!=0`r`n");
-                return -2;
-            }
-        }
-
-        /* ---- SG_RESULT 堵转检测 ---- */
-        uint16_t sg;
-        if (TMC_GetSGResult(&sg) == TMC_ERR_NONE) {
-            int32_t abs_spd = (spd_cmd >= 0) ? spd_cmd : -spd_cmd;
-            if (abs_spd >= R_SG_MIN_SPEED && sg < R_SG_THRESHOLD) {
-                TMC_SetSpeedDirect(0);
-                TMC_SetEnable(false);
-                PrintDebug("[R] STALL: SG_RESULT=%u < %u`r`n",
-                           (unsigned)sg, (unsigned)R_SG_THRESHOLD);
-                return -1;
-            }
-        }
-
-        /* ---- 到位判断 ---- */
-        int32_t err = target - position;
-        int32_t abs_err = (err >= 0) ? err : -err;
-        if (abs_err < R_POS_TOLERANCE) {
-            stable++;
-            if (stable >= R_STABLE_COUNT) {
-                TMC_SetSpeedDirect(0);
-                break;
-            }
-        } else {
-            stable = 0;
-        }
-
-        /* ---- 速度计算: 比例 + 基础巡航 + 加速度限制 ---- */
-        int32_t spd = (int32_t)((float)abs_err * R_PID_KP) + R_MIN_SPEED;
-        if (spd > max_spd) spd = max_spd;
-        if (spd < R_MIN_SPEED) spd = R_MIN_SPEED;
-
-        int32_t prev_abs = (spd_cmd >= 0) ? spd_cmd : -spd_cmd;
-        if (spd > prev_abs + 1000) spd = prev_abs + 1000;
-
-        spd_cmd = (err >= 0) ? spd : -spd;
-        TMC_SetSpeedDirect(spd_cmd);
-
-        /* ---- 超时 ---- */
-        if (HAL_GetTick() - t0 > R_TIMEOUT_MS) {
-            TMC_SetSpeedDirect(0);
-            TMC_SetEnable(false);
-            PrintDebug("[R] TIMEOUT: pos=%ld target=%ld`r`n",
-                       (long)position, (long)target);
-            return -3;
-        }
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(20));
-    TMC_SetSpeedDirect(0);
-    TMC_SetEnable(false);
-
-    Coord_UpdateR(angle);
-    PrintDebug("[R] Done: pos=%ld steps (target=%ld)`r`n",
-               (long)position, (long)target);
-    return 0;
+    g_r_deadline = HAL_GetTick() + TMC_ENABLE_DELAY_MS;
+    g_r_sub      = R_SUB_EN_DELAY;
+    g_r_state    = R_BUSY;
 }
-/*  ================================================================
+
+void r_axis_poll(void) {
+    if (g_r_state != R_BUSY) return;
+
+    uint32_t now = HAL_GetTick();
+
+    switch (g_r_sub) {
+
+    case R_SUB_EN_DELAY:
+        if ((int32_t)(now - g_r_deadline) < 0) return;
+        /* 使能稳定，设置 RAMPMODE 方向 + 初始 VACTUAL */
+        TMC_SetSpeed(g_r_spd_cmd);
+        g_r_deadline = now + 5;
+        g_r_sub = R_SUB_INIT;
+        break;
+
+    case R_SUB_INIT:
+        if ((int32_t)(now - g_r_deadline) < 0) return;
+        /* 进入 PID 调速循环 */
+        g_r_deadline = now + R_POLL_INTERVAL_MS;
+        g_r_sub = R_SUB_RUNNING;
+        break;
+
+    case R_SUB_RUNNING:
+        if ((int32_t)(now - g_r_deadline) < 0) return;
+        g_r_deadline = now + R_POLL_INTERVAL_MS;
+
+        {
+            /* ---- 积分: 当前速度 * 轮询间隔 ---- */
+            g_r_position += (g_r_spd_cmd * (int32_t)R_POLL_INTERVAL_MS) / 1000;
+
+            /* ---- DRV_STATUS.stst 硬件卡死判定 ---- */
+            uint32_t drv;
+            if (TMC_GetDRVStatus(&drv) == TMC_ERR_NONE) {
+                if ((drv & (1u << 31)) && g_r_spd_cmd != 0) {
+                    TMC_SetSpeedDirect(0);
+                    TMC_SetEnable(false);
+                    g_r_state = R_STUCK;
+                    g_r_sub   = R_SUB_IDLE;
+                    PrintDebug("[R] STUCK: stst=1 while VACTUAL!=0\r\n");
+                    return;
+                }
+            }
+
+            /* ---- SG_RESULT 堵转检测 (R_SG_THRESHOLD=0 时禁能) ---- */
+            if (R_SG_THRESHOLD > 0) {
+                uint16_t sg;
+                if (TMC_GetSGResult(&sg) == TMC_ERR_NONE) {
+                    int32_t abs_spd = (g_r_spd_cmd >= 0) ? g_r_spd_cmd : -g_r_spd_cmd;
+                    if (abs_spd >= R_SG_MIN_SPEED && sg < R_SG_THRESHOLD) {
+                        TMC_SetSpeedDirect(0);
+                        TMC_SetEnable(false);
+                        g_r_state = R_STALL;
+                        g_r_sub   = R_SUB_IDLE;
+                        PrintDebug("[R] STALL: SG_RESULT=%u < %u\r\n",
+                                   (unsigned)sg, (unsigned)R_SG_THRESHOLD);
+                        return;
+                    }
+                }
+            }
+
+            /* ---- 到位判断 ---- */
+            int32_t err = g_r_target - g_r_position;
+            int32_t abs_err = (err >= 0) ? err : -err;
+            if (abs_err < R_POS_TOLERANCE) {
+                g_r_stable++;
+                if (g_r_stable >= R_STABLE_COUNT) {
+                    TMC_SetSpeedDirect(0);
+                    g_r_deadline = now + 20;
+                    g_r_sub = R_SUB_STOP;
+                    return;
+                }
+            } else {
+                g_r_stable = 0;
+            }
+
+            /* ---- 速度计算: 比例 + 基础巡航 + 加速度限制 ---- */
+            int32_t spd = (int32_t)((float)abs_err * R_PID_KP) + R_MIN_SPEED;
+            if (spd > g_r_max_spd) spd = g_r_max_spd;
+            if (spd < R_MIN_SPEED) spd = R_MIN_SPEED;
+
+            int32_t prev_abs = (g_r_spd_cmd >= 0) ? g_r_spd_cmd : -g_r_spd_cmd;
+            if (spd > prev_abs + 1000) spd = prev_abs + 1000;
+
+            g_r_spd_cmd = (err >= 0) ? spd : -spd;
+            TMC_SetSpeedDirect(g_r_spd_cmd);
+
+            /* ---- 超时 ---- */
+            if (now - g_r_t0 > R_TIMEOUT_MS) {
+                TMC_SetSpeedDirect(0);
+                TMC_SetEnable(false);
+                g_r_state = R_TIMEOUT;
+                g_r_sub   = R_SUB_IDLE;
+                PrintDebug("[R] TIMEOUT: pos=%ld target=%ld\r\n",
+                           (long)g_r_position, (long)g_r_target);
+                return;
+            }
+        }
+        break;
+
+    case R_SUB_STOP:
+        if ((int32_t)(now - g_r_deadline) < 0) return;
+        /* 停转完成，去使能电机 */
+        TMC_SetSpeedDirect(0);
+        TMC_SetEnable(false);
+        Coord_UpdateR(g_r_cmd_angle);
+        g_r_state = R_DONE;
+        g_r_sub   = R_SUB_IDLE;
+        PrintDebug("[R] Done: pos=%ld steps (target=%ld)\r\n",
+                   (long)g_r_position, (long)g_r_target);
+        break;
+
+    default:
+        break;
+    }
+}
+
+R_State_t r_axis_state(void) {
+    return g_r_state;
+}/*  ================================================================
  *  P2 连续扫描运动控制 - X1+X2 同步速度模式 (0xF6)
  *  仅 X1(0x01)+X2(0x02) 同步,Y 轴侧移独立.
  *  X2 CAN 状态不可用,全程使用时间估算代替到位信号.
@@ -528,13 +601,13 @@ void p2_scan_stop(void)
  * @param start_x    列起点 X 坐标 (步数)
  * @param sign       方向符号 (+1 = UP, -1 = DOWN)
  * @param speed      速度 (RPM)
- * @param elapsed_ms 列启动后经过的时间 (ms)
+ * @param elapsed_ticks 列启动后经过的 tick 数 (假设 1tick=1ms)
  * @return 估算的当前 X 坐标 (步数)
  */
-int32_t p2_scan_estimate_x(int32_t start_x, int32_t sign, uint16_t speed, uint32_t elapsed_ms)
+int32_t p2_scan_estimate_x(int32_t start_x, int32_t sign, uint16_t speed, uint32_t elapsed_ticks)
 {
     float steps_per_ms = (float)speed * 16384.0f / 60000.0f;
-    int32_t dx = (int32_t)((float)sign * steps_per_ms * (float)elapsed_ms);
+    int32_t dx = (int32_t)((float)sign * steps_per_ms * (float)elapsed_ticks);
     return start_x + dx;
 }
 
@@ -563,6 +636,80 @@ void p2_scan_step_y(int32_t dy_steps, uint16_t speed, uint8_t acc)
     }
 }
 
+/**
+ * @brief P2 扫描停止并读取 X1/X2 电机真实编码器位置 (31H)
+ * @return X1+X2 平均位置 (步数), -1 表示读取失败
+ */
+int32_t p2_stop_and_read_pos(int32_t enc_start_x1, int32_t enc_start_x2, int32_t coord_start_x)
+{
+    /* Step 1: stp收到时刻立即读编码器 (停止前, 电机仍在速度模式) */
+    g_enc_ready[X1_ADDR] = false;
+    readRealTimeLocation(X1_ADDR);
+    { uint32_t t0 = osKernelGetTickCount();
+      while (!g_enc_ready[X1_ADDR] && (osKernelGetTickCount() - t0) < 100) { osDelay(2); } }
+    int32_t enc_detect_x1 = g_enc_ready[X1_ADDR] ? g_enc_pos[X1_ADDR] : enc_start_x1;
+
+    g_enc_ready[X2_ADDR] = false;
+    readRealTimeLocation(X2_ADDR);
+    { uint32_t t0 = osKernelGetTickCount();
+      while (!g_enc_ready[X2_ADDR] && (osKernelGetTickCount() - t0) < 100) { osDelay(2); } }
+    int32_t enc_detect_x2 = g_enc_ready[X2_ADDR] ? g_enc_pos[X2_ADDR] : enc_start_x2;
+
+    /* Step 2: 停止电机并等待减速完成 */
+    axis_stop(X1_ADDR);
+    axis_stop(X2_ADDR);
+    motorSyncTrigger(0);
+    osDelay(200);
+
+    /* Step 3: 读取停止后编码器 */
+    g_enc_ready[X1_ADDR] = false;
+    readRealTimeLocation(X1_ADDR);
+    { uint32_t t0 = osKernelGetTickCount();
+      while (!g_enc_ready[X1_ADDR] && (osKernelGetTickCount() - t0) < 100) { osDelay(2); } }
+    if (!g_enc_ready[X1_ADDR]) { return -1; }
+    int32_t enc_stop_x1 = g_enc_pos[X1_ADDR];
+
+    g_enc_ready[X2_ADDR] = false;
+    readRealTimeLocation(X2_ADDR);
+    { uint32_t t0 = osKernelGetTickCount();
+      while (!g_enc_ready[X2_ADDR] && (osKernelGetTickCount() - t0) < 100) { osDelay(2); } }
+    if (!g_enc_ready[X2_ADDR]) { return -1; }
+    int32_t enc_stop_x2 = g_enc_pos[X2_ADDR];
+
+    /* Step 4: 计算 overshoot 并反向补偿 (位置模式, 精确回退) */
+    int32_t overshoot_x1_enc = enc_stop_x1 - enc_detect_x1;
+    int32_t overshoot_x2_enc = enc_stop_x2 - enc_detect_x2;
+    int32_t overshoot_avg_enc = (overshoot_x1_enc + overshoot_x2_enc) / 2;
+    int32_t back_steps = -P2_ENC2STEP(overshoot_avg_enc);
+
+    /* 回退量上限 3mm (1500步), 防止编码器异常导致大幅回退 */
+    if (back_steps > 1500)  back_steps = 1500;
+    if (back_steps < -1500) back_steps = -1500;
+
+    if (back_steps != 0) {
+        g_axes_done_bits = 0;
+        g_axes_error = false;
+        motorSyncEnable(1);
+        osDelay(5);
+        positionMode2Run(X1_ADDR, 100, 50, back_steps);
+        positionMode2Run(X2_ADDR, 100, 50, back_steps);
+        motorSyncTrigger(0);
+        osDelay(500);  /* 小位移补偿, 500ms足够 */
+    }
+
+    /* Step 5: 修正坐标 = 列起点 + stp时刻位移 (不含overshoot) */
+    int32_t dx1_enc = enc_detect_x1 - enc_start_x1;
+    int32_t dx2_enc = enc_detect_x2 - enc_start_x2;
+    int32_t avg_dx_enc = (dx1_enc + dx2_enc) / 2;
+    int32_t dx_steps = P2_ENC2STEP(avg_dx_enc);
+
+    int32_t real_x = coord_start_x + dx_steps;
+
+    PrintDebug("[P2] 31H enc_detect=(%ld,%ld) enc_stop=(%ld,%ld) overshoot_enc=%ld back_step=%ld real_x=%ld\r\n",
+               (long)enc_detect_x1, (long)enc_detect_x2, (long)enc_stop_x1, (long)enc_stop_x2,
+               (long)overshoot_avg_enc, (long)back_steps, (long)real_x);
+    return real_x;
+}
 /* ---------- 任务入口 ---------- */
 void MotionTask_Func(void *argument)
 {
@@ -657,7 +804,7 @@ void MotionTask_Func(void *argument)
                 break;
 
             case MOTION_CMD_R_ROTATE:
-            r_axis_rotate((float)cmd.target_r / 100.0f, (float)cmd.speed);
+            r_axis_start((float)cmd.target_r / 100.0f, (float)cmd.speed);  /* 非阻塞启动, 由 Host_Task r_axis_poll 推进 */
             break;   // cmd.target_r 可约定为 0.01° 单位
 						
             default:
@@ -689,6 +836,16 @@ void CAN_Process_Task(void *argument) {
             }
             else if ((pkt.FuncCode == 0xF4 || pkt.FuncCode == 0xF5) && pkt.Status == 0x03) {
                 g_axes_error = true;
+            }
+            else if (pkt.FuncCode == 0x31 && pkt.ID >= 1 && pkt.ID <= 3 && pkt.DataLength >= 7) {
+                /* 31H encoder: 48-bit signed big-endian Data[1..6], Data[7]=checksum */
+                int64_t hi = ((int64_t)pkt.Data[1] << 24) | ((int64_t)pkt.Data[2] << 16) |
+                            ((int64_t)pkt.Data[3] << 8)  |  (int64_t)pkt.Data[4];
+                int64_t lo = ((int64_t)pkt.Data[5] << 8)  |  (int64_t)pkt.Data[6];
+                int64_t enc48 = (hi << 16) | lo;
+                enc48 = (enc48 << 16) >> 16;  /* sign-extend from 48 bits */
+                g_enc_pos[pkt.ID] = (int32_t)enc48;
+                g_enc_ready[pkt.ID] = true;
             }
         }
     }
