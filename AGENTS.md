@@ -292,34 +292,6 @@ pnp_1/
 
 > P3 的 dx 不取反是因为下相机图像左右镜像（相机朝上拍摄），X 轴自然反转。
 
-### 4.2.2 R ??? (TMC2209 ??????)
-
-> R ?? 2026-07-15 ??? KTH7823 ?????????????????? TMC2209
-> VACTUAL ??????????????????? `spd_cmd ? dt` ?????
-> ???? MSCNT ?????DRV_STATUS.stst ?????? + SG_RESULT ????
-> ??????SG_RESULT ?? R_SG_THRESHOLD=0 ?????
->
-> **???? (app_config.h):** `R_PID_KP=4.0f`, `R_MIN_SPEED=200`, `R_MAX_SPEED=20000`,
-> `R_POLL_INTERVAL_MS=8`, `R_POS_TOLERANCE=5`, `R_SPEED_RPM=60`?
-> ????? 1000 Hz/?? (?15ms)?0?20000Hz ? 300ms?
->
-> **????:** ???? `MSCNT_TEST` ?? 5 ? MSCNT ???????
-> (TMC2209 ?? 5000Hz, ? 20ms ???, ???? MSCNT ?????)?
-
-### 4.2.2 R轴定位 (TMC2209 时间积分开环)
-
-> R轴自 2026-07-15起放弃 KTH7823编码器闭环（偏心问题无法解决），改为 TMC2209
-> VACTUAL速度模式下的时间积分开环定位。位置通过 `spd_cmd × dt` 累积估计，
-> 不再读取 MSCNT或编码器。DRV_STATUS.stst硬件卡死检测 + SG_RESULT堵转检测
-> 作为安全网（SG_RESULT当前 R_SG_THRESHOLD=0已禁用）。
->
-> **关键常量 (app_config.h):** `R_PID_KP=4.0f`, `R_MIN_SPEED=200`, `R_MAX_SPEED=20000`,
-> `R_POLL_INTERVAL_MS=8`, `R_POS_TOLERANCE=5`, `R_SPEED_RPM=60`。
-> 加速度限制 1000 Hz/周期 (≈15ms)，0→20000Hz约 300ms。
->
-> **诊断命令:** 串口发送 `MSCNT_TEST`启动 5秒 MSCNT原始值采样测试
-> (TMC2209定速 5000Hz, 每 20ms读一次, 用于验证 MSCNT寄存器行为)。
-
 
 ### 4.2.2 R轴定位 (TMC2209 时间积分开环)
 
@@ -334,6 +306,7 @@ pnp_1/
 >
 > **诊断命令:** 串口发送 `MSCNT_TEST` 启动 5 秒 MSCNT 原始值采样测试
 > (TMC2209 定速 5000Hz, 每 20ms 读一次, 用于验证 MSCNT 寄存器行为)。
+
 ### 4.3 G4 ? MKS SERVO42D 电机 (CAN, FDCAN1)
 
 - **物理层：** CAN 2.0A, 500kbps, 标准帧(11位ID)
