@@ -42,6 +42,16 @@ bool KTH7823_IsDataReady(void);
  * @return true=成功获取数据, false=超时 */
 bool KTH7823_WaitData(uint32_t timeout_ms);
 
+/* 诊断接口 */
+typedef struct {
+    uint32_t rising_count;     /* ISR 上升沿计数 */
+    uint32_t falling_count;    /* ISR 下降沿计数 */
+    uint32_t valid_count;      /* 有效角度计算次数 */
+    uint32_t last_tON_ticks;   /* 最近一次 tON (ticks) */
+    uint32_t last_period_ticks;/* 最近一次 period (ticks) */
+} KTH7823_Debug_t;
+void KTH7823_GetDebug(KTH7823_Debug_t *dbg);
+
 #ifdef __cplusplus
 }
 #endif

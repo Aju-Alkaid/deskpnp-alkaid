@@ -81,7 +81,7 @@
           </BeforeMake>
           <AfterMake>
             <RunUserProg1>0</RunUserProg1>
-            <RunUserProg2>0</RunUserProg2>
+            <RunUserProg2>1</RunUserProg2>
             <UserProg1Name></UserProg1Name>
             <UserProg2Name></UserProg2Name>
             <UserProg1Dos16Mode>0</UserProg1Dos16Mode>
@@ -904,6 +904,16 @@
               <FileName>driver_esp32.h</FileName>
               <FileType>5</FileType>
               <FilePath>..\Drivers\ZeMCU-G4\driver_esp32.h</FilePath>
+            </File>
+            <File>
+              <FileName>driver_kth7823.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Drivers\ZeMCU-G4\driver_kth7823.c</FilePath>
+            </File>
+            <File>
+              <FileName>driver_kth7823.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Drivers\ZeMCU-G4\driver_kth7823.h</FilePath>
             </File>
           </Files>
         </Group>

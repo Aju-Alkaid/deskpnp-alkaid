@@ -5,6 +5,13 @@
 #include "FreeRTOS.h"
 #include "semphr.h"
 
+/* 调试打印开关 — 定义 DEBUG_TMC 以启用 TMC 寄存器读写调试输出 */
+#ifdef DEBUG_TMC
+#define TMC_DBG(fmt, ...) TMC_DBG(fmt, ##__VA_ARGS__)
+#else
+#define TMC_DBG(fmt, ...) ((void)0)
+#endif
+
 extern void PrintDebug(const char* fmt, ...);
 
 /* ========== 互斥锁 ========== */
@@ -91,7 +98,7 @@ static TMC_Error_t TMC_ReadReg_Internal(uint8_t reg, uint32_t *data) {
     /* 逐字节发送读请求 + 同步收走回声，防止 ORE。
        单线 UART 上每发一个字节 RX 立即收到回声，如不及时读走会溢出，
        ORE 阻塞后续 RXNE → TMC2209 的应答在 ORE 清除前就发完丢失了。 */
-    PrintDebug("[TMC] ReadReq: %02X %02X %02X %02X\r\n", req[0], req[1], req[2], req[3]);
+    TMC_DBG("[TMC] ReadReq: %02X %02X %02X %02X\r\n", req[0], req[1], req[2], req[3]);
     for (int i = 0; i < TMC_READ_REQUEST_LEN; i++) {
         while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TXE));
         huart3.Instance->TDR = req[i];
@@ -99,9 +106,9 @@ static TMC_Error_t TMC_ReadReg_Internal(uint8_t reg, uint32_t *data) {
         while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_RXNE) && --tmo);
         if (tmo) {
             volatile uint32_t echo = huart3.Instance->RDR;
-            if (echo != req[i]) PrintDebug("[TMC] Echo mismatch: sent=%02X echo=%02lX\r\n", req[i], echo);
+            if (echo != req[i]) TMC_DBG("[TMC] Echo mismatch: sent=%02X echo=%02lX\r\n", req[i], echo);
         } else {
-            PrintDebug("[TMC] Echo timeout byte %d, ISR=0x%08lX\r\n", i, huart3.Instance->ISR);
+            TMC_DBG("[TMC] Echo timeout byte %d, ISR=0x%08lX\r\n", i, huart3.Instance->ISR);
         }
     }
     while (!__HAL_UART_GET_FLAG(&huart3, UART_FLAG_TC));
@@ -119,11 +126,11 @@ static TMC_Error_t TMC_ReadReg_Internal(uint8_t reg, uint32_t *data) {
         }
         if (rx_count == 0) {
             uint32_t sr = huart3.Instance->ISR;
-            PrintDebug("[TMC] Read timeout: 0 bytes, USART_ISR=0x%08lX\r\n", sr);
+            TMC_DBG("[TMC] Read timeout: 0 bytes, USART_ISR=0x%08lX\r\n", sr);
             return TMC_ERR_TIMEOUT;
         }
         if (rx_count < 7) {
-            PrintDebug("[TMC] Short read: %d bytes (need >=7)\r\n", rx_count);
+            TMC_DBG("[TMC] Short read: %d bytes (need >=7)\r\n", rx_count);
             return TMC_ERR_TIMEOUT;
         }
         /* 8字节= sync+addr+reg+4data+crc, 7字节= sync+addr+4data+crc */
@@ -131,16 +138,16 @@ static TMC_Error_t TMC_ReadReg_Internal(uint8_t reg, uint32_t *data) {
         uint8_t crc_ofs = rx_count - 1;
         
         if (reply[0] != TMC_SYNC_BYTE || reply[1] != TMC_READ_REPLY_ADDR) {
-            PrintDebug("[TMC] Sync fail: hdr=%02X %02X\r\n", reply[0], reply[1]);
+            TMC_DBG("[TMC] Sync fail: hdr=%02X %02X\r\n", reply[0], reply[1]);
             return TMC_ERR_SYNC_FAIL;
         }
         
-        PrintDebug("[TMC] Reply %d bytes:", rx_count);
-        for (int dbg = 0; dbg < rx_count; dbg++) PrintDebug(" %02X", reply[dbg]);
-        PrintDebug("\r\n");
+        TMC_DBG("[TMC] Reply %d bytes:", rx_count);
+        for (int dbg = 0; dbg < rx_count; dbg++) TMC_DBG(" %02X", reply[dbg]);
+        TMC_DBG("\r\n");
         crc_calc = TMC_CalcCRC(reply, crc_ofs);
         if (crc_calc != reply[crc_ofs]) {
-            PrintDebug("[TMC] CRC warn (calc=%02X rx=%02X), using data\r\n", crc_calc, reply[crc_ofs]);
+            TMC_DBG("[TMC] CRC warn (calc=%02X rx=%02X), using data\r\n", crc_calc, reply[crc_ofs]);
             /* CRC bypassed */
 
         }
@@ -187,7 +194,7 @@ void TMC_SetCurrent_Raw(uint8_t run_current, uint8_t hold_current, uint8_t hold_
     if (hold_delay > 15) hold_delay = 15;
     uint32_t val = (hold_delay << 16) | (run_current << 8) | hold_current;
     if (TMC_WriteReg(TMC_REG_IHOLD_IRUN, val) != TMC_ERR_NONE)
-        PrintDebug("[TMC] IHOLD_IRUN write FAILED\r\n");
+        TMC_DBG("[TMC] IHOLD_IRUN write FAILED\r\n");
 }
 
 void TMC_SetCurrent_mA(uint16_t current_mA) {
@@ -271,71 +278,33 @@ TMC_Error_t TMC_GetSGResult(uint16_t *sg_value) {
     return ret;
 }
 
-/* ---------- 位置模式 (RAMPMODE=0) ---------- */
-
-void TMC_ConfigRamp(uint32_t vmax, uint32_t amax, uint32_t dmax, uint32_t vstart, uint32_t vstop) {
-    TMC_WriteReg(TMC_REG_VMAX,   vmax);
-    TMC_WriteReg(TMC_REG_AMAX,   amax);
-    TMC_WriteReg(TMC_REG_DMAX,   dmax);
-    TMC_WriteReg(TMC_REG_VSTART, vstart);
-    TMC_WriteReg(TMC_REG_VSTOP,  vstop);
-    PrintDebug("[TMC] Ramp: VMAX=%lu AMAX=%lu DMAX=%lu VSTART=%lu VSTOP=%lu\r\n",
-               vmax, amax, dmax, vstart, vstop);
-}
-
-TMC_Error_t TMC_ReadXActual(int32_t *xactual) {
-    if (xactual == NULL) return TMC_ERR_INVALID_PARAM;
+TMC_Error_t TMC_GetMSCNT(uint16_t *mscnt) {
     uint32_t val;
-    TMC_Error_t ret = TMC_ReadReg(TMC_REG_XACTUAL, &val);
-    if (ret == TMC_ERR_NONE) *xactual = (int32_t)val;
+    TMC_Error_t ret = TMC_ReadReg(TMC_REG_MSCNT, &val);
+    if (ret == TMC_ERR_NONE) *mscnt = (uint16_t)(val & 0x3FF);
     return ret;
 }
 
-int TMC_MoveToPosition(int32_t target_usteps) {
-    /* 先清零 VACTUAL 再切模式，防止速度模式残留值被误认为目标位置 */
-    TMC_WriteReg(TMC_REG_VACTUAL, 0);
-    vTaskDelay(pdMS_TO_TICKS(2));
-
-    if (TMC_WriteReg(TMC_REG_RAMPMODE, 0) != TMC_ERR_NONE) {
-        PrintDebug("[TMC] MoveToPos: RAMPMODE=0 write FAILED\r\n");
-        return -1;
-    }
-    vTaskDelay(pdMS_TO_TICKS(2));
-
-    /* 定位模式下 VACTUAL = 目标位置 (s32) */
-    if (TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)target_usteps) != TMC_ERR_NONE) {
-        PrintDebug("[TMC] MoveToPos: VACTUAL write FAILED\r\n");
-        return -1;
-    }
-    PrintDebug("[TMC] MoveToPos: target=%ld\r\n", (long)target_usteps);
-    return 0;
+TMC_Error_t TMC_GetDRVStatus(uint32_t *status) {
+    return TMC_ReadReg(TMC_REG_DRV_STATUS, status);
 }
 
-bool TMC_WaitPosition(int32_t target, uint32_t timeout_ms) {
-    uint32_t t0 = HAL_GetTick();
-    while (HAL_GetTick() - t0 < timeout_ms) {
-        int32_t xactual;
-        if (TMC_ReadXActual(&xactual) == TMC_ERR_NONE) {
-            if ((xactual - target) >= -2 && (xactual - target) <= 2) return true;  /* ±2 µsteps 容差 */
-        }
-        vTaskDelay(pdMS_TO_TICKS(5));
+/* ---- 直接调速（不重置 RAMPMODE，用于闭环循环内调速） ---- */
+void TMC_SetSpeedDirect(int32_t velocity) {
+    if (velocity == 0) {
+        TMC_WriteReg(TMC_REG_VACTUAL, 0);
+        return;
     }
-    PrintDebug("[TMC] WaitPosition timeout: target=%ld\r\n", (long)target);
-    return false;
-}
-
-static bool g_ramp_configured = false;
-
-void TMC_EnsureRampConfigured(void) {
-    if (!g_ramp_configured) {
-        TMC_ConfigRamp(TMC_RAMP_VMAX, TMC_RAMP_AMAX, TMC_RAMP_DMAX, TMC_RAMP_VSTART, TMC_RAMP_VSTOP);
-        g_ramp_configured = true;
-    }
+    float v_freq = (float)(velocity >= 0 ? velocity : -velocity);
+    int32_t vactual = (int32_t)(v_freq * 16777216.0f / (float)TMC2209_F_CLK);
+    if (velocity < 0) vactual = -vactual;
+    if (vactual >  8388607) vactual =  8388607;
+    if (vactual < -8388607) vactual = -8388607;
+    TMC_WriteReg(TMC_REG_VACTUAL, (uint32_t)vactual);
 }
 
 /* ========== 初始化 ========== */
 bool TMC_Init(void) {
-    g_ramp_configured = false;  /* 每次初始化重置斜坡配置标志 */
     if (g_tmc_mutex == NULL) {
         g_tmc_mutex = xSemaphoreCreateMutex();
         if (g_tmc_mutex == NULL) return false;
@@ -386,7 +355,7 @@ bool TMC_Init(void) {
     /* 1. GCONF */    /* 1. GCONF */
     uint32_t gconf = GCONF_PDN_DISABLE | GCONF_MSTEP_REG_SELECT | GCONF_I_SCALE_ANALOG | GCONF_EN_SPREADCYCLE;  /* spreadCycle = 更高扭矩 */
     if (TMC_WriteReg(TMC_REG_GCONF, gconf) != TMC_ERR_NONE) {
-        PrintDebug("[TMC] GCONF write FAILED\r\n");
+        TMC_DBG("[TMC] GCONF write FAILED\r\n");
     }
     vTaskDelay(pdMS_TO_TICKS(1));
     /* 回读 GCONF 验证通信 */
@@ -394,11 +363,11 @@ bool TMC_Init(void) {
         uint32_t gconf_rd = 0;
         TMC_Error_t rd_err = TMC_ReadReg(TMC_REG_GCONF, &gconf_rd);
         if (rd_err != TMC_ERR_NONE)
-            PrintDebug("[TMC] GCONF read-back FAILED: err=%d\r\n", rd_err);
+            TMC_DBG("[TMC] GCONF read-back FAILED: err=%d\r\n", rd_err);
         else if (gconf_rd != gconf)
-            PrintDebug("[TMC] GCONF mismatch: wr=0x%08lX rd=0x%08lX\r\n", gconf, gconf_rd);
+            TMC_DBG("[TMC] GCONF mismatch: wr=0x%08lX rd=0x%08lX\r\n", gconf, gconf_rd);
         else
-            PrintDebug("[TMC] GCONF OK (0x%08lX)\r\n", gconf_rd);
+            TMC_DBG("[TMC] GCONF OK (0x%08lX)\r\n", gconf_rd);
     }
 
     /* 2. CHOPCONF */
@@ -408,15 +377,15 @@ bool TMC_Init(void) {
                       | (0 << CHOPCONF_HEND_SHIFT)
                       | (5 << CHOPCONF_HSTRT_SHIFT)
                       | (3 << CHOPCONF_TOFF_SHIFT);
-    chopconf |= 0x10000000;  // MRES=256
+    /* MRES=0 -> 256微步 (bits 27:24 = 0), INTPOL 已在上方设置 */
     if (TMC_WriteReg(TMC_REG_CHOPCONF, chopconf) != TMC_ERR_NONE)
-        PrintDebug("[TMC] CHOPCONF write FAILED\r\n");
+        TMC_DBG("[TMC] CHOPCONF write FAILED\r\n");
     vTaskDelay(pdMS_TO_TICKS(1));
 
     /* 3. PWMCONF */
     uint32_t pwmconf = (1 << 18) | (1 << 19) | (2 << 16) | (4 << 28);
     if (TMC_WriteReg(TMC_REG_PWMCONF, pwmconf) != TMC_ERR_NONE)
-        PrintDebug("[TMC] PWMCONF write FAILED\r\n");
+        TMC_DBG("[TMC] PWMCONF write FAILED\r\n");
     vTaskDelay(pdMS_TO_TICKS(1));
 
     /* 4. 电流 */
@@ -425,17 +394,66 @@ bool TMC_Init(void) {
 
     /* 5. TPOWERDOWN */
     if (TMC_WriteReg(TMC_REG_TPOWERDOWN, 20) != TMC_ERR_NONE)
-        PrintDebug("[TMC] TPOWERDOWN write FAILED\r\n");
+        TMC_DBG("[TMC] TPOWERDOWN write FAILED\r\n");
     vTaskDelay(pdMS_TO_TICKS(1));
 
     /* 6. 等待稳定 */
     vTaskDelay(pdMS_TO_TICKS(500));
 
-    /* 7. RAMPMODE：VACTUAL 直接控速模式（TMC_SetSpeed 按方向动态切换） */
+    /* 7. 默认速度模式 (RAMPMODE=1): 兼容 TMC_SetSpeed */
     if (TMC_WriteReg(TMC_REG_RAMPMODE, 1) != TMC_ERR_NONE)
-        PrintDebug("[TMC] RAMPMODE write FAILED\r\n");
-
-        g_ramp_configured = false;  /* 重配斜坡，确保位置模式寄存器重新写入 */
-    TMC_SetEnable(false);   /* 初始化完成后关闭驱动，用到时再开 */
+        TMC_DBG("[TMC] RAMPMODE write FAILED\r\n");
+    /* 电机保持使能: ENN=HIGH 会导致片内 LDO 关断，所有寄存器复位 */
     return true;
+}
+//TMC2209 不具备 硬件级的“位置模式”。
+/* ========== 位置模式 (RAMPMODE=0, XTARGET 绝对定位) ========== */
+
+void TMC_InitPositionMode(void) {
+    /* 电机已在 TMC_Init 中使能且保持, 直接配置速度曲线 */
+    /* 速度曲线参数: 适配 ~60 RPM 旋转, 51200 usteps/rev */
+    TMC_WriteReg(TMC_REG_VSTART,  10);       /* 启动速度 */
+    TMC_WriteReg(TMC_REG_A1,      1000);     /* 第一段加速 */
+    TMC_WriteReg(TMC_REG_V1,      50000);    /* 第一段拐点速度 */
+    TMC_WriteReg(TMC_REG_VSTOP,   10);       /* 停止速度 */
+    TMC_WriteReg(TMC_REG_VMAX,    200000);   /* 最大速度 (~140 RPM) */
+    TMC_WriteReg(TMC_REG_AMAX,    5000);     /* 最大加速 */
+    TMC_WriteReg(TMC_REG_DMAX,    5000);     /* 最大减速 */
+    TMC_WriteReg(TMC_REG_D1,      1000);     /* 第一段减速 */
+    TMC_WriteReg(TMC_REG_RAMPMODE, 0);       /* 位置模式 */
+    vTaskDelay(pdMS_TO_TICKS(10));
+    /* 电机保持使能: ENN=HIGH 会导致寄存器复位 */
+}
+
+void TMC_MoveTo(int32_t target_usteps) {
+    /* RAMPMODE 已在 TMC_InitPositionMode 设为 0, 直接写目标 */
+    TMC_WriteReg(TMC_REG_XTARGET, (uint32_t)target_usteps);
+    vTaskDelay(pdMS_TO_TICKS(200));  /* 等定位启动完成, 避免读 XACTUAL 时 UART 竞争 */
+}
+
+int32_t TMC_GetPosition(void) {
+    uint32_t val = 0;
+    if (TMC_ReadReg(TMC_REG_XACTUAL, &val) == TMC_ERR_NONE) {
+        return (int32_t)val;
+    }
+    return 0;
+}
+
+bool TMC_WaitPositionReached(uint32_t timeout_ms) {
+    uint32_t t0 = HAL_GetTick();
+    int32_t last_pos = TMC_GetPosition();
+    int stable_count = 0;
+
+    while ((HAL_GetTick() - t0) < timeout_ms) {
+        vTaskDelay(pdMS_TO_TICKS(15));
+        int32_t pos = TMC_GetPosition();
+        if (pos == last_pos) {
+            stable_count++;
+            if (stable_count >= 3) return true;
+        } else {
+            stable_count = 0;
+        }
+        last_pos = pos;
+    }
+    return false;
 }

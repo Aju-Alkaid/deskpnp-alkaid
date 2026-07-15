@@ -2983,3 +2983,312 @@ KTH7823 PWM (910Hz, 14-bit)
 - _axis_rotate 返回值 (-1=跳过, -2=超时) 在 Host_Task 调用点未检查，与原开环行为一致
 - R_CORRECTION_THRESHOLD_DEG (0.1°) 在 pp_config.h 仍定义但已无引用，被 R_CLOSED_THRESHOLD (0.2°) 替代
 - 编码器断线时 _axis_set_zero offset=0，后续角度即编码器原始值（非静默错误，行为可预测）
+
+
+---
+
+## 四十、2026-07-14 会话 — P2 连续速度扫描改造
+
+### 40.1 背景
+
+原先 P2 Mark 搜索采用离散网格扫描：每个格子 `safe_move_to` 停稳 → Cam 检测 → 超时后跳到下一格。此方案效率低（频繁启停）、Cam 识别窗口受限。
+
+改为 X1+X2 同步速度模式 (0xF6) 蛇形连续扫描：Cam 在移动中实时检测 Mark，搜到立即停电机并记录位置。
+
+### 40.2 设计约束
+
+- CAN ID 0x02 (X2 电机) 的到位响应不可靠，全程使用**时间估算**代替到位信号
+- 扫描速度 40 RPM（Cam 需要低速才能准确识别），加速度 15
+- X1+X2 必须一同移动（龙门双驱）
+- 蛇形扫描方向与离散网格完全一致：偶列下→上，奇列上→下，列间 Y 电机右移 5mm
+- 仅修改 P2 连续扫描部分，其余所有流程（P1/P3/贴装/回流焊/调试命令）不变
+
+### 40.3 新增函数 (app_motion.c)
+
+| 函数 | 说明 |
+|------|------|
+| `p2_scan_start(dir, speed, acc)` | X1+X2 同步 speedModeRun (0xF6) + motorSyncTrigger |
+| `p2_scan_stop()` | X1+X2 axis_stop (0xF7) + motorSyncTrigger + osDelay(5) |
+| `p2_scan_estimate_x(start_x, sign, speed, elapsed_ms)` | 时间 → 位移 → 当前 X 坐标 |
+| `p2_scan_step_y(dy_steps, speed, acc)` | Y 电机 positionMode2Run 侧移 (阻塞式时长估算) |
+
+### 40.4 连续扫描状态机 (mark_align_step)
+
+**VISION_BUSY 分支重写：**
+```
+进入 g_p2_scanning:
+  ├─ 列初始化: p2_scan_start(dir, 40, 15) → 记录起点坐标+时刻
+  ├─ 每 ~100ms: p2_scan_estimate_x → Coord_UpdateXY (位置跟踪)
+  └─ 列超时检查:
+      ├─ elapsed < col_time → 继续扫描
+      └─ elapsed >= col_time:
+          ├─ p2_scan_stop() → 最终位置估算
+          ├─ g_p2_col++ → 检查是否耗尽
+          ├─ p2_scan_step_y(5mm) → 侧移到下列
+          └─ g_in_busy=false → 下一 tick 重新初始化新列
+
+进入非扫描 (对齐/跳转):
+  └─ 原 P2_SCAN_TIMEOUT 超时逻辑不变
+```
+
+**VISION_GOT_STOP 修改：**
+```
+if (g_p2_scanning):
+  p2_scan_stop() → g_p2_scanning=false
+  时间估算停止位置 → Coord_UpdateXY
+  PrintDebug 输出 est_x 和 elapsed
+后续跳转逻辑不变 (Mark→Mark 偏移跳转)
+```
+
+**VISION_ERROR 修改：**
+```
+if (g_p2_scanning):
+  p2_scan_stop() → g_p2_col++ → 侧移到下列
+  Vision_BackToSearch() → 继续扫描
+else:
+  原错误处理不变
+```
+
+**VISION_DONE：** 新增 `g_p2_scanning = false`。建系算法不变。
+
+### 40.5 位置精度分析
+
+时间估算公式：`x = start_x + sign * speed_rpm * 16384 / 60000 * elapsed_ms`
+
+| 因素 | 值 |
+|------|-----|
+| 更新间隔 | 100 ms |
+| 最坏位置误差 | ~2.1 mm (1092 步) |
+| P2 Cam FOV | ~9.2 mm (448px / 48.5 steps/px) |
+| 对齐捕获范围 | 远大于误差 → P2 对齐迭代自动修正 |
+
+### 40.6 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_motion.h` | 新增 4 个 P2 扫描函数声明 (lines 103-107) |
+| `Task/app_motion.c` | 新增 p2_scan_start/stop/estimate_x/step_y 实现 (~100 行) |
+| `Task/app_host.c` | #define P2_SCAN_SPEED/ACC/DIR_UP/DOWN/DIR_DOWN/COL_PAD_MS/POS_UPDATE_MS |
+| | 新增静态变量 g_p2_scanning/col/col_start_x/col_start_tick/col_time_ticks/last_pos_update |
+| | download_done(): P2 初始化新增 g_p2_scanning/col/last_pos_update 赋值 |
+| | mark_align_step(): VISION_BUSY 完全重写 (~100行) + VISION_GOT_STOP 增停止逻辑 + VISION_ERROR 增列恢复 |
+| | VISION_DONE: 增 g_p2_scanning = false |
+| | uncalibrated else: 增 g_p2_scanning = false |
+
+### 40.7 待上机验证
+
+- **方向映射：** `P2_SCAN_DIR_UP=0` (CCW), `P2_SCAN_DIR_DOWN=1` (CW)。方向反了就交换这两个值重新编译。
+- 扫描速度 40 RPM 是否适配 Cam 当前识别帧率
+- 位置估算精度是否满足建系精度要求（Mark3 验证误差 < MARK_VERIFY_ERR_MM）
+
+---
+
+---
+
+## ????2026-07-15 ?? ? R ? KTH7823 ??? ? ??????
+
+### 41.1 ??
+
+KTH7823 ????????????????????????????
+?????????????????????????????
+?????? TMC2209 MSCNT ???????????
+?? MSCNT ?? Nyquist ?????????????
+
+### 41.2 ????
+
+| ?? | ?? | ?? |
+|------|------|------|
+| 1 | MSCNT + PID ?? (diff >/<-512 ????) | accum ????, ???? |
+| 2 | ?? dir_sign ?? | ??????? 200?20000Hz ?????? |
+| 3 | ?????? 500?1000 Hz/?? | ????? accum ???? (Nyquist) |
+| 4 | R_MAX_SPEED ??? (51200?40000?20000) | accum ? ~1024 ????? |
+| 5 | MSCNT_TEST ?? (5000Hz ????) | raw ????, ??????? |
+| **6** | **?????? (????)** | **??????, ????, ????** |
+
+### 41.3 ??????????
+
+```
+position += spd_cmd ? dt_ms / 1000  (?????)
+err = target - position
+spd = |err| ? R_PID_KP + R_MIN_SPEED
+spd ?????? (1000Hz/??) + max_spd ??
+TMC_SetSpeedDirect(spd_cmd)  ?????? VACTUAL
+```
+
+**??? (??):**
+- DRV_STATUS.stst (bit31) ? ???????? (~20ms)
+- SG_RESULT ? ???? (?? R_SG_THRESHOLD=0 ??)
+
+### 41.4 ???? (app_config.h)
+
+| ?? | ? | ?? |
+|------|-----|------|
+| R_SPEED_RPM | 60 | R ????? |
+| R_STEPS_PER_REV | 51200 | 200???256?? |
+| R_PID_KP | 4.0f | ???? (usteps?Hz) |
+| R_MIN_SPEED | 200 | ?? VACTUAL ?? (Hz), ?????? |
+| R_MAX_SPEED | 20000 | ?? VACTUAL ?? (?23 RPM) |
+| R_POLL_INTERVAL_MS | 8 | ???? (ms) |
+| R_POS_TOLERANCE | 5 | ???? (usteps, ?0.035?) |
+| R_STABLE_COUNT | 3 | ?????? = 3??? |
+| R_SG_THRESHOLD | 0 | SG_RESULT ????: 0=?? |
+| R_SG_MIN_SPEED | 800 | SG ?????? (??, ????) |
+| R_TIMEOUT_MS | 8000 | ?????? |
+
+### 41.5 ??/????
+
+| ?? | ?? |
+|------|------|
+| `Task/app_config.h` | ?? R_VERIFY_THRESHOLD/R_VERIFY_MAX_ITER, ???? R_* ?? |
+| `Task/app_motion.c` | ?? KTH7823 include + ????; ?? r_axis_rotate() ????? |
+| `Task/app_motion.h` | ?? r_axis_read_encoder() ?? |
+| `Task/app_host.c` | ?? KTH7823 include ? KTH7823_Init() ??; ?? HCMD_MSCNT_TEST case |
+| `Task/app_uart_parser.h` | ???? HCMD_MSCNT_TEST |
+| `Task/app_uart_parser.c` | MATCH("MSCNT_TEST") ? HCMD_MSCNT_TEST |
+| `Task/app_test.c/h` | ?? MSCNT_Test() ? 5 ??? MSCNT ???? |
+| `Drivers/ZeMCU-G4/driver_tmc2209.h` | ?? TMC_GetMSCNT(), TMC_GetDRVStatus(), TMC_SetSpeedDirect() ?? |
+| `Drivers/ZeMCU-G4/driver_tmc2209.c` | ?????????? (~40 ?) |
+| `Drivers/ZeMCU-G4/driver_kth7823.c/h` | **???** (????, ?????) |
+
+### 41.6 ??????
+
+**1. TMC_SetSpeed vs TMC_SetSpeedDirect:**
+`TMC_SetSpeed()` ???? VACTUAL=0 ? RAMPMODE ? VACTUAL, ?? ~13ms,
+??????????????`TMC_SetSpeedDirect()` ?? VACTUAL (~3ms),
+?????????r_axis_rotate ????? TMC_SetSpeed ?????,
+????? SetSpeedDirect?
+
+**2. MSCNT ?? Nyquist ??:**
+MSCNT ? 10-bit (0~1023), diff ??? ?512 ?????? MSCNT ???? <512,
+?????????: `R_MAX_SPEED ? ???? < 512`??? 20000Hz?~16ms=320<512?
+
+**3. ?????:**
+??????? ?1000 Hz, ?? VACTUAL ???????????
+0?20000Hz ? 300ms?
+
+**4. ????:**
+VACTUAL>0 ? MSCNT ??, ?????????????????
+?? `dir_sign = (target>=0) ? 1 : -1`, ? target ?? ? VACTUAL ?? ? ????
+
+**5. MSCNT_TEST ??:**
+???? `MSCNT_TEST` ??????: TMC2209 ?? 5000Hz, ? 20ms ? MSCNT, ?? 5s?
+?? raw/prev/diff/dt, ???? MSCNT ??????
+?? 5000Hz ????????, raw ????????????
+
+### 41.7 ????
+
+???????? TMC2209 VACTUAL ??????VACTUAL ??????? 12MHz
+????? (?? ?5~10%)?90? ?? (12800 ?) ??????? ?1.8?,
+? R ???????????
+
+### 41.8 ????
+
+- ???????: ?????????? (? stst ????)
+- KTH7823 ????????????, ????????
+- MSCNT_TEST ? 5000Hz ?????, ??????????
+- R_PID_KP=4.0 ????, ????????
+
+---
+
+## 四十一、2026-07-15 会话 — R 轴 KTH7823 编码器 → 时间积分开环
+
+### 41.1 背景
+
+KTH7823 磁编码器的偏心问题（磁铁安装偏心的正弦误差）一直未解决。
+本次会话讨论并实施了从编码器闭环到时间积分开环的完整迁移。
+期间也探索了 TMC2209 MSCNT 寄存器作为位置反馈源，
+但因 MSCNT 采样 Nyquist 混叠和电机共振问题未采用。
+
+### 41.2 方案演变
+
+| 阶段 | 方案 | 结果 |
+|------|------|------|
+| 1 | MSCNT + PID 闭环 (diff >/<-512 回绕检测) | accum 始终为负, 方向误判 |
+| 2 | 修正 dir_sign 取反 | 电机方向正确但 200→20000Hz 瞬间跳变丢步 |
+| 3 | 加加速度限制 500→1000 Hz/周期 | 电机平稳但 accum 仍不收敛 (Nyquist) |
+| 4 | R_MAX_SPEED 逐步降 (51200→40000→20000) | accum 仍 ~1024 而非目标值 |
+| 5 | MSCNT_TEST 诊断 (5000Hz 定速采样) | raw 交替跳变, 确认为电机共振 |
+| **6** | **时间积分开环 (最终方案)** | **电机正常旋转, 方向正确, 到位稳定** |
+
+### 41.3 时间积分开环核心设计
+
+```
+position += spd_cmd * dt_ms / 1000  (每周期累加)
+err = target - position
+spd = |err| * R_PID_KP + R_MIN_SPEED
+spd 经加速度限制 (1000Hz/周期) + max_spd 钳位
+TMC_SetSpeedDirect(spd_cmd)  每轮强制写入 VACTUAL
+```
+
+**安全网 (保留):**
+- DRV_STATUS.stst (bit31) — 硬件卡死即时判定 (~20ms)
+- SG_RESULT — 堵转检测 (当前 R_SG_THRESHOLD=0 禁用)
+
+### 41.4 关键参数 (app_config.h)
+
+| 常量 | 值 | 说明 |
+|------|-----|------|
+| R_SPEED_RPM | 60 | R 轴最大转速 |
+| R_STEPS_PER_REV | 51200 | 200全步*256微步 |
+| R_PID_KP | 4.0f | 比例系数 (usteps→Hz) |
+| R_MIN_SPEED | 200 | 最小 VACTUAL 频率 (Hz), 底速防静摩擦 |
+| R_MAX_SPEED | 20000 | 最大 VACTUAL 频率 (≈23 RPM) |
+| R_POLL_INTERVAL_MS | 8 | 控制周期 (ms) |
+| R_POS_TOLERANCE | 5 | 到位容差 (usteps, ≈0.035°) |
+| R_STABLE_COUNT | 3 | 连续稳定次数 = 3*周期 |
+| R_SG_THRESHOLD | 0 | SG_RESULT 堵转检测: 0=禁用 |
+| R_SG_MIN_SPEED | 800 | SG 有效最低速度 (保留, 当前无效) |
+| R_TIMEOUT_MS | 8000 | 整体旋转超时 |
+
+### 41.5 新增/修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_config.h` | 删除 R_VERIFY_THRESHOLD/R_VERIFY_MAX_ITER, 新增全套 R_* 常量 |
+| `Task/app_motion.c` | 删除 KTH7823 include + 静态变量; 重写 r_axis_rotate() 为时间积分 |
+| `Task/app_motion.h` | 删除 r_axis_read_encoder() 声明 |
+| `Task/app_host.c` | 删除 KTH7823 include 和 KTH7823_Init() 调用; 新增 HCMD_MSCNT_TEST case |
+| `Task/app_uart_parser.h` | 枚举新增 HCMD_MSCNT_TEST |
+| `Task/app_uart_parser.c` | MATCH("MSCNT_TEST") → HCMD_MSCNT_TEST |
+| `Task/app_test.c/h` | 新增 MSCNT_Test() — 5 秒定速 MSCNT 采样诊断 |
+| `Drivers/ZeMCU-G4/driver_tmc2209.h` | 新增 TMC_GetMSCNT(), TMC_GetDRVStatus(), TMC_SetSpeedDirect() 声明 |
+| `Drivers/ZeMCU-G4/driver_tmc2209.c` | 新增上述三个函数实现 (~40 行) |
+| `Drivers/ZeMCU-G4/driver_kth7823.c/h` | **未修改** (文件保留, 无编译引用) |
+
+### 41.6 关键技术细节
+
+**1. TMC_SetSpeed vs TMC_SetSpeedDirect:**
+`TMC_SetSpeed()` 内部执行 VACTUAL=0 → RAMPMODE → VACTUAL, 耗时 ~13ms,
+每轮调用会导致电机反复停机。`TMC_SetSpeedDirect()` 只写 VACTUAL (~3ms),
+适用于闭环内调速。r_axis_rotate 仅在首轮用 TMC_SetSpeed 初始化方向,
+后续全部用 SetSpeedDirect。
+
+**2. MSCNT 采样 Nyquist 限速:**
+MSCNT 为 10-bit (0~1023), diff 检测用 ±512 窗口。每周期 MSCNT 变化必须 <512,
+否则方向误判。约束: `R_MAX_SPEED * 实际周期 < 512`。当前 20000Hz*~16ms=320<512。
+
+**3. 加速度限制:**
+每周期速度增幅 ≤1000 Hz, 防止 VACTUAL 跳变导致步进电机丢步。
+0→20000Hz 约 300ms。
+
+**4. 方向符号:**
+VACTUAL>0 使 MSCNT 递增, 但电机物理旋转方向取决于相序接线。
+当前 `dir_sign = (target>=0) ? 1 : -1`, 即 target 为正 → VACTUAL 为正 → 顺时针。
+
+**5. MSCNT_TEST 诊断:**
+串口发送 `MSCNT_TEST` 启动独立测试: TMC2209 定速 5000Hz, 每 20ms 读 MSCNT, 运行 5s。
+输出 raw/prev/diff/dt, 用于验证 MSCNT 寄存器行为。
+已知 5000Hz 下该电机存在共振, raw 值交替跳变但非硬件故障。
+
+### 41.7 精度评估
+
+时间积分精度依赖 TMC2209 VACTUAL 速度准确性。VACTUAL 频率精度由内部 12MHz
+振荡器决定 (典型 ±5~10%)。90° 旋转 (12800 步) 的位置误差预估 ≤1.8°,
+对 R 轴贴装角度要求可接受。
+
+### 41.8 已知限制
+
+- 无真实位置反馈: 丢步无法被检测和补偿 (仅 stst 卡死检测)
+- KTH7823 驱动文件保留但未编译引用, 若将来需要可恢复
+- MSCNT_TEST 在 5000Hz 下触发共振, 测试时应使用其他速度
+- R_PID_KP=4.0 为理论值, 可能需要实机微调

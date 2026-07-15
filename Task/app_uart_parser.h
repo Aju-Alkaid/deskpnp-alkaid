@@ -43,7 +43,9 @@ typedef enum {
     HCMD_SET_Z_PICK,          // 记录吸取高度
     HCMD_SET_Z_PLACE,         // 记录贴装高度
     HCMD_SET_R_ZERO,          // R 轴当前位置 = 0deg
-    HCMD_SET_CAM_OFFSET,     // 上摄像头à吸嘴偏置标定 (两步)
+    HCMD_R_CALIB,             // R 轴编码器自动校准
+    HCMD_MSCNT_TEST,          /* MSCNT 原始值采样诊断 */
+   HCMD_SET_CAM_OFFSET,     // 上摄像头à吸嘴偏置标定 (两步)
     HCMD_SAVE_CALIB,          // 保存标定值到 Flash
     HCMD_RESTORE_CALIB,       // 恢复标定值（调试用）
     HCMD_RESUME,              // 从暂停/WAIT_REFILL/ERROR 恢复

@@ -1,4 +1,4 @@
-#ifndef __APP_CONFIG_H
+﻿#ifndef __APP_CONFIG_H
 #define __APP_CONFIG_H
 
 #include <stdint.h>
@@ -9,17 +9,24 @@
 #define X1_ADDR          0x01
 #define X2_ADDR          0x02
 #define Y_ADDR           0x03
-/* R 轴角度矫正阈值 — |angle| <= 此值跳过矫正 (deg) */
-#define R_CORRECTION_THRESHOLD_DEG  0.1f
 /* R 轴旋转速度 (RPM) — 矫正和贴装共用 */
 #define R_SPEED_RPM                 60.0f
+#define R_CORRECTION_THRESHOLD_DEG  0.1f       /* R 轴视觉矫正死区 (deg) */
 
-/* ---- R 轴位置模式 + 编码器微调 (TMC2209 RAMPMODE=0, KTH7823 验证) ---- */
-#define R_POS_TIMEOUT_MS        5000     /* 硬件定位超时 (ms) */
-#define R_VERIFY_THRESHOLD      0.5f     /* 编码器校验阈值 (deg) */
-#define R_VERIFY_MAX_ITER       3        /* 微调最大迭代次数 */
-#define R_STEPS_PER_REV         (200 * 256)  /* 51200 μsteps/rev */
-#define R_DEG_TO_USTEPS(d)      ((int32_t)((d) * R_STEPS_PER_REV / 360.0f))
+/* ---- R 轴 MSCNT 闭环 (TMC2209 VACTUAL 速度模式) ---- */
+#define R_STEPS_PER_REV          51200       /* 200全步 × 256微步 = 51200 usteps/rev */
+#define R_DEG_TO_USTEPS(d)       ((int32_t)((d) * R_STEPS_PER_REV / 360.0f))
+#define R_POLL_INTERVAL_MS       8           /* PID 控制周期 (ms): 8ms保证MSCNT采样<512步 */
+#define R_PID_KP                 4.0f        /* 比例系数 (usteps→Hz) */
+#define R_MIN_SPEED              200         /* 最小 VACTUAL 频率 (Hz) */
+#define R_MAX_SPEED              20000       /* 最大 VACTUAL 频率 = 23 RPM, 16ms内≤320步<512 */
+#define R_POS_TOLERANCE          5           /* 到位容差 (usteps), 5步 = 0.035° */
+#define R_STABLE_COUNT           3           /* 连续稳定次数 = 3×10ms = 30ms */
+#define R_SG_THRESHOLD           0           /* SG_RESULT 堵转检测关闭: 仅 stst+MSCNT */
+#define R_SG_MIN_SPEED           800         /* (保留, 已无效) */
+#define R_STUCK_MS               200         /* MSCNT 不动超时判定卡死 (兜底) */
+#define R_TIMEOUT_MS             8000        /* 整体旋转超时 (ms) */
+#define R_UART_MAX_FAILS         3           /* 连续 UART 失败上限 */
 /* ================================================================
  *  标定数据 — W25Q64 Flash 持久化
  * ================================================================ */

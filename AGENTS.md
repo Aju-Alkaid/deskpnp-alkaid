@@ -56,7 +56,7 @@
 | SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, 连接 W25Q64 Flash |
 | SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, 连接 ESP32 通信模块 |
 | TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) Z轴舵机 PWM (50Hz) / 32位时间戳基准 |
-| TIM5 | CH1(PB2) KTH7823 编码器输入捕获 (170MHz) / CH3(PE8) Z轴舵机 PWM (50Hz) |
+| TIM5 | CH1(PB2) KTH7823 编码器输入捕获 (170MHz, 已弃用) / CH3(PE8) Z轴舵机 PWM (50Hz) |
 | TIM6 | HAL 系统时基 |
 | CRC | 硬件 CRC 校验 |
 | GPIO 按键 | KEY1(PC6) / KEY2(PC7) / CW(PA8) / CCW(PC8) / PUSH(PC9), 低电平有效 |
@@ -86,8 +86,8 @@ pnp_1/
 │       ├── driver_uart.c/h      # UART DMA+空闲中断 4通道驱动（UART_CH1~4）
 │       ├── driver_can.c/h       # FDCAN 收发 + 滤波器 + CRC_SUM8 + 中断
 │       ├── driver_motor.c/h     # MKS 伺服电机 CAN 控制（0xF5/0xF3/0x82/0x92/0x4A/0x4B 等）
-│       ├── driver_tmc2209.c/h   # TMC2209 UART 寄存器读写 (R轴)
-│       ├── driver_kth7823.c/h   # KTH7823 磁编码器 PWM 输入捕获 + 角度解算 (R轴闭环反馈)
+│       ├── driver_tmc2209.c/h   # TMC2209 UART 寄存器读写 (R轴, VACTUAL速度模式+时间积分开环定位)
+│       ├── driver_kth7823.c/h   # KTH7823 磁编码器 (已弃用, 仅文件保留; R轴改为时间积分开环)
 │       ├── driver_servo.c/h     # MG995 舵机 PWM 控制（TIM2_CH3 / PB10）
 │       ├── driver_drv8803.c/h   # DRV8803 双芯片 8通道驱动（12V+24V）
 │       ├── driver_heater.c/h    # 加热台 CAN 通信 (CAN ID 0x04/0x05, 自有 CRC 协议, 见 §4.4)
@@ -292,6 +292,48 @@ pnp_1/
 
 > P3 的 dx 不取反是因为下相机图像左右镜像（相机朝上拍摄），X 轴自然反转。
 
+### 4.2.2 R ??? (TMC2209 ??????)
+
+> R ?? 2026-07-15 ??? KTH7823 ?????????????????? TMC2209
+> VACTUAL ??????????????????? `spd_cmd ? dt` ?????
+> ???? MSCNT ?????DRV_STATUS.stst ?????? + SG_RESULT ????
+> ??????SG_RESULT ?? R_SG_THRESHOLD=0 ?????
+>
+> **???? (app_config.h):** `R_PID_KP=4.0f`, `R_MIN_SPEED=200`, `R_MAX_SPEED=20000`,
+> `R_POLL_INTERVAL_MS=8`, `R_POS_TOLERANCE=5`, `R_SPEED_RPM=60`?
+> ????? 1000 Hz/?? (?15ms)?0?20000Hz ? 300ms?
+>
+> **????:** ???? `MSCNT_TEST` ?? 5 ? MSCNT ???????
+> (TMC2209 ?? 5000Hz, ? 20ms ???, ???? MSCNT ?????)?
+
+### 4.2.2 R轴定位 (TMC2209 时间积分开环)
+
+> R轴自 2026-07-15起放弃 KTH7823编码器闭环（偏心问题无法解决），改为 TMC2209
+> VACTUAL速度模式下的时间积分开环定位。位置通过 `spd_cmd × dt` 累积估计，
+> 不再读取 MSCNT或编码器。DRV_STATUS.stst硬件卡死检测 + SG_RESULT堵转检测
+> 作为安全网（SG_RESULT当前 R_SG_THRESHOLD=0已禁用）。
+>
+> **关键常量 (app_config.h):** `R_PID_KP=4.0f`, `R_MIN_SPEED=200`, `R_MAX_SPEED=20000`,
+> `R_POLL_INTERVAL_MS=8`, `R_POS_TOLERANCE=5`, `R_SPEED_RPM=60`。
+> 加速度限制 1000 Hz/周期 (≈15ms)，0→20000Hz约 300ms。
+>
+> **诊断命令:** 串口发送 `MSCNT_TEST`启动 5秒 MSCNT原始值采样测试
+> (TMC2209定速 5000Hz, 每 20ms读一次, 用于验证 MSCNT寄存器行为)。
+
+
+### 4.2.2 R轴定位 (TMC2209 时间积分开环)
+
+> R轴自 2026-07-15 起放弃 KTH7823 编码器闭环（偏心问题无法解决），改为 TMC2209
+> VACTUAL 速度模式下的时间积分开环定位。位置通过 `spd_cmd × dt` 累积估计，
+> 不再读取 MSCNT 或编码器。DRV_STATUS.stst 硬件卡死检测 + SG_RESULT 堵转检测
+> 作为安全网（SG_RESULT 当前 R_SG_THRESHOLD=0 已禁用）。
+>
+> **关键常量 (app_config.h):** `R_PID_KP=4.0f`, `R_MIN_SPEED=200`, `R_MAX_SPEED=20000`,
+> `R_POLL_INTERVAL_MS=8`, `R_POS_TOLERANCE=5`, `R_SPEED_RPM=60`。
+> 加速度限制 1000 Hz/周期 (≈15ms)，0→20000Hz 约 300ms。
+>
+> **诊断命令:** 串口发送 `MSCNT_TEST` 启动 5 秒 MSCNT 原始值采样测试
+> (TMC2209 定速 5000Hz, 每 20ms 读一次, 用于验证 MSCNT 寄存器行为)。
 ### 4.3 G4 ? MKS SERVO42D 电机 (CAN, FDCAN1)
 
 - **物理层：** CAN 2.0A, 500kbps, 标准帧(11位ID)
@@ -441,8 +483,10 @@ pnp_1/
                                              │
                                              └── 500ms超时 → download_done()
                                                    │
-                                                   ├─ g_mark_count>0 → P2建系
+                                                   ├─ g_mark_count>0 → P2建系（连续速度扫描）
                                                    │    mark_align_step() → Vision_Start(VCMD_P2)
+                                                   │    → speedModeRun(X1+X2, 蛇形逐列连续) + 位置时间估算
+                                                   │    → Cam搜到stp → 立即停电机 → P2对齐迭代 → 建系
                                                    │    → g_mark_avg_dx/dy (Mark平均偏移)
                                                    │
                                                    └─ g_comp_count>0 → 逐个贴装循环
@@ -492,6 +536,20 @@ pnp_1/
 3. **`CAN_Transmit_Data` 中调试打印（已修复，见 §9.6-2）：** 每次 CAN 发送的 TX 日志同样用 `#ifdef DEBUG_CAN_ISR` 包裹。
 4. **`motor_send_move_cmd` 函数体冗余：** 该函数的 buffer 填充逻辑与 `positionMode3Run` 重复，实际调用也是转发到后者。建议移除冗余逻辑或直接废弃此函数。
 
+### 9.6 R轴编码器方案已弃用
+
+6. **KTH7823磁编码器偏心问题 (2026-07-15):** 编码器的正弦偏心误差无法通过
+   软件校准彻底消除。经 MSCNT探索和验证后，R轴最终采用 TMC2209时间积分
+   开环方案。精度依赖 VACTUAL速度准确性（典型 <2%误差），对 R轴贴装角度
+   要求足够。`driver_kth7823.c/h`文件保留但未编译引用。
+
+
+### 9.6 R轴编码器方案已弃用
+
+6. **KTH7823 磁编码器偏心问题 (2026-07-15):** 编码器的正弦偏心误差无法通过
+   软件校准彻底消除。经 MSCNT 探索和验证后，R 轴最终采用 TMC2209 时间积分
+   开环方案。精度依赖 VACTUAL 速度准确性（典型 <2% 误差），对 R 轴贴装角度
+   要求足够。`driver_kth7823.c/h` 文件保留但未编译引用。
 ### 9.3 功能性问题（部分已解决）
 5. **离散移动命令去重 BUG（已修复）：** `handle_debug_cmd` 的去重逻辑原先对所有命令生效，导致同方向同步长的离散移动（MOVE_UP/DOWN/LEFT/RIGHT）只能执行一次。已收窄为仅对 JOG START 命令去重。
 5. **正式运动任务（已解决，见 §9.8）：** `PnP_Motion_Task` 已由 `Host_Task` 取代，`Host_Task` 统一处理调试命令和 PnP 流程。
@@ -515,6 +573,42 @@ pnp_1/
 4. **`Key_Task` 已改用 `osDelayUntil`：** 原 `osDelay(10)` 改为 `osDelayUntil`，消除任务执行时间导致的周期漂移，保证精确 10ms 扫描间隔。
 5. **已删除未使用的 FreeRTOS 对象：** `semX1Done`、`semX2Done`、`semYDone`、`semEmergency`（信号量）和 `can_rx_queue`（队列）已从源码中移除。到位通知统一使用 `evtAxesDone` 事件组。
 
+
+### 9.7 P2 连续速度扫描 (2026-07-14)
+
+**设计：** P2 Mark 搜索从离散网格跳格改为 X1+X2 同步速度模式 (0xF6) 蛇形连续扫描，Cam 在移动中实时检测 Mark。
+
+**扫描参数：**
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `P2_SCAN_SPEED` | 40 RPM | Cam 需要低速识别 |
+| `P2_SCAN_ACC` | 15 | 加速度 |
+| `P2_SCAN_STEP_MM` | 5.0 mm | 横向步进宽度 (Y电机) |
+| `P2_SCAN_COL_PAD_MS` | 500 ms | 每列额外延时，补偿加减速段 |
+| `P2_SCAN_POS_UPDATE_MS` | 100 ms | Coord 位置估算更新间隔 |
+| `P2_SCAN_DIR_UP` / `DOWN` | 0 / 1 | speedModeRun 方向位，方向反了就交换 |
+
+**蛇形扫描顺序（与离散网格一致）：**
+```
+偶列(0,2,4...): X1+X2 dir=UP   → 从下到上扫完整列
+                 → Y电机右移 P2_SCAN_STEP_MM
+奇列(1,3,5...): X1+X2 dir=DOWN → 从上到下扫完整列
+                 → Y电机右移 P2_SCAN_STEP_MM
+周而复始。单列耗时 ≈ col_h / (speed*PULSES_PER_REV/60000) + PAD ≈ 4.7s。
+```
+
+**Cam 检测到 Mark 时：** `VISION_GOT_STOP` → `p2_scan_stop()` 立即停 X1+X2 → 时间估算停止位置 (elapsed*speed) → `Coord_UpdateXY` → `Vision_Go()` → 进入对齐迭代。
+
+**位置精度：** 时间估算误差 ≤ 2.1mm (@100ms 更新间隔)，Cam P2 FOV ≈ 9.2mm (448px / 48.5 steps/px)，误差在捕获范围内。P2 对齐迭代进一步精修。
+
+**X2 状态：** CAN ID 0x02 的到位响应不可靠，全程使用时间估算代替到位信号。`p2_scan_step_y` 也是阻塞式时长估算。
+
+**涉及文件：**
+| 文件 | 改动 |
+|------|------|
+| `Task/app_motion.h` | 新增 p2_scan_start/stop/estimate_x/step_y 声明 |
+| `Task/app_motion.c` | 新增 4 个 P2 扫描函数 (~100行) |
+| `Task/app_host.c` | #define + 静态变量 + mark_align_step 重写 (~200行改) |
 
 ## 十、快速参考
 

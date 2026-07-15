@@ -42,4 +42,7 @@ extern const osThreadAttr_t camTestTask_attributes;
 void StartESPTestTask(void *argument);
 extern const osThreadAttr_t espTestTask_attributes;
 
+/* ---- MSCNT 原始值采样诊断 ---- */
+void MSCNT_Test(void);
+
 #endif

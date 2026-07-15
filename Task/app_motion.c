@@ -1,4 +1,4 @@
-#include "app_motion.h"
+﻿#include "app_motion.h"
 
 //#define DEBUG_MOTION  // cancel comment to enable motion debug log
 #include "driver_motor.h"
@@ -7,15 +7,13 @@
 #include <string.h>
 #include <stdbool.h>
 #include "driver_servo.h"
-#include "driver_tmc2209.h"   
-#include "driver_kth7823.h"
+#include "driver_tmc2209.h"
 #include <math.h>   // 解决 fabsf 未声明
 #include "app_test.h"
 #include "driver_drv8803.h"
 #include "app_config.h"
 #include "driver_uart.h"
 #include "timestamp.h"
-
 
 extern TIM_HandleTypeDef htim5;
 
@@ -30,9 +28,6 @@ volatile bool s_cmd_interrupted = false;
 volatile uint32_t g_axes_done_bits = 0;
 volatile bool g_axes_error = false;
 
-/* ---- KTH7823 R 轴编码器零点偏置 (deg) ---- */
-float g_r_encoder_zero_offset = 0.0f;
-
 /* ---------- 电机地址定义 ---------- */
 #define X1_ADDR   0x01
 #define X2_ADDR   0x02
@@ -44,29 +39,29 @@ float g_r_encoder_zero_offset = 0.0f;
 #define ANGLE_UP      75.0f   // 吸嘴升起角度 / 安全高度 / P3偏移检测
 #define ANGLE_DOWN  110.0f    // 吸嘴下降角度 / 吸取+贴装高度
 
-// 吸嘴气泵由 DRV8803 12VO1 (PE11) 控制，见 driver_drv8803.h Pump_On/Off
+// 吸嘴气泵由 DRV8803 12VO1 (PE11) 控制,见 driver_drv8803.h Pump_On/Off
+
 
 /* MKS SERVO42D 编码器参数 */
 #define MKS_PULSES_PER_REV  16384.0f  /* 电机每圈脉冲数 */
 
 /* 协议常量 */
 #define FUNC_ABS_POS   0xF5       // 坐标绝对运动功能码
-#define STATUS_SYNC_RECV  0x05    // 同步模式：已接收指令，等待同步执行
+#define STATUS_SYNC_RECV  0x05    // 同步模式：已接收指令,等待同步执行
 #define STATUS_RUN_COMPLETE 0x02  // 运行完成
 #define STATUS_START      0x01    // 普通模式：运行开始 (未使用同步时可能收到)
 
 #define ACK_TIMEOUT_MS   2000      // 单轴到位超时 (ms)
 
-static uint32_t g_move_pad_ms = 3000;  /* move_xy_relative 安全余量，点动时临时改为 80 */
-
+static uint32_t g_move_pad_ms = 3000;  /* move_xy_relative 安全余量,点动时临时改为 80 */
 /* ================================================================
- *  座标核心 — 线程安全的机器座标系单例
+ *  座标核心 - 线程安全的机器座标系单例
  * ================================================================ */
 static MachineCoord_t g_coord;
 static osMutexId_t    g_coord_mutex;
 
 void Coord_Init(void) {
-    if (g_coord_mutex != NULL) return;  /* 幂等，允许多处调用 */
+    if (g_coord_mutex != NULL) return;  /* 幂等,允许多处调用 */
     g_coord_mutex = osMutexNew(NULL);
     memset(&g_coord, 0, sizeof(g_coord));
     g_coord.z = 75.0f;                  /* 默认安全角度 */
@@ -136,7 +131,7 @@ static void send_axis_abs(int32_t addr, int32_t abs_coord, uint16_t speed, uint8
 
 /**
  * @brief 向指定电机发送急停（立即减速停止）
- *        acc=0 时立即停止，否则减速停止
+ *        acc=0 时立即停止,否则减速停止
  */
 static void send_axis_stop(int32_t addr)
 {
@@ -158,9 +153,9 @@ void axis_stop(int32_t addr)
     CAN_Transmit_Data(&hfdcan1, addr, tx, 1);
 }
 /**
- * @brief 急停三轴（同步模式，0xF7 立即停止 + 同步触发）
- * @note  Motor_Init 已开启同步（motorSyncEnable(1)），
- *        axis_stop 经 motorSyncTrigger 同步触发执行。
+ * @brief 急停三轴（同步模式,0xF7 立即停止 + 同步触发）
+ * @note  Motor_Init 已开启同步（motorSyncEnable(1)）,
+ *        axis_stop 经 motorSyncTrigger 同步触发执行.
  */
 void disable_sync_stop(void)
 {
@@ -172,14 +167,14 @@ void disable_sync_stop(void)
 }
 
 /**
- * @brief  XY 相对移动（阻塞式，按时长估算到位）
+ * @brief  XY 相对移动（阻塞式,按时长估算到位）
  *
  * 发送 F4 相对位置指令到指定轴 → 广播同步触发 → 按时长估算等待到位 →
- * 检测 g_axes_error 堵转标志。CAN_Process_Task 异步消费 CAN 帧并更新
- * g_axes_done_bits / g_axes_error 全局标志。
+ * 检测 g_axes_error 堵转标志.CAN_Process_Task 异步消费 CAN 帧并更新
+ * g_axes_done_bits / g_axes_error 全局标志.
  *
- * @param  dx     X 轴相对位移 (步数，X1+X2 双电机同步)
- * @param  dy     Y 轴相对位移 (步数，单电机)
+ * @param  dx     X 轴相对位移 (步数,X1+X2 双电机同步)
+ * @param  dy     Y 轴相对位移 (步数,单电机)
  * @param  speed  速度 (RPM)
  * @param  acc    加速度
  * @retval  0  到位
@@ -200,7 +195,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         return 0;
     }
 
-    /* 重置到位标志，供 CAN_Process_Task 更新 */
+    /* 重置到位标志,供 CAN_Process_Task 更新 */
     g_axes_done_bits = 0;
     g_axes_error = false;
 
@@ -242,7 +237,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
     return 0;}
 
 /**
- * @brief 阻塞等待指定电机进入"运行完成"状态 (0x02)      已被事件组代替，暂无用
+ * @brief 阻塞等待指定电机进入"运行完成"状态 (0x02)      已被事件组代替,暂无用
  * @param addr 电机 CAN ID
  * @param timeout_ms 超时 (ms)
  * @retval 0 成功, -1 超时
@@ -259,7 +254,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
 //                if (pkt.Status == STATUS_RUN_COMPLETE) {
 //                    return 0;   // 到位
 //                }
-//                // 其他状态 (0x05 同步接收, 0x01 开始) 忽略，继续等待
+//                // 其他状态 (0x05 同步接收, 0x01 开始) 忽略,继续等待
 //            }
 //        }
 //    }
@@ -301,7 +296,7 @@ void nozzle_off(void) {
 
 /* ---------- 封装 Z 轴基本动作 ---------- */
 
-// 阻塞式等待舵机稳定 (简单延时，MG995 大约 0.2s/60°)
+// 阻塞式等待舵机稳定 (简单延时,MG995 大约 0.2s/60°)
 static void servo_delay_ms(uint32_t ms) {
     osDelay(ms);   // FreeRTOS 下的毫秒延时
 }
@@ -347,7 +342,7 @@ int safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc
     int32_t dx = target_x - c0.x;
     int32_t dy = target_y - c0.y;
     int ret = move_xy_relative(dx, dy, speed, acc);
-    if (ret == -2) g_motor_error = true;   /* 限位/堵转，不可恢复 */
+    if (ret == -2) g_motor_error = true;   /* 限位/堵转,不可恢复 */
     return ret;
 }
 
@@ -369,7 +364,7 @@ bool pick_component(void) {
     return true;
 }
 
-/* 真空检测 — 当前无硬件，始终返回 true。接入 GPIO/ADC 后覆盖此函数 */
+/* 真空检测 - 当前无硬件,始终返回 true.接入 GPIO/ADC 后覆盖此函数 */
 __weak bool vacuum_ok(void) {
     return true;
 }
@@ -383,97 +378,191 @@ void place_component(void) {
     z_safe();
 }
 
-/**
- * @brief R 轴软件归零 — 记录编码器当前角度作为零点偏置
- */
+/* ========== R轴 时间积分开环 (TMC2209 VACTUAL 速度模式, 无编码器) ========== */
+
 void r_axis_set_zero(void) {
-    /* 等待首个有效编码器读数, 确保零点偏置基于真实角度 */
-    if (KTH7823_WaitData(100)) {
-        g_r_encoder_zero_offset = KTH7823_GetAngle();
-    }
-    /* 超时或未初始化: offset 保持 0 (编译期零初始化), 后续角度即编码器原始值 */
-    Coord_UpdateR(0.0f);
+    PrintDebug("[R] Zero set (time-integration ref)`r`n");
 }
 
-/**
- * @brief R 轴两层闭环旋转 (TMC2209 位置模式 + KTH7823 编码器验证)
- * @param angle     目标角度 (绝对角度, 0~360)
- * @param speed_rpm 保留参数，当前未使用（位置模式由硬件控制速度）
- * @return 0=成功, -1=已在阈值内无需动作, -2=硬件定位超时
- */
+float r_axis_calibrate(void) {
+    return 0.0f;
+}
+
 int r_axis_rotate(float angle, float speed_rpm) {
-    (void)speed_rpm;  /* 位置模式下不需要速度参数 */
+    int32_t target = R_DEG_TO_USTEPS(angle);
+    if (target == 0) {
+        Coord_UpdateR(angle);
+        return 0;
+    }
 
-    MachineCoord_t c0 = Coord_Get();
-    float delta = angle - c0.r;
-    if (delta < -180.0f) delta += 360.0f;
-    else if (delta > 180.0f) delta -= 360.0f;
+    int32_t max_spd = (int32_t)(speed_rpm * R_STEPS_PER_REV / 60.0f);
+    if (max_spd > R_MAX_SPEED) max_spd = R_MAX_SPEED;
+    if (max_spd < R_MIN_SPEED) max_spd = R_MIN_SPEED;
 
-    if (fabsf(delta) <= R_VERIFY_THRESHOLD) return -1;
-
-    /* 角度差 → μsteps */
-    int32_t delta_usteps = R_DEG_TO_USTEPS(delta);
-    if (delta_usteps == 0) return -1;
-
-    /* 使能 TMC2209, 配置斜坡（仅首次） */
     TMC_SetEnable(true);
     vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
-    TMC_EnsureRampConfigured();
 
-    /* ---- 第一层: TMC2209 硬件位置模式定位 ---- */
-    int32_t xactual;
-    if (TMC_ReadXActual(&xactual) != TMC_ERR_NONE) {
-        TMC_SetEnable(false);
-        return -2;
+    /* 首轮用 TMC_SetSpeed 初始化 RAMPMODE 方向 */
+    int32_t init_spd = (target >= 0) ? R_MIN_SPEED : -R_MIN_SPEED;
+    TMC_SetSpeed(init_spd);
+    vTaskDelay(pdMS_TO_TICKS(5));
+
+    int32_t  position   = 0;       /* 时间积分估算位置 (usteps) */
+    int32_t  spd_cmd    = init_spd;
+    int      stable     = 0;
+    uint32_t t_prev     = HAL_GetTick();
+    uint32_t t0         = t_prev;
+
+    while (1) {
+        vTaskDelay(pdMS_TO_TICKS(R_POLL_INTERVAL_MS));
+
+        /* ---- 积分: 上一周期速度 × 实际耗时 ---- */
+        uint32_t t_now  = HAL_GetTick();
+        int32_t  dt_ms  = (int32_t)(t_now - t_prev);
+        t_prev = t_now;
+        position += (spd_cmd * dt_ms) / 1000;
+
+        /* ---- DRV_STATUS.stst 硬件卡死判定 ---- */
+        uint32_t drv;
+        if (TMC_GetDRVStatus(&drv) == TMC_ERR_NONE) {
+            if ((drv & (1u << 31)) && spd_cmd != 0) {
+                TMC_SetSpeedDirect(0);
+                TMC_SetEnable(false);
+                PrintDebug("[R] STUCK: stst=1 while VACTUAL!=0`r`n");
+                return -2;
+            }
+        }
+
+        /* ---- SG_RESULT 堵转检测 ---- */
+        uint16_t sg;
+        if (TMC_GetSGResult(&sg) == TMC_ERR_NONE) {
+            int32_t abs_spd = (spd_cmd >= 0) ? spd_cmd : -spd_cmd;
+            if (abs_spd >= R_SG_MIN_SPEED && sg < R_SG_THRESHOLD) {
+                TMC_SetSpeedDirect(0);
+                TMC_SetEnable(false);
+                PrintDebug("[R] STALL: SG_RESULT=%u < %u`r`n",
+                           (unsigned)sg, (unsigned)R_SG_THRESHOLD);
+                return -1;
+            }
+        }
+
+        /* ---- 到位判断 ---- */
+        int32_t err = target - position;
+        int32_t abs_err = (err >= 0) ? err : -err;
+        if (abs_err < R_POS_TOLERANCE) {
+            stable++;
+            if (stable >= R_STABLE_COUNT) {
+                TMC_SetSpeedDirect(0);
+                break;
+            }
+        } else {
+            stable = 0;
+        }
+
+        /* ---- 速度计算: 比例 + 基础巡航 + 加速度限制 ---- */
+        int32_t spd = (int32_t)((float)abs_err * R_PID_KP) + R_MIN_SPEED;
+        if (spd > max_spd) spd = max_spd;
+        if (spd < R_MIN_SPEED) spd = R_MIN_SPEED;
+
+        int32_t prev_abs = (spd_cmd >= 0) ? spd_cmd : -spd_cmd;
+        if (spd > prev_abs + 1000) spd = prev_abs + 1000;
+
+        spd_cmd = (err >= 0) ? spd : -spd;
+        TMC_SetSpeedDirect(spd_cmd);
+
+        /* ---- 超时 ---- */
+        if (HAL_GetTick() - t0 > R_TIMEOUT_MS) {
+            TMC_SetSpeedDirect(0);
+            TMC_SetEnable(false);
+            PrintDebug("[R] TIMEOUT: pos=%ld target=%ld`r`n",
+                       (long)position, (long)target);
+            return -3;
+        }
     }
-    int32_t target = xactual + delta_usteps;
 
-    if (TMC_MoveToPosition(target) != 0) {
-        TMC_SetEnable(false);
-        return -2;
-    }
-
-    if (!TMC_WaitPosition(target, R_POS_TIMEOUT_MS)) {
-        TMC_SetEnable(false);
-        return -2;
-    }
-
-    /* ---- 第二层: KTH7823 编码器验证 + 微调 (最多 R_VERIFY_MAX_ITER 次) ---- */
-    for (int iter = 0; iter < R_VERIFY_MAX_ITER; iter++) {
-        if (!KTH7823_WaitData(100)) break;
-
-        float current_enc = KTH7823_GetAngle();
-
-        /* 目标编码器角度 */
-        float target_enc = angle + g_r_encoder_zero_offset;
-        while (target_enc >= 360.0f) target_enc -= 360.0f;
-        while (target_enc < 0.0f)   target_enc += 360.0f;
-
-        /* 解绕 */
-        float current_adj = current_enc;
-        float diff = target_enc - current_adj;
-        if (diff > 180.0f)       current_adj += 360.0f;
-        else if (diff < -180.0f) current_adj -= 360.0f;
-
-        float error = target_enc - current_adj;
-        if (fabsf(error) <= R_VERIFY_THRESHOLD) break;
-
-        /* 微调: 误差 → μsteps, 小步定位 */
-        int32_t fine_usteps = R_DEG_TO_USTEPS(error);
-        if (fine_usteps == 0) break;
-
-        if (TMC_ReadXActual(&xactual) != TMC_ERR_NONE) break;
-        target = xactual + fine_usteps;
-        if (TMC_MoveToPosition(target) != 0) break;
-        if (!TMC_WaitPosition(target, R_POS_TIMEOUT_MS)) break;
-    }
-
-    /* 关闭驱动 */
+    vTaskDelay(pdMS_TO_TICKS(20));
+    TMC_SetSpeedDirect(0);
     TMC_SetEnable(false);
 
     Coord_UpdateR(angle);
+    PrintDebug("[R] Done: pos=%ld steps (target=%ld)`r`n",
+               (long)position, (long)target);
     return 0;
 }
+/*  ================================================================
+ *  P2 连续扫描运动控制 - X1+X2 同步速度模式 (0xF6)
+ *  仅 X1(0x01)+X2(0x02) 同步,Y 轴侧移独立.
+ *  X2 CAN 状态不可用,全程使用时间估算代替到位信号.
+ * ================================================================ */
+
+/**
+ * @brief P2 扫描启动 - X1+X2 同步速度模式 (0xF6)
+ * @param dir   方向: 0=CCW, 1=CW (@see P2_SCAN_DIR_UP/DOWN)
+ * @param speed 速度 (RPM)
+ * @param acc   加速度
+ */
+void p2_scan_start(uint8_t dir, uint16_t speed, uint8_t acc)
+{
+    g_axes_done_bits = 0;
+    g_axes_error = false;
+    speedModeRun(X1_ADDR, dir, speed, acc);
+    osDelay(2);
+    speedModeRun(X2_ADDR, dir, speed, acc);
+    osDelay(2);
+    motorSyncTrigger(0);
+}
+
+/**
+ * @brief P2 扫描停止 - X1+X2 立即停止 (0xF7) + 同步触发
+ */
+void p2_scan_stop(void)
+{
+    axis_stop(X1_ADDR);
+    axis_stop(X2_ADDR);
+    motorSyncTrigger(0);
+    osDelay(5);
+}
+
+/**
+ * @brief P2 扫描位置估算 - 基于速度和时间的 X1/X2 轴位移
+ * @param start_x    列起点 X 坐标 (步数)
+ * @param sign       方向符号 (+1 = UP, -1 = DOWN)
+ * @param speed      速度 (RPM)
+ * @param elapsed_ms 列启动后经过的时间 (ms)
+ * @return 估算的当前 X 坐标 (步数)
+ */
+int32_t p2_scan_estimate_x(int32_t start_x, int32_t sign, uint16_t speed, uint32_t elapsed_ms)
+{
+    float steps_per_ms = (float)speed * 16384.0f / 60000.0f;
+    int32_t dx = (int32_t)((float)sign * steps_per_ms * (float)elapsed_ms);
+    return start_x + dx;
+}
+
+/**
+ * @brief P2 扫描侧移 - Y 电机相对位移 (阻塞式,时长估算到位)
+ * @param dy_steps Y 轴相对位移 (步数)
+ * @param speed    速度 (RPM)
+ * @param acc      加速度
+ */
+void p2_scan_step_y(int32_t dy_steps, uint16_t speed, uint8_t acc)
+{
+    if (dy_steps == 0) return;
+    g_axes_done_bits = 0;
+    g_axes_error = false;
+    positionMode2Run(Y_ADDR, speed, acc, dy_steps);
+    motorSyncTrigger(0);
+    {
+        float steps_per_ms = (float)speed * 16384.0f / 60000.0f;
+        uint32_t move_ms = (uint32_t)(fabsf((float)dy_steps) / steps_per_ms) + 200;
+        if (move_ms < 50)  move_ms = 50;
+        if (move_ms > 5000) move_ms = 5000;
+        osDelay(move_ms);
+    }
+    if (!g_axes_error) {
+        Coord_UpdateXY(Coord_Get().x, Coord_Get().y + dy_steps);
+    }
+}
+
 /* ---------- 任务入口 ---------- */
 void MotionTask_Func(void *argument)
 {
@@ -484,7 +573,7 @@ void MotionTask_Func(void *argument)
 
     // 电机硬件初始化 (包括设置模式、使能、同步标志、零点等)
     Motor_Init();   // 你的 Motor_Init 已经包含了同步使能(0x4A)
-    Servo_Init(&htim5);       // 舵机初始化，参数按你的实际定时器填写
+    Servo_Init(&htim5);       // 舵机初始化,参数按你的实际定时器填写
     TMC_Init();               // TMC2209 初始化
     // 可选：将开机当前位置设为工作零点
     // motorSetZero(0x01); ...
@@ -536,7 +625,7 @@ void MotionTask_Func(void *argument)
                 break;
 
             case MOTION_CMD_HOME:
-                // 回零：向坐标 0 移动，速度稍慢
+                // 回零：向坐标 0 移动,速度稍慢
                 if (move_to(0, 0, 100, 50) == 0) {
                     Coord_SetHome();
                 }
@@ -585,7 +674,7 @@ void Event_Init(void) {
 
 /**
  * @brief can处理任务函数
- * @note 从motor_event_queue 取数据并释放信号量。
+ * @note 从motor_event_queue 取数据并释放信号量.
  */
 
 void CAN_Process_Task(void *argument) {

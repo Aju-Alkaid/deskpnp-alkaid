@@ -1,4 +1,4 @@
-#include "driver_uart.h"  
+﻿#include "driver_uart.h"  
 #include "FreeRTOS.h"     
 #include "task.h"         
 #include <string.h>       // 用于 strlen
@@ -114,6 +114,56 @@ static int dbg_vformat(char* buf, int sz, const char* fmt, va_list args) {
     buf[pos] = '\0';
     return pos;
 }
+
+/* ================================================================
+ *  MSCNT 原始值采样诊断 — 定速旋转, 每 20ms 读一次 MSCNT, 运行 5s
+ *  用法: 串口发送 MSCNT_TEST<CR>
+ * ================================================================ */
+void MSCNT_Test(void) {
+    PrintDebug("[MSCNT-TEST] start: enable TMC2209, speed=5000 Hz\r\n");
+
+    TMC_SetEnable(true);
+    vTaskDelay(pdMS_TO_TICKS(TMC_ENABLE_DELAY_MS));
+
+    /* ?? 5000 Hz (?5.9 RPM): ? 20ms ? 100 ?, MSCNT ?? 0~1023 ????? */
+    TMC_SetSpeed(5000);
+    vTaskDelay(pdMS_TO_TICKS(10));
+
+    uint16_t raw, prev;
+    if (TMC_GetMSCNT(&raw) != TMC_ERR_NONE) {
+        PrintDebug("[MSCNT-TEST] ERR: first MSCNT read failed\r\n");
+        TMC_SetSpeed(0);
+        TMC_SetEnable(false);
+        return;
+    }
+    prev = raw;
+
+    uint32_t t0 = HAL_GetTick();
+    int count = 0;
+
+    while (HAL_GetTick() - t0 < 5000) {
+        vTaskDelay(pdMS_TO_TICKS(20));
+        if (TMC_GetMSCNT(&raw) != TMC_ERR_NONE) {
+            PrintDebug("[MSCNT-TEST] ERR: read failed at sample %d\r\n", count);
+            break;
+        }
+        int16_t diff = (int16_t)(raw - prev);
+        PrintDebug("[MSCNT-TEST] #%d raw=%u prev=%u diff=%d dt=%lu\r\n",
+                   count, (unsigned)raw, (unsigned)prev, (int)diff,
+                   (unsigned long)(HAL_GetTick() - t0));
+        prev = raw;
+        count++;
+    }
+
+    TMC_SetSpeed(0);
+    vTaskDelay(pdMS_TO_TICKS(50));
+    TMC_SetEnable(false);
+    PrintDebug("[MSCNT-TEST] done: %d samples in 5s\r\n", count);
+}
+
+
+
+
 
 void PrintDebug(const char* fmt, ...) {
     osMutexAcquire(g_debug_mutex, osWaitForever);

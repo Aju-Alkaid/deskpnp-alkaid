@@ -124,6 +124,12 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("SET_R_ZERO")) {
         return HCMD_SET_R_ZERO;
     }
+    if (MATCH("R_CALIB")) {
+        return HCMD_R_CALIB;
+    }
+    if (MATCH("MSCNT_TEST")) {
+        return HCMD_MSCNT_TEST;
+    }
     if (MATCH("SET_CAM_OFFSET")) {
         return HCMD_SET_CAM_OFFSET;
     }
@@ -154,7 +160,7 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("LIGHT")) {
         return HCMD_LIGHT;
     }
-    #undef MATCH#undef MATCH
+    #undef MATCH
     return HCMD_UNKNOWN;
 }
 

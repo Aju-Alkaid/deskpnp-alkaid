@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file    driver_kth7823.c
  * @brief   KTH7823 14-bit 磁编码器驱动 — TIM5 CH1 双边沿输入捕获 + 角度解算
  *
@@ -36,6 +36,10 @@ static struct {
     volatile bool     data_ready;       /* 新数据待读取 */
     bool              have_prev_rising; /* 已捕获至少一次上升沿 */
     bool              initialized;      /* HAL_TIM_IC_Start_IT 成功 */
+    /* 诊断计数器 (ISR 安全，仅递增) */
+    volatile uint32_t dbg_rising_cnt;
+    volatile uint32_t dbg_falling_cnt;
+    volatile uint32_t dbg_valid_cnt;
 } g_kth;
 
 /* ---- 内部辅助 ---- */
@@ -73,6 +77,18 @@ bool KTH7823_Init(void) {
     ccmr1 &= ~TIM_CCMR1_IC1F;
     ccmr1 |= (KTH7823_IC_FILTER << TIM_CCMR1_IC1F_Pos);
     TIM5->CCMR1 = ccmr1;
+
+    /* PB2 加内部上拉：若 KTH7823 正常输出则无影响；
+       若 KTH7823 断电/断线，上拉防止引脚浮空产生噪声边沿 */
+    {
+        GPIO_InitTypeDef pb2_cfg = {0};
+        pb2_cfg.Pin       = GPIO_PIN_2;
+        pb2_cfg.Mode      = GPIO_MODE_AF_PP;
+        pb2_cfg.Pull      = GPIO_PULLUP;
+        pb2_cfg.Speed     = GPIO_SPEED_FREQ_LOW;
+        pb2_cfg.Alternate = GPIO_AF2_TIM5;
+        HAL_GPIO_Init(GPIOB, &pb2_cfg);
+    }
 
     /* 启动 CH1 双边沿输入捕获中断 */
     if (HAL_TIM_IC_Start_IT(KTH7823_TIM, KTH7823_TIM_CHANNEL) != HAL_OK) {
@@ -138,20 +154,32 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
 
     if (HAL_GPIO_ReadPin(KTH7823_PWM_PORT, KTH7823_PWM_PIN) == GPIO_PIN_SET) {
         /* ---- 上升沿 ---- */
+        g_kth.dbg_rising_cnt++;
         g_kth.rising_ccr = ccr;
 
         if (g_kth.have_prev_rising) {
-            g_kth.period_ticks = g_kth.rising_ccr - g_kth.prev_rising_ccr;
+            /* 处理 ARR 回绕：TIM5 ARR=3399999，计数器 0→ARR 循环 */
+            if (g_kth.rising_ccr >= g_kth.prev_rising_ccr) {
+                g_kth.period_ticks = g_kth.rising_ccr - g_kth.prev_rising_ccr;
+            } else {
+                g_kth.period_ticks = (TIM5->ARR + 1) - g_kth.prev_rising_ccr + g_kth.rising_ccr;
+            }
         }
         g_kth.prev_rising_ccr = ccr;
         g_kth.have_prev_rising = true;
 
     } else {
         /* ---- 下降沿 ---- */
+        g_kth.dbg_falling_cnt++;
         if (!g_kth.have_prev_rising) return;
 
         g_kth.falling_ccr = ccr;
-        g_kth.tON_ticks   = g_kth.falling_ccr - g_kth.rising_ccr;
+        /* 处理 ARR 回绕 */
+        if (g_kth.falling_ccr >= g_kth.rising_ccr) {
+            g_kth.tON_ticks = g_kth.falling_ccr - g_kth.rising_ccr;
+        } else {
+            g_kth.tON_ticks = (TIM5->ARR + 1) - g_kth.rising_ccr + g_kth.falling_ccr;
+        }
 
         /* 有效性检查: 周期已建立 且 脉宽不超过周期 */
         if (g_kth.period_ticks > 0
@@ -159,6 +187,18 @@ void HAL_TIM_IC_CaptureCallback(TIM_HandleTypeDef *htim) {
             g_kth.angle_deg = kth_compute_angle(g_kth.tON_ticks,
                                                 g_kth.period_ticks);
             g_kth.data_ready = true;
+            g_kth.dbg_valid_cnt++;
         }
-    }
+    }  
+}
+
+
+/* ---- 诊断接口 ---- */
+void KTH7823_GetDebug(KTH7823_Debug_t *dbg) {
+    if (!dbg) return;
+    dbg->rising_count      = g_kth.dbg_rising_cnt;
+    dbg->falling_count     = g_kth.dbg_falling_cnt;
+    dbg->valid_count       = g_kth.dbg_valid_cnt;
+    dbg->last_tON_ticks    = g_kth.tON_ticks;
+    dbg->last_period_ticks = g_kth.period_ticks;
 }

@@ -1,4 +1,4 @@
-#ifndef __APP_MOTION_H
+﻿#ifndef __APP_MOTION_H
 #define __APP_MOTION_H
 
 #include "cmsis_os2.h"
@@ -81,6 +81,7 @@ bool pick_component(void);
 void place_component(void);
 bool vacuum_ok(void);  /* __weak stub, override with GPIO/ADC */
 void r_axis_set_zero(void);
+float r_axis_calibrate(void);
 int  r_axis_rotate(float angle, float speed_rpm);
 int  safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc);
 void move_set_pad_ms(uint32_t pad_ms);
@@ -99,6 +100,13 @@ extern volatile MotorError_t g_motor_error_detail;
 void axis_stop(int32_t addr);
 void disable_sync_stop(void);
 int  move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc);
+
+/* ---- P2 连续扫描运动控制 ---- */
+void p2_scan_start(uint8_t dir, uint16_t speed, uint8_t acc);
+void p2_scan_stop(void);
+int32_t p2_scan_estimate_x(int32_t start_x, int32_t sign, uint16_t speed, uint32_t elapsed_ms);
+void p2_scan_step_y(int32_t dy_steps, uint16_t speed, uint8_t acc);
+
 extern volatile bool s_cmd_interrupted;
 
 #endif

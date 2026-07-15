@@ -11,7 +11,6 @@
 #include "driver_servo.h"
 #include "driver_drv8803.h"
 #include "driver_tmc2209.h"
-#include "driver_kth7823.h"
 #include "driver_heater.h"
 #include "app_logger.h"
 #include "driver_spiflash_w25q64.h"
@@ -37,9 +36,17 @@ extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 #define PUMP_BLOW_MS    1000          /* 关气泵后电磁阀吹气时长(ms) */
 
 #define MARK_VERIFY_ERR_MM  0.3f   /* Mark3 验证允许误差 (mm) */
-#define P2_SCAN_STEP_MM      5.0f   /* P2 网格扫描步长 (mm) */
-#define P2_SCAN_TIMEOUT       300   /* 每格位超时 (~3s, 主循环10ms/轮) */
+#define P2_SCAN_STEP_MM      5.0f   /* P2 横向步进宽度 (mm) */
+#define P2_SCAN_SPEED        40     /* P2 连续扫描速度 (RPM), Cam 需要低速识别 */
+#define P2_SCAN_ACC          15     /* P2 连续扫描加速度 */
+#define P2_SCAN_TIMEOUT       300   /* P2 非扫描模式超时 (~3s, 对齐/跳转等待) */
+#define P2_SCAN_COL_PAD_MS   500    /* 每列额外延时 (ms), 补偿加减速段 */
+#define P2_SCAN_POS_UPDATE_MS 100   /* 位置估算 Coord 更新间隔 (ms) */
 #define P2_MAX_ALIGN_ITER       5   /* P2 对齐迭代上限，防死循环 */
+
+/* speedModeRun 方向位: 0=CCW→电机x增大(上), 1=CW→电机x减小(下). 方向反了就交换 */
+#define P2_SCAN_DIR_UP        1
+#define P2_SCAN_DIR_DOWN      0
 #define Z_SERVO_CH       2            /* 舵机通道号 */
 
 /* ================================================================
@@ -80,10 +87,8 @@ static uint32_t g_error_start_tick = 0;  /* ERROR 30s 超时计时器 */
 static HostCmd_t    g_last_cmd = HCMD_NONE;
 static float        g_last_param = 0.0f;
 
-
 /* 行解析器 */
 static LineParser_t g_parser;
-
 
 /* Mark 对齐累计偏移 */
 static int32_t g_mark_offsets[P2_MARK_COUNT][2];  /* 3个Mark的(dx, dy) mm*10000 */
@@ -109,13 +114,21 @@ static int32_t g_p3_offset_y = 0;
 
 /* P2 引导式扫描状态 */
 static bool    g_mark_scanning = false;
-static int32_t g_scan_cols = 0, g_scan_rows = 0;
-static int32_t g_scan_cur  = 0;
+static int32_t g_scan_cols = 0;          /* 扫描总列数 (cols) */
+static int32_t g_scan_rows = 0;          /* (保留兼容: rows) */
+static int32_t g_scan_cur  = 0;          /* (保留兼容: VISION_ERROR 回退用) */
 static uint32_t g_busy_enter_tick = 0;
 static bool     g_in_busy = false;
 static bool    g_mark_just_jumped = false;  /* 防止 Mark 跳转后冗余二次跳转 */
 static int     g_p2_pos_iter = 0;           /* P2 对齐迭代计数，防死循环 */
 
+/* P2 连续扫描状态 */
+static bool     g_p2_scanning = false;      /* 是否正在连续扫描 */
+static int32_t  g_p2_col = 0;               /* 当前列号 (0..g_scan_cols-1) */
+static int32_t  g_p2_col_start_x = 0;       /* 当前列起点 X1 电机坐标 (步数) */
+static uint32_t g_p2_col_start_tick = 0;    /* 当前列开始时刻 (tick) */
+static uint32_t g_p2_col_time_ticks = 0;    /* 当前列预估总时长 (tick) */
+static uint32_t g_p2_last_pos_update = 0;   /* 上次位置估算更新时刻 (tick) */
 
 /* 散料区子扫描位: [cell][subpos][x/y] */
 int32_t g_scatter_subpos[SCATTER_CELLS][SCATTER_SUBPOS][2];
@@ -134,7 +147,6 @@ static void host_send(const char *msg) {
 }
 
 /* ---- CSV 解析（v2：制表符分隔、15 固定列、引号包裹、mm 后缀）---- */
-
 
 /* ================================================================
  *  散料区单元格 + 子扫描位预计算
@@ -166,7 +178,6 @@ void scatter_init_cells(void) {
     }
     PrintDebug("[HOST] Scatter cells: size=%ld, subpos computed.\r\n", (long)size);
 }
-
 
 /* 封装名->P1类别ID映射 (0=ccapt 1=cledy 2=cledo 3=crest) */
 static int footprint_to_class_id(const char *fp) {
@@ -351,14 +362,18 @@ static void download_done(void) {
             g_scan_cur    = 0;
             g_in_busy = false;
             g_mark_scanning = true;
+            g_p2_scanning = true;
+            g_p2_col = 0;
+            g_p2_last_pos_update = 0;
             /* 初始定位：阻塞式移动到扫描起点 (同 StartCamTestTask) */
             safe_move_to(g_calib.heat_platform_x_min + g_calib.cam_to_nozzle_dx_steps,
                          g_calib.heat_platform_y_min + g_calib.cam_to_nozzle_dy_steps,
                          PNP_SPEED, PNP_ACC);
-            PrintDebug("[HOST] P2 scan: %ldx%ld grid, step=%ld steps\r\n",
-                       (long)g_scan_cols, (long)g_scan_rows, (long)scan_step);
+            PrintDebug("[HOST] P2 scan: %ld cols, step=%ld steps, speed=%dRPM\r\n",
+                       (long)g_scan_cols, (long)scan_step, P2_SCAN_SPEED);
         } else {
             g_mark_scanning = false;
+            g_p2_scanning = false;
             PrintDebug("[HOST] PCB area uncalibrated, single-spot P2.\r\n");
         }
 
@@ -428,6 +443,9 @@ static bool handle_calib_cmd(HostParsed_t *cmd) {
         r_axis_set_zero();
         PrintDebug("[HOST] SET_R_ZERO: R axis zeroed\r\n");
         return true;
+    case HCMD_R_CALIB:
+        { float a = r_axis_calibrate(); if (a > 0) PrintDebug("[HOST] R_CALIB done: A=%.2f\r\n", (double)a); }
+        return true;
     case HCMD_SET_CAM_OFFSET:
         if (!g_cam_ref_valid) {
             g_cam_ref_x = Coord_Get().x;
@@ -484,7 +502,6 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
     g_last_cmd  = cmd->cmd;
     g_last_param = cmd->param;
     g_during_cmd = true;
-
 
     if (handle_calib_cmd(cmd)) { g_during_cmd = false; return; }
 
@@ -618,6 +635,11 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
             r_axis_rotate(angle, R_SPEED_RPM);
             PrintDebug("[HOST] SET_R_AXIS %.1f deg\r\n", angle);
         }
+        break;
+
+    case HCMD_MSCNT_TEST:
+        MSCNT_Test();
+        PrintDebug("[HOST] MSCNT test done\r\n");
         break;
 
     case HCMD_PUMP_ON:
@@ -764,64 +786,106 @@ static void mark_align_step(void) {
         Vision_Go();
         break;
 
-    /* ---- 网格扫描 / 跳转搜索超时 ---- */
+    /* ---- 连续扫描 / 跳转搜索状态机 ---- */
     case VISION_BUSY:
         if (!g_in_busy) {
             g_in_busy = true;
             g_busy_enter_tick = osKernelGetTickCount();
+
+            if (g_p2_scanning) {
+                /* 新列启动: X1+X2 速度模式连续扫描 */
+                g_p2_col_start_x = Coord_Get().x;
+                g_p2_col_start_tick = osKernelGetTickCount();
+                g_p2_last_pos_update = g_p2_col_start_tick;
+
+                uint8_t dir = (g_p2_col & 1) ? P2_SCAN_DIR_DOWN : P2_SCAN_DIR_UP;
+                p2_scan_start(dir, P2_SCAN_SPEED, P2_SCAN_ACC);
+
+                /* 预计算列时间: col_h / speed, tick≈ms */
+                int32_t col_h = g_calib.heat_platform_x_max - g_calib.heat_platform_x_min;
+                if (col_h < 0) col_h = -col_h;
+                float spms = (float)P2_SCAN_SPEED * 16384.0f / 60000.0f;
+                g_p2_col_time_ticks = (uint32_t)((float)col_h / spms) + pdMS_TO_TICKS(P2_SCAN_COL_PAD_MS);
+
+                PrintDebug("[HOST] P2 scan col %ld/%ld dir=%d est=%ldms\r\n",
+                           (long)g_p2_col, (long)g_scan_cols, (int)dir,
+                           (long)(g_p2_col_time_ticks));
+            }
         }
-        if ((osKernelGetTickCount() - g_busy_enter_tick) < pdMS_TO_TICKS(P2_SCAN_TIMEOUT * 10)) break;
-        g_in_busy = false;
-        if (g_mark_scanning) {
-            /* 网格扫描超时：移到下一格 */
-            g_scan_cur++;
-            if (g_scan_cur >= g_scan_cols * g_scan_rows) {
-                PrintDebug("[HOST] P2 scan exhausted (%ld cells), Mark0 not found.\r\n",
-                           (long)(g_scan_cols * g_scan_rows));
-                g_mark_scanning = false;
-                Vision_ForceIdle();
-                g_state = HOST_ERROR;
-                break;
-            }
-            /* 竖向蛇形扫描: row慢(左右步进) col快(上下扫描) */
-            int32_t row = g_scan_cur / g_scan_cols;
-            int32_t col = g_scan_cur % g_scan_cols;
-            int32_t step = (int32_t)(P2_SCAN_STEP_MM * STEPS_PER_MM);
-            int32_t x_dir = (g_calib.heat_platform_x_max >= g_calib.heat_platform_x_min) ? 1 : -1;
-            int32_t y_dir = (g_calib.heat_platform_y_max >= g_calib.heat_platform_y_min) ? 1 : -1;
-            int32_t tx, ty;
-            if (row & 1) {
-                tx = g_calib.heat_platform_x_max - x_dir * col * step;
-            } else {
-                tx = g_calib.heat_platform_x_min + x_dir * col * step;
-            }
-            ty = g_calib.heat_platform_y_min + y_dir * row * step;
-            safe_move_to(tx + g_calib.cam_to_nozzle_dx_steps,
-                         ty + g_calib.cam_to_nozzle_dy_steps,
-                         PNP_SPEED, PNP_ACC);
-            PrintDebug("[HOST] P2 scan [%ld,%ld] \u2192 (%ld,%ld)\r\n",
-                       (long)row, (long)col, (long)tx, (long)ty);
-        } else {
-            /* Mark已锁定(aligning/pos-detect)超时: 重置超时继续等Cam */
+
+        if (!g_p2_scanning) {
+            if ((osKernelGetTickCount() - g_busy_enter_tick) < pdMS_TO_TICKS(P2_SCAN_TIMEOUT * 10)) break;
+            g_in_busy = false;
             g_busy_enter_tick = osKernelGetTickCount();
+            break;
+        }
+
+        {
+            uint32_t now = osKernelGetTickCount();
+            uint32_t elapsed = now - g_p2_col_start_tick;
+
+            if ((now - g_p2_last_pos_update) >= pdMS_TO_TICKS(P2_SCAN_POS_UPDATE_MS)) {
+                g_p2_last_pos_update = now;
+                int32_t sign = ((g_p2_col & 1) ? P2_SCAN_DIR_DOWN : P2_SCAN_DIR_UP) == P2_SCAN_DIR_UP ? 1 : -1;
+                int32_t est_x = p2_scan_estimate_x(g_p2_col_start_x, sign, P2_SCAN_SPEED, elapsed);
+                Coord_UpdateXY(est_x, Coord_Get().y);
+            }
+
+            if (elapsed >= g_p2_col_time_ticks) {
+                p2_scan_stop();
+                {
+                    int32_t sign = ((g_p2_col & 1) ? P2_SCAN_DIR_DOWN : P2_SCAN_DIR_UP) == P2_SCAN_DIR_UP ? 1 : -1;
+                    int32_t est_x = p2_scan_estimate_x(g_p2_col_start_x, sign, P2_SCAN_SPEED, elapsed);
+                    Coord_UpdateXY(est_x, Coord_Get().y);
+                }
+
+                g_p2_col++;
+                if (g_p2_col >= g_scan_cols) {
+                    PrintDebug("[HOST] P2 scan exhausted (%ld cols), Mark0 not found.\r\n",
+                               (long)g_scan_cols);
+                    g_p2_scanning = false;
+                    g_mark_scanning = false;
+                    Vision_ForceIdle();
+                    g_state = HOST_ERROR;
+                    break;
+                }
+
+                {
+                    int32_t y_dir_sign = (g_calib.heat_platform_y_max >= g_calib.heat_platform_y_min) ? 1 : -1;
+                    int32_t step = (int32_t)(P2_SCAN_STEP_MM * STEPS_PER_MM);
+                    p2_scan_step_y(y_dir_sign * step, PNP_SPEED, PNP_ACC);
+                }
+                g_in_busy = false;
+                PrintDebug("[HOST] P2 scan col %ld done, stepping to col %ld\r\n",
+                           (long)(g_p2_col - 1), (long)g_p2_col);
+            }
         }
         break;
 
-    /* ---- 收到 stp: Mark 锁定 ---- */
     case VISION_GOT_STOP:
-        g_mark_scanning = false;   /* 停止网格扫描 */
+        if (g_p2_scanning) {
+            p2_scan_stop();
+            g_p2_scanning = false;
+            {
+                uint32_t elapsed = osKernelGetTickCount() - g_p2_col_start_tick;
+                int32_t sign = ((g_p2_col & 1) ? P2_SCAN_DIR_DOWN : P2_SCAN_DIR_UP) == P2_SCAN_DIR_UP ? 1 : -1;
+                int32_t est_x = p2_scan_estimate_x(g_p2_col_start_x, sign, P2_SCAN_SPEED, elapsed);
+                Coord_UpdateXY(est_x, Coord_Get().y);
+                PrintDebug("[HOST] P2 stop col %ld est_x=%ld(tick=%ld)\r\n",
+                           (long)g_p2_col, (long)est_x, (long)elapsed);
+            }
+        }
+        g_mark_scanning = false;
         g_in_busy = false;
-        g_p2_pos_iter = 0;         /* 新 Mark 开始，重置迭代计数 */
+        g_p2_pos_iter = 0;
         {
             int32_t idx = r->mark_index;
             if (idx >= 1 && idx < P2_MARK_COUNT && !g_mark_just_jumped) {
-                /* 首次 GOT_STOP (上一 Mark 完成): 跳转到预估位置 */
                 float tdx = g_marks[idx].target_x - g_marks[idx-1].target_x;
                 float tdy = g_marks[idx].target_y - g_marks[idx-1].target_y;
-                int32_t dx = (int32_t)(tdy * STEPS_PER_MM);  // target_y → X1+X2 电机（物理 Y 轴）
-                int32_t dy = -(int32_t)(tdx * STEPS_PER_MM); // target_x → Y 电机（物理 X 轴）
+                int32_t dx = (int32_t)(tdy * STEPS_PER_MM);
+                int32_t dy = -(int32_t)(tdx * STEPS_PER_MM);
                 int32_t prev = idx - 1;
-                /* g_marks_actual为真实机器坐标, safe_move_to移吸嘴, 吸嘴=摄像头+cam, 故加cam_offset */
                 safe_move_to(g_marks_actual[prev][0] + dx + g_calib.cam_to_nozzle_dx_steps,
                              g_marks_actual[prev][1] + dy + g_calib.cam_to_nozzle_dy_steps,
                              PNP_SPEED, PNP_ACC);
@@ -829,11 +893,9 @@ static void mark_align_step(void) {
                 PrintDebug("[HOST] P2 jump Mark%ld: theory(%.1f,%.1f)mm → (%ld,%ld)\r\n",
                            (long)idx, tdx, tdy, (long)Coord_Get().x, (long)Coord_Get().y);
             }
-            /* Mark0 或二次 GOT_STOP (相机已找到): 龙门已在目标位，无需移动 */
         }
         Vision_Go();
         break;
-
     /* ---- 收到偏移 → 移动并对齐 (保持不变) ---- */
     case VISION_GOT_POS: {
         g_mark_scanning = false;       /* 收到 pos 数据，停止网格扫描 */
@@ -873,6 +935,7 @@ static void mark_align_step(void) {
     /* ---- 建系 (保持不变) ---- */
     case VISION_DONE: {
         g_mark_scanning = false;
+        g_p2_scanning = false;
         if (g_mark_count < P2_MARK_COUNT) {
             PrintDebug("[HOST] P2: only %u marks (need %d), aborting.\r\n", g_mark_count, P2_MARK_COUNT);
             Vision_SendEnd();
@@ -948,18 +1011,39 @@ static void mark_align_step(void) {
 
     case VISION_ERROR:
         PrintDebug("[HOST] Mark alignment ERROR: %s\r\n", Vision_GetError());
-        if (g_scan_cur < g_scan_cols * g_scan_rows - 1) {
+        if (g_p2_scanning) {
+            p2_scan_stop();
+            g_p2_col++;
+            if (g_p2_col >= g_scan_cols) {
+                g_p2_scanning = false;
+                g_mark_scanning = false;
+                Vision_SendEnd();
+                Vision_ForceIdle();
+                g_state = HOST_ERROR;
+                break;
+            }
+            {
+                int32_t y_dir_sign = (g_calib.heat_platform_y_max >= g_calib.heat_platform_y_min) ? 1 : -1;
+                int32_t step = (int32_t)(P2_SCAN_STEP_MM * STEPS_PER_MM);
+                int32_t base_y = g_calib.heat_platform_y_min;
+                int32_t target_y = base_y + y_dir_sign * g_p2_col * step;
+                safe_move_to(g_calib.heat_platform_x_min + g_calib.cam_to_nozzle_dx_steps,
+                             target_y + g_calib.cam_to_nozzle_dy_steps,
+                             PNP_SPEED, PNP_ACC);
+            }
             g_mark_scanning = true;
+            g_p2_scanning = true;
             Vision_BackToSearch();
-            PrintDebug("[HOST] P2 error, resuming scan from cell %ld\r\n", (long)g_scan_cur);
+            g_in_busy = false;
+            PrintDebug("[HOST] P2 error, resuming scan from col %ld\r\n", (long)g_p2_col);
         } else {
             g_mark_scanning = false;
+            g_p2_scanning = false;
             Vision_SendEnd();
             Vision_ForceIdle();
             g_state = HOST_ERROR;
         }
         break;
-
     default:
         break;
     }
@@ -969,7 +1053,7 @@ static void mark_align_step(void) {
 bool host_correct_r_from_vision(const VisionResult_t *r, const char *stage) {
     if (!r || !r->angle_valid) return false;
     float ang = (float)r->angle_x100 / 100.0f;
-    if (fabsf(ang) <= R_CLOSED_THRESHOLD) return false;
+    if (fabsf(ang) <= R_CORRECTION_THRESHOLD_DEG) return false;
     r_axis_set_zero();
     PrintDebug("[HOST] %s: R correction %.2f deg\r\n", stage, (double)ang);
     r_axis_rotate(ang, R_SPEED_RPM);
@@ -1058,7 +1142,6 @@ static void find_comp_step(void) {
         g_state = HOST_PICK;
         break;
     }
-
 
     case VISION_ERROR: {
         const char *err = Vision_GetError();
@@ -1158,7 +1241,6 @@ static void offset_check_step(void) {
         g_state = HOST_MOVE_TO_PCB;
         break;
     }
-
 
     case VISION_ERROR: {
         const char *err = Vision_GetError();
@@ -1337,7 +1419,6 @@ void Host_UartRecvCallback(uint8_t *data, int len) {
      * 避免 ISR 中 FPU 浮点运算及 g_parser 竞态。 */
 }
 
-
 /* ================================================================
  *  Host_Task — 统一主任务
  * ================================================================ */
@@ -1390,15 +1471,7 @@ void Host_Task(void *argument) {
     }
     /* ENN 低有效：LOW=开启，HIGH=关闭。初始化完成后关闭，用到时再开 */
     TMC_SetEnable(false);
-    
-        /* KTH7823 磁编码器初始化 (R轴闭环反馈) */
-    if (!KTH7823_Init()) {
-        PrintDebug("[HOST] KTH7823 encoder init FAILED!\r\n");
-    } else {
-        PrintDebug("[HOST] KTH7823 encoder init done\r\n");
-    }
 
-    
     Log_Init();
 
     /* 从 Flash 加载标定值 */
