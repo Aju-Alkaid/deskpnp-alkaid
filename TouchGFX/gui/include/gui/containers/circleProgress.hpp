@@ -9,7 +9,8 @@ class circleProgress : public circleProgressBase
 public:
     circleProgress();
     virtual ~circleProgress() {}
-    virtual void Data_Refresh();    // 刷新圆形进度框的数据
+    virtual void Data_Refresh();                    // 刷新圆形进度框的数据（从全局变量读取，向后兼容）
+    void Data_RefreshParams(uint8_t cur, uint8_t total, uint8_t is_smt);  // 参数化刷新（推荐使用）
 
     virtual void initialize();
 protected:

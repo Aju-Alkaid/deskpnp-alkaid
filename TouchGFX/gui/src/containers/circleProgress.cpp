@@ -23,18 +23,23 @@ void circleProgress::initialize()
 
 void circleProgress::Data_Refresh()
 {
-    // 更新进度文本: now_SMT / total_SMT
-    touchgfx::Unicode::snprintf(wildcard1Buffer, TEXT_PROGRESS_SIZE, "%u", now_SMT);
-    touchgfx::Unicode::snprintf(wildcard2Buffer, TEXT_PROGRESS_SIZE, "%u", total_SMT);
+    /* 向后兼容：从全局变量读取。新代码应优先使用 Data_RefreshParams() */
+    Data_RefreshParams(now_SMT, total_SMT, if_now_SMT);
+}
+
+void circleProgress::Data_RefreshParams(uint8_t cur, uint8_t total, uint8_t is_smt)
+{
+    touchgfx::Unicode::snprintf(wildcard1Buffer, TEXT_PROGRESS_SIZE, "%u", cur);
+    touchgfx::Unicode::snprintf(wildcard2Buffer, TEXT_PROGRESS_SIZE, "%u", total);
     textProgress1.invalidate();
 
-    if (if_now_SMT == 1) {
+    if (is_smt == 1) {
         Working.setVisible(true);
         Working.invalidate();
         Waiting.setVisible(false);
         Waiting.invalidate();
-        circleProgress1.setRange(0, total_SMT > 0 ? total_SMT : 1);
-        circleProgress1.setValue(now_SMT);
+        circleProgress1.setRange(0, total > 0 ? total : 1);
+        circleProgress1.setValue(cur);
     } else {
         Working.setVisible(false);
         Working.invalidate();

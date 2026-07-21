@@ -29,6 +29,7 @@ typedef enum {
     VCMD_P1,             
     VCMD_P2,             
     VCMD_P3,             
+    VCMD_P4,             /* P4: 下相机圆形标定对位（吸嘴中心） */
 } VisionCmd_t;
 
 /* P1 component class mapping (MaixCAM YOLO model_284490) */
@@ -82,6 +83,7 @@ void CamUart_RecvCallback(uint8_t *data, int len);
 
 /* Timeout protection (30s default) */
 bool Vision_IsTimedOut(void);
+void Vision_ResetTimeout(void);
 void Vision_ForceIdle(void);
 void Vision_SendEnd(void);
 

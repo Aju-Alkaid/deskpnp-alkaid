@@ -35,9 +35,8 @@ void Screen_HOMEView::handleTickEvent()
 
 void Screen_HOMEView::handleSMTProgress(uint8_t current, uint8_t total)
 {
-    (void)current;
-    (void)total;
-    Progress1.Data_Refresh();
+    /* 使用参数化刷新，不再依赖全局变量 */
+    Progress1.Data_RefreshParams(current, total, 1);
 }
 
 
@@ -71,15 +70,18 @@ void Screen_HOMEView::handleFreshEvent()
 
 void Screen_HOMEView::handleTemp(uint16_t temp)
 {
-    touchgfx::Unicode::snprintf(wildcard1Buffer, sizeof(wildcard1Buffer)/sizeof(wildcard1Buffer[0]), "%u", temp);
+    /* temp 单位为 0.1°C，格式化为 xx.x °C */
+    uint16_t int_part = temp / 10;
+    uint8_t  dec_part = temp % 10;
+    touchgfx::Unicode::snprintf(wildcard1Buffer, sizeof(wildcard1Buffer)/sizeof(wildcard1Buffer[0]), "%u.%u", int_part, dec_part);
     temperature.invalidate();
 }
 
 void Screen_HOMEView::handleSMTStatus(uint8_t is_smt)
 {
     if (!is_smt) {
-        // 璐寸墖缁撴潫锛氳繘搴﹀綊闆?
-        Progress1.Data_Refresh();
+        /* 贴片结束：进度归零 */
+        Progress1.Data_RefreshParams(0, 0, 0);
     }
 }
 

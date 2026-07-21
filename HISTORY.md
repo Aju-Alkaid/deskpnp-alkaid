@@ -2913,7 +2913,9 @@ KTH7823 PWM (910Hz, 14-bit)
 | Core/Src/stm32g4xx_it.c | 新增 TIM5_IRQHandler → HAL_TIM_IRQHandler(&htim5) |
 | Drivers/ZeMCU-G4/driver_drv8803.c | Port_24VO4: num_pins=2→1, 移除 PB2 PWM 引脚引用 |
 | Task/app_config.h | 新增 R_CLOSED_KP/KI/KD/MAX_SPEED/THRESHOLD/TIMEOUT/KICK_MS/LOOP_MS |
-| Task/app_motion.c | _axis_rotate() 改为闭环 PID (static 复用); _axis_set_zero() 加 KTH7823_WaitData; 新增 #include "driver_kth7823.h" + "pid.h"; g_r_encoder_zero_offset |
+| Task/app_motion.c | 
+_axis_rotate() 改为闭环 PID (static 复用); 
+_axis_set_zero() 加 KTH7823_WaitData; 新增 #include "driver_kth7823.h" + "pid.h"; g_r_encoder_zero_offset |
 | Task/app_host.c | 新增 #include "driver_kth7823.h"; KTH7823_Init() 调用 + 错误检查; host_correct_r_from_vision 中 R_CORRECTION_THRESHOLD_DEG → R_CLOSED_THRESHOLD |
 
 **闭环 PID 参数（app_config.h）：**
@@ -2934,7 +2936,8 @@ KTH7823 PWM (910Hz, 14-bit)
 **第一轮（初始实现 → 用户自审）：**
 - CubeMX 硬件配置完成：TIM5 PSC=0, IC 配置, IRQ 使能
 - Port_24VO4 释放 PB2
-- 缺失：驱动层 driver_kth7823.c/h、闭环 _axis_rotate()、PID 参数
+- 缺失：驱动层 driver_kth7823.c/h、闭环 
+_axis_rotate()、PID 参数
 
 **第二轮（实现 + 首轮审计 → 8 项修复）：**
 
@@ -2943,7 +2946,8 @@ KTH7823 PWM (910Hz, 14-bit)
 | 1 | P1 | memset((void*)&g_kth...) 强转丢弃 volatile | 移除 memset，依赖 static 编译期零初始化 + 显式复位关键字段 |
 | 2 | P1 | GetAngle() 先清 data_ready 再读 ngle_deg | 先快照值再清标志 |
 | 3 | P1 | ICFilter=0 无硬件毛刺抑制 | KTH7823_Init 中写 CCMR1 设 IC1F=8 (~47ns) |
-| 4 | P1 | _axis_set_zero 无编码器数据等待 | 新增 KTH7823_WaitData(timeout_ms) |
+| 4 | P1 | 
+_axis_set_zero 无编码器数据等待 | 新增 KTH7823_WaitData(timeout_ms) |
 | 5 | P2 | 硬编码 GPIO_PIN_2 / GPIOB | 新增 KTH7823_PWM_PORT / KTH7823_PWM_PIN 宏 |
 | 6 | P2 | PID 首拍 D-term 尖峰 (MeasurementPrev=0) | 首次读数调用 PID_Compute 初始化历史 (丢弃输出) |
 | 7 | P2 | host_correct_r_from_vision 阈值不一致 | 统一为 R_CLOSED_THRESHOLD |
@@ -2956,18 +2960,21 @@ KTH7823 PWM (910Hz, 14-bit)
 | 1 | P0 | PID_Init 每次调用 osMutexNew → FreeRTOS 堆泄漏 | 改为 static PID_Controller_t r_pid，仅首次 PID_Init，后续 PID_Reset + PID_SetParams 复用 |
 | 2 | P2 | R_CLOSED_KICK_MS / R_CLOSED_LOOP_MS 定义在 app_motion.c | 移到 pp_config.h 集中管理 |
 | 3 | P3 | KTH7823_Init() 返回 void，失败无感知 | 改为返回 ool，pp_host.c 检查并打印 FAILED |
-| 4 | P1 | _axis_set_zero 忽略 KTH7823_WaitData 返回值 | 检查返回值，超时时 offset 保持 0 + 注释说明 |
+| 4 | P1 | 
+_axis_set_zero 忽略 KTH7823_WaitData 返回值 | 检查返回值，超时时 offset 保持 0 + 注释说明 |
 
 **第四轮（最终审计 → 2 项）：**
 
 | # | 严重度 | 问题 | 修复 |
 |---|--------|------|------|
-| 1 | Bug | _axis_set_zero 仍忽略 WaitData 返回值 (第三轮修复未正确处理) | 重新修复：if (KTH7823_WaitData(100)) { ... } |
+| 1 | Bug | 
+_axis_set_zero 仍忽略 WaitData 返回值 (第三轮修复未正确处理) | 重新修复：if (KTH7823_WaitData(100)) { ... } |
 | 2 | Style | 多余空行 | 清理 |
 
 ### 39.7 关键技术决策
 
-1. **static PID 复用：** _axis_rotate 内使用 static PID_Controller_t r_pid，首次调用 PID_Init 创建 mutex，后续调用 PID_Reset + 参数更新复用同一实例。避免每次旋转分配/泄漏 FreeRTOS mutex 对象。
+1. **static PID 复用：** 
+_axis_rotate 内使用 static PID_Controller_t r_pid，首次调用 PID_Init 创建 mutex，后续调用 PID_Reset + 参数更新复用同一实例。避免每次旋转分配/泄漏 FreeRTOS mutex 对象。
 
 2. **角度解绕 (unwrap)：** PID 工作在连续空间。编码器角度 (0~360°) 被"解绕"到 setpoint ±180° 范围后再送入 PID，避免 359°→1° 跨越被误认为 358° 误差。
 
@@ -2980,9 +2987,11 @@ KTH7823 PWM (910Hz, 14-bit)
 ### 39.8 已知限制
 
 - PID 参数为理论值，需实机整定（通过阶跃响应调整 KP/KI/KD）
-- _axis_rotate 返回值 (-1=跳过, -2=超时) 在 Host_Task 调用点未检查，与原开环行为一致
+- 
+_axis_rotate 返回值 (-1=跳过, -2=超时) 在 Host_Task 调用点未检查，与原开环行为一致
 - R_CORRECTION_THRESHOLD_DEG (0.1°) 在 pp_config.h 仍定义但已无引用，被 R_CLOSED_THRESHOLD (0.2°) 替代
-- 编码器断线时 _axis_set_zero offset=0，后续角度即编码器原始值（非静默错误，行为可预测）
+- 编码器断线时 
+_axis_set_zero offset=0，后续角度即编码器原始值（非静默错误，行为可预测）
 
 
 ---
@@ -3256,3 +3265,204 @@ safe_move_to(scatter):  dx = scatter_target - Coord.x
 - MKS 速度模式不更新内部位置计数器，绝对移动(HOME/send_axis_abs)可能不准。PnP 自动流程全用相对移动(safe_move_to → positionMode2Run)不受影响。
 - overshoot 回退用位置模式相对移动。正常 overshoot 仅 5-9 步(≈0.01mm)，上限 3mm 防编码器异常。
 - P2_ENC_RATIO 依赖机械参数固定，更换电机/驱动器后需重新 CALIB_ENC 标定。
+
+## 四十二、2026-07-18 会话 — R 轴性能优化与阻塞回归
+
+### 42.1 背景
+
+R 轴自 commit 15b19ae 改为非阻塞状态机（`r_axis_start` + `r_axis_poll` + `r_axis_state`）
+后存在两个问题：（1）旋转速度慢，500ms 死等待过长；
+（2）到位精度差，物理旋转量仅 ~50% 命令值。
+
+### 42.2 探索过程
+
+| 阶段 | 尝试方案 | 结果 |
+|------|----------|------|
+| 1 | PID 参数提速：Kp=15, R_MIN_SPEED=300, 去 osDelay(500)→10 | 电机只能发出白噪音不转 — stst 误判卡死 |
+| 2 | 起步冲量 2000→5000 Hz + stst 去抖 5 次 + 加速限制 5000 | 能转但角度只有命令的 ~50% |
+| 3 | 真实 dt_ms 时间积分（替代固定 8ms） | 积分准确了, 电机物理位置仍不准 |
+| 4 | TMC2209 硬件位置模式（RAMPMODE=0, XTARGET） | XACTUAL 始终为 0, 电机不动 |
+| 5 | XACTUAL 做位置反馈 + VACTUAL 调速（混合模式） | XACTUAL 读取静默失败, 电机无限旋转 |
+| 6 | MSCNT 10-bit 溢出追踪做位置反馈 | MSCNT 读取同样静默失败, 电机无限旋转 |
+| 7 | MSCNT 优先 + 时间积分 dt 兜底 | 仍然无限旋转 — 兜底也没生效 |
+
+**根本原因：** TMC2209 单线 UART 在主循环交织环境下连续读写不可靠。
+MSCNT/XACTUAL/DRV_STATUS 读取随机静默失败，位置永远不更新，
+PID 保持极速输出。
+
+### 42.3 最终方案：阻塞式 r_axis_rotate 回归
+
+回到 commit 427759a 验证过的阻塞实现。`r_axis_rotate` 独占 CPU
+执行 `while(1)` + `vTaskDelay(8ms)` 的 PID 循环，UART 读写不被打断。
+
+非阻塞 API 保留为兼容层：
+- `r_axis_start(angle, speed)` → 内部调 `r_axis_rotate(angle, R_SPEED_RPM)`，阻塞返回
+- `r_axis_poll()` → 空函数
+- `r_axis_state()` → 始终返回 `R_DONE`
+- `host_start_r_correction()` → 调 `r_axis_rotate`，返回 `false`（调用方无需 phase 等待）
+
+### 42.4 性能优化
+
+| 参数 | 旧值 | 新值 | 说明 |
+|------|------|------|------|
+| `R_MAX_SPEED` | 20000 Hz (23 RPM) | 50000 Hz (58 RPM) | 极速 2.5x |
+| `R_MIN_SPEED` | 200 Hz (0.23 RPM) | 1000 Hz (1.2 RPM) | 消除末端微步蠕动 |
+| `R_POS_TOLERANCE` | 5 步 (0.035°) | 150 步 (~1°) | 容差放宽到 1~2° |
+| `R_STABLE_COUNT` | 3 | 2 | 减少确认等待 |
+| 加速限制 | 1000 Hz/周期 | 3000 Hz/周期 | 3x 提速 |
+| 末端提前退出 | 无 | err<300 步 + 最低速 → 强制 DONE | 消除秒级蠕动 |
+| 旋转后延迟 | vTaskDelay(20ms) | 移除 | 立即失能 |
+
+### 42.5 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_motion.c` | 恢复 commit 427759a 的 `r_axis_rotate`；添加非阻塞兼容层 wrapper；末端提前退出；移除 20ms 延迟 |
+| `Task/app_motion.h` | 添加 `R_State_t` 枚举 + `r_axis_start`/`r_axis_poll`/`r_axis_state`/`r_axis_rotate` 声明 |
+| `Task/app_config.h` | R_MAX_SPEED→50000, R_MIN_SPEED→1000, R_POS_TOLERANCE→150, R_STABLE_COUNT→2 |
+| `Task/app_host.c` | `r_axis_poll()` 从主循环移除；`host_start_r_correction` 改为调 `r_axis_rotate` 返回 false；osDelay(500)→10 |
+
+### 42.6 已知限制
+
+- 旋转期间 Host_Task 阻塞（90° ≈ 0.5s, 360° ≈ 2s），上位机命令暂不响应
+- CAN 中断和 FreeRTOS 其他任务（TouchGFX, CAN_Process_Task）不受影响
+- 容差 1~2° 对贴片角度可接受，需批量验证
+- 时间积分精度依赖 TMC2209 内部振荡器（典型 ±5~10%）
+
+---
+
+## 四十三、2026-07-18 会话 — P2 31H 编码器响应解码修复
+
+### 43.1 背景
+
+P2 建系完成后机器坐标整体偏移约 7.5mm（约为 Mark 间距的一半），导致散料区等绝对坐标定位不准。31H 之前 P2 正常，加入 31H 编码器定位后出现此问题。
+
+### 43.2 根因分析
+
+**直接原因：** `p2_stop_and_read_pos()` 中的 31H 编码器读取始终失败（100ms 超时），回退到 `p2_scan_estimate_x()` 估算。估算使用速度模式脉冲常数 `16384`（实际应为 `32768`），导致估算位移约为实际位移的 1/2。Coord 被设为错误估算值，而电机停在物理正确位置，Coord 与电机物理位置之间产生不可消除的偏差。
+
+**偏差传播链：** 偏差产生后，pos-detect 对齐使用相对移动（电机从物理位置移动到正确中心位置）但 Coord 基于错误估算做绝对更新，偏差无法消除 → `g_marks_actual` 全部偏移 → PCB Frame 内部一致（Mark3 verify ~0.1mm）但全局偏移 → 散料区 `safe_move_to()` 使用 Coord 算相对位移，偏差暴露。
+
+**根本原因：** `CAN_Process_Task` 仅处理 0xF4/0xF5（位置模式完成/错误），未处理 0x31 编码器响应。MKS 电机正确返回了 31H 编码器数据，但响应在 `CAN_Process_Task` 中被丢弃。`g_enc_ready[id]` 和 `g_enc_pos[id]` 在整个项目中没有任何写入路径。
+
+### 43.3 MKS 31H 响应格式
+
+| 字节 | 内容 |
+|------|------|
+| Data[0] | 功能码 0x31 |
+| Data[1] | 编码器值 byte 5 (MSB) |
+| Data[2] | 编码器值 byte 4 |
+| Data[3] | 编码器值 byte 3 |
+| Data[4] | 编码器值 byte 2 |
+| Data[5] | 编码器值 byte 1 |
+| Data[6] | 编码器值 byte 0 (LSB) |
+| Data[7] | CRC（校验和） |
+
+48-bit 有符号大端编码器值。固件取 Data[3..6] 低 32 位组装 `int32_t`（实际值远小于 2^32）。
+
+### 43.4 修复
+
+**修复 1：`CAN_Process_Task` 增加 0x31 解码分支**（`Task/app_motion.c`）
+
+在 CAN_Process_Task 主循环中，0xF4/0xF5 错误处理分支后增加解码逻辑：
+取 Data[3..6] 低 32 位 big-endian 组装为 int32_t，存入 g_enc_pos[pkt.ID] 并置 g_enc_ready[pkt.ID] = true。
+
+**修复 2：速度模式脉冲常数 16384→32768**（三处）
+
+| 位置 | 文件 | 函数/用途 |
+|------|------|----------|
+| p2_scan_estimate_x() | app_motion.c:555 | 扫描位置估算 |
+| p2_scan_step_y() | app_motion.c:574 | Y轴步进延时（位置模式，仅影响padding） |
+| 列超时计算 | app_host.c:861 | 列超时 tick 计算 |
+
+### 43.5 关键经验
+
+- 速度模式(0xF6)电机实际位移对应 32768 脉冲/转，位置模式(0xF4/0xF5)为 16384（`MKS_PULSES_PER_REV`）。两者相差 2 倍。
+- 31H 响应需要 CAN_Process_Task 显式解码后设置 `g_enc_ready`/`g_enc_pos`，否则所有轮询等待均 100ms 超时。
+- 当 Coord 与电机物理位置不一致时，`safe_move_to()` 的相对移动正确（电机从物理位置移动），但 Coord 绝对更新基于错误基准，偏差持续存在且无法通过后续 pos-detect 消除。
+
+### 43.6 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_motion.c` | CAN_Process_Task 新增 0x31 解码分支；p2_scan_estimate_x()/p2_scan_step_y() 速度常数 16384→32768 |
+| `Task/app_host.c` | 列超时计算速度常数 16384→32768 |
+| `AGENTS.md` | §4.2 更新 31H 响应格式+处理器文档 + 速度常数说明；§10.2 新增 0x31 指令 |
+| `HISTORY.md` | §43 新增本记录 |
+
+---
+
+## 四十四、2026-07-18 会话 — P4 下相机基线/校验流程
+
+### 44.1 背景
+
+P2 建系过程中电机停止仍存在 1~2mm 残余误差。该误差不影响 PCB 建系内部一致性（Mark3 verify 仍可通过），但会使机器内部坐标系与真实物理坐标系之间产生平移偏移，导致散料区、下相机站位等 flash 标定坐标定位不准。
+
+为在软件层面补偿该误差，引入 P4 流程：用下相机对吸嘴中心做两次圆形标定，一次在 P2 建系前（基线），一次在 P2 建系后（校验）。两次测量得到的坐标差即为 P2 引入的整体漂移，随后做整体平移补偿。
+
+### 44.2 新流程
+
+```
+下载 CSV 完成
+  → HOST_P4_BASELINE（P4 基线校验）
+  → HOST_MARK_ALIGN（P2 建系）
+  → HOST_P4_VERIFY（P4 漂移校验）
+  → 补偿整体漂移
+  → HOST_FIND_COMP（P1 找元件）→ HOST_PICK → ...
+```
+
+| 阶段 | 状态 | 行为 |
+|------|------|------|
+| 基线 | `HOST_P4_BASELINE` | 移动到下相机站位，启动 P4 迭代对准吸嘴中心，记录 `g_p4_base_x/y` |
+| 建系 | `HOST_MARK_ALIGN` | 原 P2 流程，建系结果写入 `g_pcb_frame` |
+| 校验 | `HOST_P4_VERIFY` | 再次移动到下相机站位，P4 迭代对准，计算 `e = coord - base` |
+| 补偿 | — | `Coord_UpdateXY` + 修正 `g_pcb_frame.origin` / `g_mark_avg_dx/dy` |
+| 贴装 | `HOST_FIND_COMP`... | 原 P1/P3 循环 |
+
+### 44.3 P4 协议（MaixCAM → G4）
+
+| 帧 | 方向 | 说明 |
+|----|------|------|
+| `p4` | Host → Cam | 启动下相机圆形标定对位 |
+| `pos` | Cam → Host | 未对准，后跟 `N:{dx} N:{dy}`（已是电机步数） |
+| `go` | Host → Cam | Host 按偏差移动补偿后通知相机复测 |
+| `ok` | Cam → Host | `|dx|<5px 且 |dy|<5px`，对准完成 |
+| `err4_4` | Cam → Host | 5 轮未对准 |
+| `err4_5` | Cam → Host | 等 `go` 超时 30s |
+
+### 44.4 补偿算法
+
+```
+e_x = Coord_Get().x - g_p4_base_x
+e_y = Coord_Get().y - g_p4_base_y
+
+Coord_UpdateXY(Coord_Get().x - e_x, Coord_Get().y - e_y)   // 机器坐标回归真实
+g_pcb_frame.origin_x_steps -= e_x                          // PCB 坐标系同步平移
+g_pcb_frame.origin_y_steps -= e_y
+g_mark_avg_dy -= e_x                                        // 降级路径同步平移
+g_mark_avg_dx -= e_y
+```
+
+PCB 贴装坐标在补偿前后保持物理正确；散料区、下相机站位等 flash 标定坐标恢复正确。
+
+### 44.5 错误处理
+
+- P4 基线/校验阶段 `Vision_IsTimedOut()` 或 `err4_x` → 进入 `HOST_ERROR`，等待 `RESUME`/`ABORT`。
+- 基线阶段本身只记录坐标，不判定“偏差是否过大”；偏差大小在校验阶段统一处理。
+
+### 44.6 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_vision.h` | 新增 `VCMD_P4` |
+| `Task/app_vision.c` | 新增 P4 子状态、帧解析 `process_p4_frame`、启动/Go 分支 |
+| `Task/app_host.h` | 新增 `HOST_P4_BASELINE`、`HOST_P4_VERIFY` |
+| `Task/app_host.c` | `download_done` 后进入 P4 基线；P2 完成后进入 P4 校验；新增 `start_p2_mark_align`、`start_p1_find_first`、`p4_baseline_step`、`p4_verify_step`；主循环 switch 增加两个状态 |
+| `AGENTS.md` | §4.2 新增 P4 协议；§五任务架构状态表新增两态；§六数据流更新 |
+| `HISTORY.md` | 新增 §44 本记录 |
+
+### 44.7 已知限制
+
+- P4 补偿假设 P2 引入的误差是**纯平移**，不补偿旋转或缩放误差。
+- 补偿值仅在 P2 建系后应用一次，后续贴装循环中不再重新测量。
+- P4 本身依赖下相机检测吸嘴圆，吸嘴必须位于相机视野内且 Z 高度与标定条件一致。

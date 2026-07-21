@@ -163,6 +163,9 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("CALIB_ENC")) {
         return HCMD_CALIB_ENC;
     }
+    if (MATCH("SCREEN_TEST")) {
+        return HCMD_SCREEN_TEST;
+    }
     #undef MATCH
     return HCMD_UNKNOWN;
 }

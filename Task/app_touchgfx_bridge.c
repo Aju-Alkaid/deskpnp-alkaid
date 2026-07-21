@@ -4,6 +4,7 @@
 #include "driver_heater.h"
 #include "app_motion.h"
 #include "app_config.h"
+#include "app_esp_task.h"
 #include "driver_motor.h"
 #include <string.h>
 
@@ -56,19 +57,25 @@ void Bridge_NotifyTemp(int16_t temp_0_1c)
 /* ======================== 贴片状态通知 ======================== */
 void Bridge_NotifySMTStatus(uint8_t is_smt)
 {
+    extern uint8_t if_now_SMT;
     if (is_smt == s_last_smt_status) return;
     s_last_smt_status = is_smt;
     DT_NotifySMTStatus(is_smt);
+    if_now_SMT = is_smt;  /* 同步全局变量供 circleProgress 读取 */
 }
 
 /* ======================== 贴片进度通知 ======================== */
 void Bridge_NotifySMTProgress(uint8_t current, uint8_t total)
 {
+    extern uint8_t total_SMT;
+    extern uint8_t now_SMT;
     /* 去重：进度值未变化不重复发送，降低队列冲刷风险 */
     if (current == s_last_progress_cur && total == s_last_progress_total) return;
     s_last_progress_cur   = current;
     s_last_progress_total = total;
     DT_NotifySMTProgress(current, total);
+    total_SMT = total;
+    now_SMT   = current;  /* 同步全局变量供 circleProgress 读取 */
 }
 
 /* ======================== 下载状态通知 ======================== */
@@ -189,4 +196,16 @@ void Bridge_SystemReset(void)
 {
     /* 各外设由各自任务管理，这里直接触发系统复位 */
     NVIC_SystemReset();
+}
+
+/* ---- WiFi 开关控制 ---- */
+/* status: 0=关闭, 1=开启。通过 ESP32 SPI 发送 WiFi 开关命令 */
+void Bridge_WifiCtrl(uint8_t status)
+{
+    if (status) {
+        ESP_SendCommand(ESP_CMD_WIFI_ON);
+    } else {
+        ESP_SendCommand(ESP_CMD_WIFI_OFF);
+    }
+    Bridge_NotifyWifiStatus(status);
 }

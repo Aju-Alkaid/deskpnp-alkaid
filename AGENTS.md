@@ -230,7 +230,11 @@ pnp_1/
   - **错误：** `err2_1`（空闲超时）、`err2_3`（pos_detect 未检测到 Mark）、`err2_4`（对准迭代超 7 次）
   - **P2 退出必须发送 `end` 帧：** P2 完成或异常退出后，必须通过 `Vision_SendEnd()` 发送 `end` 帧通知摄像头终止 P2 会话。Host_Task 的 `mark_align_step` 和 `app_test.c` 的 `cam_p2_full_test_run` 在所有 P2 退出路径均已添加此调用。
 
-- **P2 编码器定位（2026-07-16 更新）：** 扫描停止后通过 31H CAN 指令读取 MKS 电机编码器真值，替代旧的时间估算方式。`p2_stop_and_read_pos()` 流程：收到 stp → 立即读编码器(enc_detect) → 停止电机 → 读编码器(enc_stop) → 计算 overshoot → 位置模式回退(上限3mm) → 返回修正坐标。编码器→步数转换使用 `P2_ENC2STEP(x) = x * P2_ENC_RATIO_NUM / P2_ENC_RATIO_DEN`，默认 `10000/10004`（通过 `CALIB_ENC` 命令标定）。
+- **P2 编码器定位（2026-07-18 更新）：** 扫描停止后通过 31H CAN 指令读取 MKS 电机编码器真值，替代旧的时间估算方式。`p2_stop_and_read_pos()` 流程：收到 stp → 立即读编码器(enc_detect) → 停止电机 → 读编码器(enc_stop) → 计算 overshoot → 位置模式回退(上限3mm) → 返回修正坐标。编码器→步数转换使用 `P2_ENC2STEP(x) = x * P2_ENC_RATIO_NUM / P2_ENC_RATIO_DEN`，默认 `10000/10004`（通过 `CALIB_ENC` 命令标定）。
+
+  **31H 响应格式（MKS SERVO42D）：** 8 字节 CAN 帧：Data[0]=0x31, Data[1..6]=48-bit 编码器值(大端, byte5 MSB→byte0 LSB), Data[7]=CRC。实际值远小于 2^32，固件取 Data[3..6] 低 32 位组装 `int32_t`。`CAN_Process_Task` 中 0x31 分支解码后存入 `g_enc_pos[id]` 并置 `g_enc_ready[id]=true`，调用方轮询该标志（100ms 超时）。
+
+  **速度模式脉冲常数：** 速度模式(0xF6)下电机实际位移对应 `32768` 脉冲/转，位置模式(0xF4/0xF5)为 `16384`（`MKS_PULSES_PER_REV`）。`p2_scan_estimate_x()` 和列超时计算估算的是速度模式位移，使用 32768；`p2_scan_step_y()` 使用位置模式但常数仅影响延时 padding（+200ms 余量足够），也统一为 32768。
 
 - **P3 — 下相机单次检测对位（下摄像头 640×480，YOLO model_286344，2026-07-11 升级为单次检测）：**
 
@@ -255,13 +259,41 @@ pnp_1/
   | P1 | `pos` N:dx N:dy N:ao N:cls `end` | 4 | **电机步数** | 47.077 |
   | P2 | `pos` N:dx N:dy `end` | 2 | **电机步数** | 48.5 |
   | P3 | `pos` N:dx N:dy N:ao `end` | 3 | **电机步数** | 13.5554 |
+  | P4 | `pos` N:dx N:dy `end` | 2 | **电机步数** | 下相机标定，无固定增益 |
 
   > **重要变更（2026-07-11）：** CAM 端已将像素值预乘增益，输出的 N: 值**直接是电机步数**。
   > G4 固件端**不再做任何缩放**，仅进行轴映射（cam X→Y电机取反，cam Y→X1+X2）。
   > P1/P3 改为**单次检测**，Phase1 直接返回全部数据（含角度），不再有 Phase2 迭代对齐。
   > 角度符号：P1 `-angle*100`（取反），P3 `angle*100`（不取反）。
+  > P4 为**迭代对准**，用于建系前后的吸嘴中心基线/漂移校验。
   > 详细协议参见上位机文档 `E:/聊天记录/通讯接口文档 (1).md`。
 - **固件侧实现：**- **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
+
+**P4 — 下相机圆形标定对位（吸嘴中心）**
+
+**功能：** 下相机检测吸嘴圆（面积 1500-1900 px²，448×448），迭代对准吸嘴中心，用于 P2 建系前后的坐标基线/漂移校验。
+
+| 步骤 | 方向 | 帧 | 说明 |
+|------|------|-----|------|
+| 1 | Host→Cam | `p4` | 启动 P4 |
+| — | Cam | 初始化：打开下相机 448×448 | |
+| 2 | Cam→Host | `ok` | 对准完成（dx、dy 均小于 5px） |
+| — | Cam→Host | `pos` | 未对准：后跟 `N:{dx} N:{dy}`（已是电机步数） |
+| — | Cam→Host | `end` | 位置数据结束 |
+| 3 | Host→Cam | `go` | 主机按偏差移动补偿后确认 |
+| — | — | — | 最多 5 轮（`p4_max_iter=5`） |
+| — | Cam→Host | `err4_4` | 5 轮未对准 |
+| — | Cam→Host | `err4_5` | 等 `go` 超时 30s |
+
+**数据包格式：** `pos` `N:{dx}` `N:{dy}` `end`（dx/dy 已是电机步数，2 字段）。
+
+**关键参数：** `p4_cam_width=448`, `p4_cam_height=448`, `p4_circle_area_min=1500`, `p4_circle_area_max=1900`, `p4_align_threshold=5`, `p4_max_iter=5`, `p4_detect_frames=8`, `p4_stability_dist=25`。
+
+**错误码：** `err4_4`（5 轮未对准）、`err4_5`（等 `go` 超时 30s）。
+
+**轴映射：** P4 使用与 P3 相同的下相机，偏移补偿沿用 P3 约定：
+- `machine_x += +r->dy`（cam Y → X1+X2，不取反）
+- `machine_y += -r->dx`（cam X → Y 电机，取反）
 
 ### 4.2.1 物理轴约定（设计坐标 → 电机坐标映射）
 
@@ -290,22 +322,27 @@ pnp_1/
 | P2 偏移修正 | `-(r->dy)` | `-(r->dx)` |
 | P1 偏移修正 | `-(r->dy)` | `-(r->dx)` |
 | P3 偏移修正 | `+(r->dy)` 不取反 | `-(r->dx)` |
+| P4 偏移修正 | `+(r->dy)` 不取反 | `-(r->dx)` |
 
 > **2026-07-11 更新：** CAM 端已预乘增益（P1=47.077, P2=48.5, P3=13.5554），G4 端直接使用 r->dx/r->dy 值，不再乘 scale。上表已移除 `* scale`。
 
-> P3 的 dx 不取反是因为下相机图像左右镜像（相机朝上拍摄），X 轴自然反转。
+> P3/P4 的 dx 不取反是因为下相机图像左右镜像（相机朝上拍摄），X 轴自然反转。
 
 
 ### 4.2.2 R轴定位 (TMC2209 时间积分开环)
 
-> R轴自 2026-07-15 起放弃 KTH7823 编码器闭环（偏心问题无法解决），改为 TMC2209
-> VACTUAL 速度模式下的时间积分开环定位。位置通过 `spd_cmd × dt` 累积估计，
-> 不再读取 MSCNT 或编码器。DRV_STATUS.stst 硬件卡死检测 + SG_RESULT 堵转检测
-> 作为安全网（SG_RESULT 当前 R_SG_THRESHOLD=0 已禁用）。
+> R 轴自 2026-07-15 起放弃 KTH7823 编码器闭环（偏心问题无法解决）。
+> 2026-07-18 经 MSCNT/XACTUAL 位置反馈探索后，最终回归 `r_axis_rotate` 阻塞式实现
+> （commit 427759a 验证过的方案），内部使用时间积分开环 + PID 速度闭环。
+> 非阻塞 API (`r_axis_start`/`r_axis_poll`/`r_axis_state`) 保留为兼容层，
+> 内部封装为阻塞调用。DRV_STATUS.stst 硬件卡死检测作为安全网
+> （SG_RESULT 当前 R_SG_THRESHOLD=0 已禁用）。
 >
-> **关键常量 (app_config.h):** `R_PID_KP=4.0f`, `R_MIN_SPEED=200`, `R_MAX_SPEED=20000`,
-> `R_POLL_INTERVAL_MS=8`, `R_POS_TOLERANCE=5`, `R_SPEED_RPM=60`。
-> 加速度限制 1000 Hz/周期 (≈15ms)，0→20000Hz 约 300ms。
+> **关键常量 (app_config.h):** `R_PID_KP=4.0f`, `R_MIN_SPEED=1000`, `R_MAX_SPEED=50000`,
+> `R_POLL_INTERVAL_MS=8`, `R_POS_TOLERANCE=150` (~1°), `R_SPEED_RPM=60`,
+> `R_STABLE_COUNT=2`。加速度限制 3000 Hz/周期。
+> 末端低速提前退出：|error|<300 步且速度=R_MIN_SPEED 时强制停机，避免微步蠕动。
+> 误差目标：1~2°。
 >
 > **诊断命令:** 串口发送 `MSCNT_TEST` 启动 5 秒 MSCNT 原始值采样测试
 > (TMC2209 定速 5000Hz, 每 20ms 读一次, 用于验证 MSCNT 寄存器行为)。
@@ -415,7 +452,7 @@ pnp_1/
 
 | 任务 | 栈大小 | 优先级 | 功能 |
 |------|--------|--------|------|
-| `Host_Task` | 1024 | Normal | ★ 主任务：上位机通信 + 调试命令 + CSV解析 + 视觉协调 + PnP流程 |
+| `Host_Task` | 1024 | Normal | ★ 主任务：上位机通信 + 调试命令 + CSV解析 + 视觉协调 + P4基线/P2建系/P4校验 + PnP流程 |
 | `CAN_Process_Task` | 512 | Normal | 从 motor_event_queue 取 CAN 报文，更新 g_axes_done_bits / g_axes_error 全局标志 |
 | `vMotorTestTask` | 1024 | Normal | MKS 电机测试任务（已注释） |
 | `TouchGFX_Task` | 8192 | Normal | GUI 图形界面渲染 + VSYNC + 按键处理 |
@@ -441,6 +478,10 @@ pnp_1/
 - `heater_rx_queue` (10深度) — CAN ISR → Heater_ProcessStatus()，加热台状态帧专用队列
 - `g_coord_mutex` (互斥锁) — Coord_Get/Update/Invalidate 内部，保护 MachineCoord_t 读写
 
+**Host_Task 新增 P4 状态：**
+- `HOST_P4_BASELINE` — 下载 CSV 后，先移动吸嘴至下相机(P4)记录基线坐标。
+- `HOST_P4_VERIFY` — P2 建系后，再次移动吸嘴至下相机(P4)检测校验；若坐标相对基线有偏差，则整体平移补偿机器坐标系与 PCB 坐标系。
+
 ## 六、关键数据流
 
 ```
@@ -459,11 +500,15 @@ pnp_1/
                                              │
                                              └── 500ms超时 → download_done()
                                                    │
-                                                   ├─ g_mark_count>0 → P2建系（连续速度扫描）
-                                                   │    mark_align_step() → Vision_Start(VCMD_P2)
+                                                   ├─ g_mark_count>0 → HOST_P4_BASELINE
+                                                   │    → 移动吸嘴至下相机(P4)记录基线坐标
+                                                   │    → mark_align_step() → Vision_Start(VCMD_P2)
                                                    │    → speedModeRun(X1+X2, 蛇形逐列连续) + 位置时间估算
                                                    │    → Cam搜到stp → 立即停电机 → P2对齐迭代 → 建系
                                                    │    → g_mark_avg_dx/dy (Mark平均偏移)
+                                                   │    → HOST_P4_VERIFY
+                                                   │    → 再次移动吸嘴至下相机(P4)检测校验
+                                                   │    → 如有偏差 → 整体平移补偿(Coord_UpdateXY/g_pcb_frame.origin/g_mark_avg_dx/dy)
                                                    │
                                                    └─ g_comp_count>0 → 逐个贴装循环
                                                         HOST_FIND_COMP          → P1找元件(含类别询问)
@@ -524,8 +569,8 @@ pnp_1/
 
 6. **KTH7823 磁编码器偏心问题 (2026-07-15):** 编码器的正弦偏心误差无法通过
    软件校准彻底消除。经 MSCNT 探索和验证后，R 轴最终采用 TMC2209 时间积分
-   开环方案。精度依赖 VACTUAL 速度准确性（典型 <2% 误差），对 R 轴贴装角度
-   要求足够。`driver_kth7823.c/h` 文件保留但未编译引用。
+   开环方案（阻塞式 `r_axis_rotate`，非阻塞兼容层保留）。精度依赖 VACTUAL
+   速度准确性，容差约 1~2°。`driver_kth7823.c/h` 文件保留但未编译引用。
 ### 9.3 功能性问题（部分已解决）
 5. **离散移动命令去重 BUG（已修复）：** `handle_debug_cmd` 的去重逻辑原先对所有命令生效，导致同方向同步长的离散移动（MOVE_UP/DOWN/LEFT/RIGHT）只能执行一次。已收窄为仅对 JOG START 命令去重。
 5. **正式运动任务（已解决，见 §9.8）：** `PnP_Motion_Task` 已由 `Host_Task` 取代，`Host_Task` 统一处理调试命令和 PnP 流程。
@@ -576,7 +621,7 @@ pnp_1/
 周而复始。单列耗时 ≈ col_h / (speed*PULSES_PER_REV/60000) + PAD ≈ 4.7s。
 ```
 
-**Cam 检测到 Mark 时（2026-07-16 更新）：** `VISION_GOT_STOP` → `p2_stop_and_read_pos()` 读31H编码器真值 → overshoot回退(上限3mm) → `Coord_UpdateXY` → `Vision_Go()` → 进入对齐迭代。编码器→步数使用 `P2_ENC2STEP` 宏，比值 `P2_ENC_RATIO_NUM/P2_ENC_RATIO_DEN = 10000/10004`（CALIB_ENC 标定）。
+**Cam 检测到 Mark 时（2026-07-18 更新）：** `VISION_GOT_STOP` → `p2_stop_and_read_pos()` 读31H编码器真值 → overshoot回退(上限3mm) → `Coord_UpdateXY` → `Vision_Go()` → 进入对齐迭代。编码器→步数使用 `P2_ENC2STEP` 宏，比值 `P2_ENC_RATIO_NUM/P2_ENC_RATIO_DEN = 10000/10004`（CALIB_ENC 标定）。
 
 **位置精度：** 31H 编码器定位精度取决于 `P2_ENC_RATIO` 标定精度。当前 10000/10004 误差 <0.04%。P2 对齐迭代进一步精修残留偏差。
 
@@ -922,24 +967,24 @@ P1 检测角度 → 吸取 → [矫正1: r_axis_rotate(p1_angle)] → 移至下�
 - 矫正 2（P3 后）：下相机验证矫正结果。若仍有残余偏角（机械公差、吸取偏移导致），执行二次精修。
 - 两次矫正使用相同的阈值 `R_CORRECTION_THRESHOLD_DEG`（0.1°）和转速 `R_SPEED_RPM`（60 RPM）。
 
-#### host_correct_r_from_vision 辅助函数
+#### host_start_r_correction 辅助函数
 
 Host_Task 中提取了公共辅助函数（[app_host.c](E:/Desktop/qiansai/pnp_1/Task/app_host.c:782)），消除 find_comp_step 和 offset_check_step 中的重复代码：
 
 ```c
-static bool host_correct_r_from_vision(const VisionResult_t *r, const char *stage) {
+static bool host_start_r_correction(const VisionResult_t *r, const char *stage) {
     if (!r || !r->angle_valid) return false;          // 空指针 + 有效性守卫
     float ang = (float)r->angle_x100 / 100.0f;
     if (fabsf(ang) <= R_CORRECTION_THRESHOLD_DEG) return false;  // 低于阈值跳过
     PrintDebug("[HOST] %s: R correction %.2f deg\r\n", stage, (double)ang);
-    r_axis_rotate(ang, R_SPEED_RPM);
-    return true;
+    r_axis_rotate(ang, R_SPEED_RPM);  /* 阻塞执行, 旋转在 return 前已完成 */
+    return false;                   /* false: 调用方无需 phase 等待 */
 }
 ```
 
 调用点：
-- pick_step pick_component() 成功后 → host_correct_r_from_vision(Vision_GetResult(), "P1") → HOST_MOVE_TO_BOTTOM_CAM (P1 矫正已从 VISION_DONE 移至吸取后)
-- `offset_check_step` VISION_DONE → `host_correct_r_from_vision(r, "P3")` → HOST_MOVE_TO_PCB
+- pick_step pick_component() 成功后 → host_start_r_correction(Vision_GetResult(), "P1") → HOST_MOVE_TO_BOTTOM_CAM (P1 矫正已从 VISION_DONE 移至吸取后)
+- `offset_check_step` VISION_DONE → `host_start_r_correction(r, "P3")` → HOST_MOVE_TO_PCB
 
 #### Host_Task 坐标映射修正
 
@@ -972,7 +1017,7 @@ static bool host_correct_r_from_vision(const VisionResult_t *r, const char *stag
 |------|------|
 | `app_config.h` | 新增 `R_CORRECTION_THRESHOLD_DEG`；移入 `R_SPEED_RPM` |
 | `app_host.h` | 移除 `R_SPEED_RPM`（已迁至 app_config.h） |
-| `app_host.c` | 新增 `host_correct_r_from_vision` 辅助函数；find_comp_step/offset_check_step VISION_DONE 调用辅助函数；find_comp_step/mark_align_step/offset_check_step VISION_GOT_POS 坐标映射修正 |
+| `app_host.c` | 新增 `host_start_r_correction` 辅助函数；find_comp_step/offset_check_step VISION_DONE 调用辅助函数；find_comp_step/mark_align_step/offset_check_step VISION_GOT_POS 坐标映射修正 |
 | `app_test.c` | StartCamTestTask 初始化流程对齐；P1/P2/P3 测试流程激活；R 轴两步矫正逻辑；硬编码 0.1f/60.0f 替换为命名常量；cam_test_run 移动调用改为 safe_move_to |
 
 
@@ -1104,7 +1149,7 @@ PID 循环 (5ms 周期): 读编码器角度 → 解绕到 target±180° → PID 
 | Drivers/ZeMCU-G4/driver_drv8803.c | Port_24VO4 移除 PB2, num_pins=1 |
 | Task/app_config.h | 新增 8 个 R_CLOSED_* PID 参数常量 |
 | Task/app_motion.c | _axis_rotate() 闭环 PID; _axis_set_zero() 编码器零点 |
-| Task/app_host.c | KTH7823_Init() 调用 + 错误检查; host_correct_r_from_vision 阈值统一 |
+| Task/app_host.c | KTH7823_Init() 调用 + 错误检查; host_start_r_correction 阈值统一 |
 
 **已知限制：**
 - PID 参数 (KP=2.5, KI=0.05, KD=0.3) 为理论值，需实机整定
@@ -1160,6 +1205,7 @@ PID 循环 (5ms 周期): 读编码器角度 → 解绕到 target±180° → PID 
 | 0x95 | 到位阈值设置 | 4 字节 |
 | 0x83 | 设置工作电流 | 3 字节 |
 | 0x84 | 设置工作细分 | 2 字节 |
+| 0x31 | 读取实时位置(编码器) | 1 字节 |
 | 0x32 | 读取实时转速 | 2 字节 |
 | 0x3F | 恢复出厂参数 | 2 字节 |
 | 0x3D | 解除堵转保护 | 1 字节 |

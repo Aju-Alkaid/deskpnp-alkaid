@@ -1,4 +1,4 @@
-﻿#include "app_vision.h"
+#include "app_vision.h"
 #include "app_host.h"
 #include "app_test.h"
 #include "driver_uart.h"
@@ -55,6 +55,13 @@ typedef enum {
 } P3_State_t;
 
 /* ================================================================
+ *  Process4 内部子状态
+ * ================================================================ */
+typedef enum {
+    P4_WAITING,          /* 等待 Cam 对位结果 */
+} P4_State_t;
+
+/* ================================================================
  *  全局状态
  * ================================================================ */
 
@@ -79,6 +86,11 @@ static int           g_p2_mark_idx  = 0;    /* 当前 Mark 序号 (0-based) */
 /* ---- Process3 子状态 ---- */
 static P3_State_t    g_p3_sub       = P3_PHASE1;
 static int           g_p3_retry_cnt = 0;
+
+/* ---- Process4 子状态 ---- */
+static P4_State_t    g_p4_sub       = P4_WAITING;
+static int           g_p4_iter      = 0;  /* P4 对位迭代计数 */
+
 static int           g_p2_iter      = 0;  /* P2 aligning 迭代计数 */
 
 /* ---- 字段收集状态 ---- */
@@ -159,6 +171,8 @@ static void reset_all(void) {
     g_p2_mark_idx  = 0;
     g_p3_sub       = P3_PHASE1;
     g_p3_retry_cnt = 0;
+    g_p4_sub       = P4_WAITING;
+    g_p4_iter      = 0;
     g_p2_iter      = 0;
     g_p2_total_rx  = 0;
     g_p2_stp_ignored = 0;
@@ -428,6 +442,68 @@ static void process_p3_frame(const char *str) {
 }
 
 /* ================================================================
+ *  Process4 帧分发 (ISR 上下文)
+ *
+ *  P4 下相机圆形标定对位（吸嘴中心）：
+ *  - 对准前回 "pos N:{dx} N:{dy} end"（2 字段，已是电机步数）
+ *  - 对准后回 "ok"
+ *  - 5 轮未对准回 "err4_4"；等 go 超 30s 回 "err4_5"
+ * ================================================================ */
+static void process_p4_frame(const char *str) {
+    /* ---- 错误帧处理 ---- */
+    if (str[0] == 'e' && str[1] == 'r' && str[2] == 'r') {
+        g_collecting = false;
+        g_state = VISION_ERROR;
+        save_error(str);
+        return;
+    }
+
+    /* ---- "ok" -> 对位完成 ---- */
+    if (str[0] == 'o' && str[1] == 'k' && str[2] == '\0') {
+        g_collecting = false;
+        g_state = VISION_DONE;
+        PrintDebug("[VISION] P4 align done (iter %d)\r\n", g_p4_iter);
+        return;
+    }
+
+    /* ---- "pos" (2 fields: dx,dy) ---- */
+    if (str[0] == 'p' && str[1] == 'o' && str[2] == 's' && str[3] == '\0') {
+        if (g_p4_sub == P4_WAITING)
+            collect_begin(2, false);   /* dx, dy */
+        return;
+    }
+
+    /* ---- "end" -> 收集完成，转入 VISION_GOT_POS 供 Host 移动补偿 ---- */
+    if (str[0] == 'e' && str[1] == 'n' && str[2] == 'd' && str[3] == '\0') {
+        if (!g_collecting) return;
+        g_collecting = false;
+        if (g_p4_sub == P4_WAITING) {
+            g_result.dx         = g_tmp_dx;
+            g_result.dy         = g_tmp_dy;
+            g_result.angle_x100 = 0;
+            g_result.angle_valid = false;
+            g_result.class_id   = -1;
+            g_result.class_name[0] = '\0';
+            g_state = VISION_GOT_POS;
+        }
+        return;
+    }
+
+    /* ---- 收集模式 (0=dx, 1=dy) ---- */
+    if (g_collecting) {
+        int32_t val;
+        if (parse_number_frame(str, &val)) {
+            switch (g_collect_cnt) {
+            case 0: g_tmp_dx = val; break;
+            case 1: g_tmp_dy = val; break;
+            default: break;
+            }
+        }
+        g_collect_cnt++;
+    }
+}
+
+/* ================================================================
  *  Frame dispatch: handles both P0 handshake and active processes
  * ================================================================ */
 static void process_frame(const char *str) {
@@ -448,6 +524,7 @@ static void process_frame(const char *str) {
     case VCMD_P1: process_p1_frame(str); break;
     case VCMD_P2: process_p2_frame(str); break;
     case VCMD_P3: process_p3_frame(str); break;
+    case VCMD_P4: process_p4_frame(str); break;
     default: break;
     }
 }
@@ -564,6 +641,14 @@ void Vision_Start(VisionCmd_t cmd, int class_id) {
         PrintDebug("[VISION] -> Cam: p3 (P3 start)\r\n");
         break;
 
+    case VCMD_P4:
+        g_p4_sub       = P4_WAITING;
+        g_p4_iter      = 0;
+        g_state        = VISION_BUSY;
+        send_frame("p4");
+        PrintDebug("[VISION] -> Cam: p4 (P4 start, nozzle calibrate)\r\n");
+        break;
+
     default:
         g_state = VISION_IDLE;
         break;
@@ -621,6 +706,14 @@ void Vision_Go(void) {
     }
     else if (g_active_cmd == VCMD_P3) {
         /* P3 single-shot: no Phase2 */
+        return;
+    }
+    else if (g_active_cmd == VCMD_P4) {
+        /* P4 iterative align: keep P4_WAITING, increase iter counter */
+        if (g_state == VISION_GOT_POS) {
+            g_p4_iter++;
+            PrintDebug("[VISION] -> Cam: go (P4 align iter %d)\r\n", g_p4_iter);
+        }
         return;
     }
 
@@ -688,6 +781,10 @@ void CamUart_RecvCallback(uint8_t *data, int len) {
 
 bool Vision_IsTimedOut(void) {
     return (osKernelGetTickCount() - g_vision_start_tick) >= pdMS_TO_TICKS(VISION_TIMEOUT_MS);
+}
+
+void Vision_ResetTimeout(void) {
+    g_vision_start_tick = osKernelGetTickCount();
 }
 
 void Vision_ForceIdle(void) {

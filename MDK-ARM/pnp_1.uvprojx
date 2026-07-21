@@ -2860,6 +2860,16 @@
               <FilePath>..\Task\app_uart_parser.h</FilePath>
             </File>
             <File>
+              <FileName>app_screen_test.c</FileName>
+              <FileType>1</FileType>
+              <FilePath>..\Task\app_screen_test.c</FilePath>
+            </File>
+            <File>
+              <FileName>app_screen_test.h</FileName>
+              <FileType>5</FileType>
+              <FilePath>..\Task\app_screen_test.h</FilePath>
+            </File>
+            <File>
               <FileName>app_vision.c</FileName>
               <FileType>1</FileType>
               <FilePath>..\Task\app_vision.c</FilePath>

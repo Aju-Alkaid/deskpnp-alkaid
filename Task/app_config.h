@@ -5,18 +5,10 @@
 
 /* ---- 共享运动控制常量 ---- */
 #define STEPS_PER_MM     512.0f
-
-/* ---- MKS 编码器→步数转换 (14-bit encoder, 256 microstep) ---- */
-#define ENC_PER_REV       16384     /* 14-bit 磁编码器, counts/rev */
-#define STEP_PER_REV      51200     /* 200全步×256微步, steps/rev */
-#define ENC2STEP(x)       ((int32_t)((int64_t)(x) * STEP_PER_REV / ENC_PER_REV))
-
-/* ---- P2 31H 编码器→步数比 (实测标定: enc_delta / motor_step_delta) ---- */
-/* 48-bit encoder: enc_units/motor_step = 10712/1578 = 6.79 */
+#define JOG_MAX_STEPS    8388607
 #define P2_ENC_RATIO_NUM  10000
 #define P2_ENC_RATIO_DEN  10004
 #define P2_ENC2STEP(x)    ((int32_t)((int64_t)(x) * P2_ENC_RATIO_NUM / P2_ENC_RATIO_DEN))
-#define JOG_MAX_STEPS    8388607
 #define X1_ADDR          0x01
 #define X2_ADDR          0x02
 #define Y_ADDR           0x03
@@ -29,10 +21,10 @@
 #define R_DEG_TO_USTEPS(d)       ((int32_t)((d) * R_STEPS_PER_REV / 360.0f))
 #define R_POLL_INTERVAL_MS       8           /* PID 控制周期 (ms): 8ms保证MSCNT采样<512步 */
 #define R_PID_KP                 4.0f        /* 比例系数 (usteps→Hz) */
-#define R_MIN_SPEED              200         /* 最小 VACTUAL 频率 (Hz) */
-#define R_MAX_SPEED              20000       /* 最大 VACTUAL 频率 = 23 RPM, 16ms内≤320步<512 */
-#define R_POS_TOLERANCE          5           /* 到位容差 (usteps), 5步 = 0.035° */
-#define R_STABLE_COUNT           3           /* 连续稳定次数 = 3×10ms = 30ms */
+#define R_MIN_SPEED              1000        /* 最小 VACTUAL 频率 (~1.2 RPM) */
+#define R_MAX_SPEED              50000       /* 最大 VACTUAL 频率 ≈ 58 RPM */
+#define R_POS_TOLERANCE          150         /* 到位容差 (usteps), ~1.0° */
+#define R_STABLE_COUNT           2           /* 连续稳定次数 */
 #define R_SG_THRESHOLD           0           /* SG_RESULT 堵转检测关闭: 仅 stst+MSCNT */
 #define R_SG_MIN_SPEED           800         /* (保留, 已无效) */
 #define R_STUCK_MS               200         /* MSCNT 不动超时判定卡死 (兜底) */

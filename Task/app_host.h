@@ -66,6 +66,8 @@ typedef enum {
     HOST_DEBUG,          /* 调试模式：手动电机控制 */
     HOST_DOWNLOADING,    /* 接收 CSV 文件 */
     HOST_MARK_ALIGN,     /* P2: Mark 点建系 */
+    HOST_P4_BASELINE,    /* P4: 建系前下相机基线校验 */
+    HOST_P4_VERIFY,      /* P4: 建系后下相机漂移校验 */
     HOST_FIND_COMP,      /* P1: 散料区找元件 */
     HOST_PICK,              /* 吸取元件 (Z轴+气泵) */
     HOST_MOVE_TO_BOTTOM_CAM,/* 移动到下相机 */

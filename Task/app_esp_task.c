@@ -35,6 +35,7 @@ static uint8_t s_rx_buf[128];        /* 接收缓冲区 (.bss) */
 static uint8_t s_round_robin_index;  /* 轮询分时索引 0~3 */
 static uint8_t s_no_resp_count;      /* 连续无响应计数 */
 static uint16_t s_last_temp;         /* 上一次发送的温度值 (0.1°C)，用于变化检测 */
+static uint32_t s_last_heartbeat_tick; /* 上一次发送心跳包的 tick */
 
 /* ---- 数据字段轮询表 ---- */
 /* 顺序: 进度 -> 状态 -> 加热台状态 -> 加热台温度 */
@@ -82,8 +83,8 @@ void ESP_Task(void *argument)
     /* ---- 主循环 ---- */
     for (;;) {
         /*
-         * 阻塞等待: 500ms 心跳超时 或 esp_cmd_queue 有新命令
-         * 使用 osThreadFlagsWait 实现事件驱动 + 周期心跳
+         * 阻塞等待: 500ms 轮询超时 或 esp_cmd_queue 有新命令
+         * 使用 osThreadFlagsWait 实现事件驱动 + 周期轮询
          */
         uint32_t flags = osThreadFlagsWait(0x01, osFlagsWaitAny,
                                            pdMS_TO_TICKS(500));
@@ -98,15 +99,19 @@ void ESP_Task(void *argument)
         }
 
         /*
-         * 心跳超时 → 检查是否 WiFi 已开启
-         * WiFi 未开启时只发心跳包 (被动等待响应)
+         * 轮询超时 → 检查是否 WiFi 已开启
+         * WiFi 未开启时每 30s 发一次心跳包 (被动等待响应)
          * WiFi 开启后按轮询表发送数据字段
          */
         if (!g_esp_wifi_enabled) {
-            /* WiFi 未开启: 发心跳包，仅读取 ESP 响应 (可能含版本/状态) */
-            ESP_BuildHeartbeatPacket(s_tx_buf);
-            ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-            _process_response();
+            /* WiFi 未开启: 每 30s 发一次心跳包，仅读取 ESP 响应 (可能含版本/状态) */
+            uint32_t now = osKernelGetTickCount();
+            if ((now - s_last_heartbeat_tick) >= pdMS_TO_TICKS(30000)) {
+                s_last_heartbeat_tick = now;
+                ESP_BuildHeartbeatPacket(s_tx_buf);
+                ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+                _process_response();
+            }
         } else {
             /* WiFi 已开启: 轮询分时发送数据字段 */
             _send_data_field(s_round_robin_index);

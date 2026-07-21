@@ -23,6 +23,7 @@ static void _h_smt_start(const DT_Msg_t *msg);
 static void _h_smt_pause(const DT_Msg_t *msg);
 static void _h_heater_set(const DT_Msg_t *msg);
 static void _h_system_reset(const DT_Msg_t *msg);
+static void _h_wifi_ctrl(const DT_Msg_t *msg);
 
 static DT_Route_t s_routeTable[] = {
     //  type                    handler              queue锛坔andler 浼樺厛锛?
@@ -34,7 +35,7 @@ static DT_Route_t s_routeTable[] = {
     { DT_CMD_HEATER_SET,   _h_heater_set,       NULL },
     { DT_CMD_SYSTEM_RESET, _h_system_reset,     NULL },
     { DT_CMD_CUSTOM,       NULL,                NULL },
-    { DT_CMD_WIFI_CTRL,    NULL,                NULL },  // 棰勭暀锛岀敱 Model 鑷澶勭悊
+    { DT_CMD_WIFI_CTRL,    _h_wifi_ctrl,        NULL },
 };
 
 static const int s_routeCount = sizeof(s_routeTable) / sizeof(DT_Route_t);
@@ -177,6 +178,7 @@ extern void Bridge_SMTStart(void);
 extern void Bridge_SMTPause(void);
 extern void Bridge_HeaterSet(uint16_t temp);
 extern void Bridge_SystemReset(void);
+extern void Bridge_WifiCtrl(uint8_t status);
 
 static void _h_motor_move(const DT_Msg_t *msg)
 {
@@ -218,6 +220,11 @@ static void _h_system_reset(const DT_Msg_t *msg)
     Bridge_SystemReset();
 }
 
+static void _h_wifi_ctrl(const DT_Msg_t *msg)
+{
+    Bridge_WifiCtrl(msg->data.status);
+}
+
 // ---- 占位函数（向后兼容，待主程序替换）----
 static uint8_t motor_reset_done = 0;
 
@@ -237,7 +244,7 @@ int motorReset_IsDone(void)
 
 void smt_Start(void)
 {
-    // TODO: 鍚姩璐寸墖娴佺▼锛堢敱璐寸墖浠诲姟瀹炵幇锛?
+    Bridge_SMTStart();
 }
 
 

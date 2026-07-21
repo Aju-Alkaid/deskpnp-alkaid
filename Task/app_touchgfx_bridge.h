@@ -58,6 +58,7 @@ void Bridge_SMTStart(void);
 void Bridge_SMTPause(void);
 void Bridge_HeaterSet(uint16_t temp);
 void Bridge_SystemReset(void);
+void Bridge_WifiCtrl(uint8_t status);
 
 /* ======================== GUI 触发的全局标志（Host_Task 主循环检测） ======================== */
 extern volatile uint8_t g_gui_smt_start_req;   /* GUI 请求启动贴片 */

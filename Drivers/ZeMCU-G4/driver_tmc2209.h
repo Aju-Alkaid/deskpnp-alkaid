@@ -128,6 +128,8 @@ TMC_Error_t     TMC_GetStatus(uint8_t *status);
 TMC_Error_t     TMC_GetSGResult(uint16_t *sg_value);
 TMC_Error_t     TMC_GetMSCNT(uint16_t *mscnt);
 TMC_Error_t     TMC_GetDRVStatus(uint32_t *status);
+void            TMC_InitPositionMode(void);
+void            TMC_MoveTo(int32_t target_usteps);
 
 #ifdef __cplusplus
 }
