@@ -1880,7 +1880,7 @@ MKS 官方文档明确规定：`0x4B` 同步执行指令**必须发广播地址 
 
 ### 27.5 修复 4 — 等待策略从事件标志改为时长估算
 
-**根因：** `osEventFlagsWait` 事件标志在调试中反复出现异常（`flags=0xE` 凭空出现，包含 `X2_DONE|Y_DONE|ANY_ERROR`）。同时在 ISR 或任务上下文中调用大量 `PrintDebug` 会阻塞 CAN 帧处理、诱发栈/数据踩踏。即使修复以上三项，MKS 电机对 `F4 02` 完成响应的回报行为因固件版本而异且不可靠。
+**根因：** `osEventFlagsWait` 事件标志在调试中反复出现异常（`flags=0xE` 凭空出现，包含 `X2_DONE|Y_DONE|ANY_ERROR`）。同时在 ISR 或任务上下文中调用大量 `PrintDebug` 会阻塞 CAN 帧处理、诱发栈/数据踩踏。即使修复以上三项，MKS 电机对 `F4 02` 完成响应的回报行为因固件版本而异且不可靠 **（后来发现是 CAN TX mailbox 机制问题，非固件版本差异，详见 §45）**。
 
 **修复方案：** 彻底绕开 RTOS 事件标志和电机完成响应依赖。
 
@@ -1938,7 +1938,7 @@ volatile bool     g_axes_error    = false; // F4/F5 0x03 堵转标志
 ### 27.8 设计决策记录
 
 - **不恢复事件标志：** RTOS 事件标志在 `PrintDebug` 密集场景下存在不可靠行为。`volatile uint32_t` + `volatile bool` 极简方案对单任务写入场景完全足够，零中间层、零堆分配。
-- **不等待 F4 02 完成响应：** MKS 电机对相对模式完成响应的行为因固件版本而异（某些版本不发 0x02）。时长估算与 JOG 策略一致——发完即等，不到即假定完成。
+- **不等待 F4 02 完成响应（已过时，参见 §45）：** 早期开发时认为 MKS 0x02 不可靠，采用时间估算。2026-07-27 发现 0x02 实际能被 0x31 编码器查询 flush 出来（CAN TX mailbox 机制），现已改为硬件到位确认 + 0x31 ping 轮询。
 - **到位阈值 50 而非更低：** 5 步（~0.05mm）会导致伺服闭环振荡不稳定。50 步（~0.5mm）兼顾到位确认与稳定性。
 - **移除 MOVE_STOP 检测而非保留：** 运动期间 `Host_Task` 处于阻塞态，上位机无法发送需要即时响应的命令。`MOVE_STOP` 由上位机通过 JOG 状态机自行管理（`MOVE_*_START` 的第二次点击）。
 - **坐标映射正确性：** 电机 X1/X2 控制机器垂直轴（上下），电机 Y 控制水平轴（左右）。上位机坐标系约定 X=水平、Y=垂直，与电机坐标系差 90° 旋转 + 水平轴取反：`host_x = -motor_y`，`host_y = +motor_x`。`handle_debug_cmd` 离散移动表和 JOG 方向的电机映射已确认正确，`MOVE_TO` 的 `ty` 需取反（-cmd->param）以匹配此约定。标定 SET 命令存电机坐标、读取也用电机坐标，往返闭环正确，Display 层统一转上位机坐标显示。详见 §9.17。
@@ -3006,7 +3006,7 @@ _axis_set_zero offset=0，后续角度即编码器原始值（非静默错误，
 
 ### 40.2 设计约束
 
-- CAN ID 0x02 (X2 电机) 的到位响应不可靠，全程使用**时间估算**代替到位信号
+- ~~CAN ID 0x02 (X2 电机) 的到位响应不可靠~~ **（已过时，见 §45）**：MKS 0x02 实际可稳定接收，需 0x31 ping 周期性 flush CAN TX mailbox（详见 §45）。当前已改为 0x02 硬件到位 + 时间估算兜底。
 - 扫描速度 40 RPM（Cam 需要低速才能准确识别），加速度 15
 - X1+X2 必须一同移动（龙门双驱）
 - 蛇形扫描方向与离散网格完全一致：偶列下→上，奇列上→下，列间 Y 电机右移 5mm
@@ -3019,7 +3019,7 @@ _axis_set_zero offset=0，后续角度即编码器原始值（非静默错误，
 | `p2_scan_start(dir, speed, acc)` | X1+X2 同步 speedModeRun (0xF6) + motorSyncTrigger |
 | `p2_scan_stop()` | X1+X2 axis_stop (0xF7) + motorSyncTrigger + osDelay(5) |
 | `p2_scan_estimate_x(start_x, sign, speed, elapsed_ms)` | 时间 → 位移 → 当前 X 坐标 |
-| `p2_scan_step_y(dy_steps, speed, acc)` | Y 电机 positionMode2Run 侧移 (阻塞式时长估算) |
+| `p2_scan_step_y(dy_steps, speed, acc)` | Y 电机 positionMode2Run 侧移 (0x02 硬件到位 + 编码器验证) |
 
 ### 40.4 连续扫描状态机 (mark_align_step)
 
@@ -3372,7 +3372,7 @@ P2 建系完成后机器坐标整体偏移约 7.5mm（约为 Mark 间距的一�
 | 位置 | 文件 | 函数/用途 |
 |------|------|----------|
 | p2_scan_estimate_x() | app_motion.c:555 | 扫描位置估算 |
-| p2_scan_step_y() | app_motion.c:574 | Y轴步进延时（位置模式，仅影响padding） |
+| p2_scan_step_y() | app_motion.c:574 | Y轴步进延时（位置模式，仅影响padding）**（2026-07-27 已修正为 MKS_PULSES_PER_REV=16384，见 §45）** |
 | 列超时计算 | app_host.c:861 | 列超时 tick 计算 |
 
 ### 43.5 关键经验
@@ -3466,3 +3466,139 @@ PCB 贴装坐标在补偿前后保持物理正确；散料区、下相机站位�
 - P4 补偿假设 P2 引入的误差是**纯平移**，不补偿旋转或缩放误差。
 - 补偿值仅在 P2 建系后应用一次，后续贴装循环中不再重新测量。
 - P4 本身依赖下相机检测吸嘴圆，吸嘴必须位于相机视野内且 Z 高度与标定条件一致。
+
+---
+
+## 四十五、2026-07-27 会话 — MKS 0x02 到位信号发现与 0x31 Ping 方案
+
+### 45.1 背景
+
+长久以来所有电机到位都是时间估读，对长期优化不友好。用户要求根据 MKS CAN 协议实现
+0x02 到位信号检测。此前多次尝试使用到位检测均以失败告终。本次会话通过系统排查，
+最终发现根因并实现稳定接收。
+
+### 45.2 排查过程
+
+| 阶段 | 假设 | 验证方式 | 结论 |
+|------|------|---------|------|
+| 1 | 到位阈值太小导致 0x02 不发 | `motorSetArrivalThreshold` 50→150 步 | 无效 |
+| 2 | 0x31 编码器请求挤占 CAN 总线，0x02 被延迟 | 关掉编码器读取 | 无效 |
+| 3 | 同步模式导致 0x02 乱序 | 关掉同步模式 | 无效 |
+| 4 | `motor_event_queue` 深度不够导致 0x02 丢失 | 扩大队列 | 无效 |
+| 5 | 编码器读取后续帧冲掉了 0x02 | 注释掉编码器读取 | 无效 |
+| 6 | CAN catch-all 日志确认 0x02 根本没发出 | 打开 [CAN] RX 全量日志 | **确认**：0x01 有、0x05 有，0x02 无 |
+| 7 | 重新审视成功日志，发现规律 | 对比有/无 0x31 轮询时的日志 | **发现**：0x02 只在有 0x31 持续轮询时出现 |
+| 8 | 验证 0x31 ping 主动 flush 方案 | `motion_wait_done` 每 50ms 发 0x31 | **稳定生效**：0x02 ~360ms 到位 |
+
+### 45.3 根因
+
+**MKS SERVO42D CAN TX mailbox 机制：**
+
+- 0x01 响应：收到 0xF4 命令后**同步发送**（在命令处理 ISR 中），立即发出
+- 0x02 响应：电机运行完成后**异步生成**，放入 CAN TX mailbox 等待发送
+- MKS 的 CAN 控制器 TX mailbox 深度有限（推测 1~2 个），且**不会主动发送**——需要
+  收到下一个 CAN 帧后才能触发 TX 缓冲区 flush
+
+当只有 0xF4 命令而无后续 CAN 交互时，0x02 将永远卡在 TX mailbox 中。
+持续 0x31 编码器查询充当了"踢邮箱"的角色——每收到一个 0x31 请求，电机回复编码器值，
+同时会把 TX mailbox 中的所有待发帧（包括 0x02）一起推出。
+
+**因此，0x02 其实一直都在，只是没有被"逼出来"。**
+
+### 45.4 解决方案：0x31 Ping
+
+在 `motion_wait_done()` 中每 50ms 向等待中的电机发送一次 0x31 编码器查询：
+
+```c
+ping_tick += 10;
+if (ping_tick >= 50) {
+    ping_tick = 0;
+    if (need & EVENT_X1_DONE) readRealTimeLocation(1);
+    if (need & EVENT_X2_DONE) readRealTimeLocation(2);
+    if (need & EVENT_Y_DONE)  readRealTimeLocation(3);
+}
+```
+
+`readRealTimeLocation` 纯发 CAN 帧不阻塞。0x31 返回的编码器值由 `CAN_Process_Task`
+消费，不影响等待逻辑。
+
+`motion_wait_done` 同时输出诊断日志：
+
+```
+[POLL] ok: bits=0x04 waited=360ms       ← 0x02 命中
+[POLL] timeout: bits=0x00 need=0x04 ... ← 超时
+```
+
+### 45.5 实测结果
+
+10mm @ 100 RPM 点动测试，每条指令 ~360ms 到位，0x02 成功率 100%。
+
+| 指标 | 旧（纯时间估算） | 新（0x02 + 0x31 ping） |
+|------|-----------------|------------------------|
+| 到位判定 | 靠猜（g_move_pad_ms=3000, ~3.3s） | 靠 0x02 信号（~0.36s） |
+| 可靠性 | 无硬件反馈 | 电机硬件回报确认 |
+| g_move_pad_ms | 3000 | 500（0x02 可靠，fallback 仍够） |
+
+### 45.6 副作用修正：p2_scan_step_y 速度常数
+
+在 §43 中 `p2_scan_step_y()` 的速度常数被从 16384 改为 32768，声称是"修复"。
+实际上位置模式(0xF4)的正确常数是 16384（`MKS_PULSES_PER_REV`），32768 是
+速度模式(0xF6)的常数。
+
+本次在重构 `p2_scan_step_y()` 时将其改回 `MKS_PULSES_PER_REV`（16384）。
+同时将原有的 `osDelay(move_ms)` 盲等改为 `motion_wait_done` + 编码器验证。
+
+---
+
+## 四十六、2026-07-27 会话 — app_motion.c 运动函数全面重构
+
+### 46.1 背景
+
+在 0x02 到位信号稳定后，对 `app_motion.c` 的运动函数进行了一次系统重构。
+统一了编码器读取、到位等待、错误处理逻辑。
+
+### 46.2 新增辅助函数（static 文件内部）
+
+| 函数 | 说明 |
+|------|------|
+| `motion_drain_queue()` | 排空 `motor_event_queue` 中旧帧 |
+| `motion_read_done_bits()` | 原子读 `g_axes_done_bits` |
+| `motion_clear_done_bits()` | 清零 `g_axes_done_bits` + `g_axes_error` |
+| `motion_set_done_bits()` | 原子写（`|=`）`g_axes_done_bits` |
+| `motion_read_encoder()` | 发 0x31 + 轮询 `g_enc_ready`（100ms 超时），替代分散的 encoder 读代码 |
+| `motion_wait_done()` | 0x02 位轮询 + 0x31 ping + 堵转检测，替代原有的被动 `osDelay` 等待 |
+
+### 46.3 重构函数
+
+| 函数 | 旧机制 | 新机制 | 调用方 |
+|------|--------|--------|--------|
+| `move_xy_relative` | 内联 encoder 读 + 被动 poll 循环 + 时间估算 | `motion_wait_done` (0x02+ping) + 编码器验证 | `safe_move_to` → 全 PnP 流程 |
+| `move_to` (static) | 内联被动 poll + 静默超时 | `motion_wait_done` + 超时自动刹车 + 编码器验证 | `MOTION_CMD_HOME` (TouchGFX 回零) |
+| `p2_scan_step_y` | `osDelay(move_ms)` 盲等 + 32768 速度常数 | `motion_wait_done` + `MKS_PULSES_PER_REV` (16384) + 编码器验证 | P2 Mark 扫描 Y 轴步进 |
+| `CAN_Process_Task` | 直接写 `g_axes_done_bits`、仅判 0xF4/0xF5 | 统一用 `motion_set_done_bits`、新增 0xFD 判定、`MotorDiag_CANRxHook` 诊断钩子、`DEBUG_MOTION` 日志守卫 | FreeRTOS 任务 |
+
+### 46.4 其他修改
+
+| 改动 | 说明 |
+|------|------|
+| `disable_sync_stop()` 移除 `motorSyncTrigger(0)` | 停止时不应触发同步执行 |
+| `p2_scan_start()` `osDelay(2)→(20)` | X1→X2 speedModeRun 间隔保守化 |
+| `g_move_pad_ms 3000→500` | 0x02 已可靠，fallback 时间缩短 |
+| `[POLL] ok/timeout` 诊断日志 | 无需 DEBUG_MOTION 即可看到到位状态 |
+| 两阶段到位修正 | 主 move 后编码器校验偏差 > ENC_TOLERANCE_STEPS 时，自动低速微调一枪（speed=50, acc=30），修正后重验 |
+| `motorSetArrivalThreshold 150→125` | 与 ENC_TOLERANCE_STEPS 对齐，电机内部 PID 停止阈值 |
+| `ENC_TOLERANCE_STEPS 100→125` | 与 arrival threshold 对齐，避免 0x02 通过但编码器误判 |
+
+### 46.5 遗留
+
+`MotionTask_Func` 中的 `MOTION_CMD_MOVE_TO` 分支（第 874 行）仍使用内联被动 poll
+循环，未迁移到 `motion_wait_done`。此路径由 TouchGFX 桥接层触发（`app_touchgfx_bridge.c:171`），
+在 0x31 ping 方案生效后仍会 2s 超时。非本次引入问题，可在后续统一迁移到 `move_to()`。
+
+### 46.6 涉及文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_motion.c` | 新增 6 个 static 辅助函数；重构 move_xy_relative / move_to / p2_scan_step_y / CAN_Process_Task；disable_sync_stop / p2_scan_start 调整；g_move_pad_ms 3000→500 |
+| `Task/app_motion.h` | 无接口变更 |
+

@@ -166,6 +166,14 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("SCREEN_TEST")) {
         return HCMD_SCREEN_TEST;
     }
+    if (MATCH("MOTOR_DIAG")) {
+        if (space) {
+            char *p = (char*)(space + 1);
+            *param  = strtof(p, &p);
+            *param2 = strtof(p, NULL);
+        }
+        return HCMD_MOTOR_DIAG;
+    }
     #undef MATCH
     return HCMD_UNKNOWN;
 }

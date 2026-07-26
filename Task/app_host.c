@@ -31,7 +31,7 @@ static void start_p1_find_first(void);
  * ================================================================ */
 #define DEBUG_SPEED     200            /* 调试模式离散移动速度 */
 #define DEBUG_ACC       25             /* 调试模式加速度 */
-#define JOG_SPEED        100            /* 连续移动速度 (RPM) */
+#define JOG_SPEED        200            /* 连续移动速度 (RPM) */
 #define JOG_ACC          25             /* 连续移动加速度 */
 #define JOG_MMS_TO_RPM  12.0f   /* mm/s → RPM: STEPS_PER_MM/16384*60 */
 #define PNP_SPEED_FAST   200   /* 长途移动 */
@@ -569,7 +569,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         int32_t steps_mm = (int32_t)(cmd->param * STEPS_PER_MM);
         int32_t dx = tbl[idx].sx * steps_mm;
         int32_t dy = tbl[idx].sy * steps_mm;
-        move_set_pad_ms(80);
+        move_set_pad_ms(500);
         int ret = safe_move_to(Coord_Get().x + dx, Coord_Get().y + dy, DEBUG_SPEED, DEBUG_ACC);
         move_set_pad_ms(3000);
         g_jog_active = false;
@@ -1765,6 +1765,7 @@ void Host_Task(void *argument) {
     LineParser_Init(&g_parser);
     Vision_Init();
 
+#ifndef SKIP_CAM_HANDSHAKE
     /* P0 握手：与 MaixCAM 建立连接 */
     if (!Vision_Handshake(120000)) {
         PrintDebug("[HOST] P0 handshake FAILED! Camera not responding.\r\n");
@@ -1772,6 +1773,9 @@ void Host_Task(void *argument) {
     } else {
         PrintDebug("[HOST] P0 handshake OK.\r\n");
     }
+#else
+    PrintDebug("[HOST] P0 handshake SKIPPED.\r\n");
+#endif
 
     g_state = HOST_HOME;
     g_comp_count = 0;

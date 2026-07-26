@@ -5,6 +5,7 @@
 #include "driver_can.h"
 #include "cmsis_os2.h"
 #include <string.h>
+#include <stdlib.h>
 #include <stdbool.h>
 #include "driver_servo.h"
 #include "driver_tmc2209.h"
@@ -46,6 +47,7 @@ volatile bool    g_enc_ready[4] = {false};
 
 /* MKS SERVO42D 编码器参数 */
 #define MKS_PULSES_PER_REV  16384.0f  /* 电机每圈脉冲数 */
+#define ENC_TOLERANCE_STEPS 125        /* 编码器到位容差 (步数) */
 
 /* 协议常量 */
 #define FUNC_ABS_POS   0xF5       // 坐标绝对运动功能码
@@ -55,8 +57,84 @@ volatile bool    g_enc_ready[4] = {false};
 
 #define ACK_TIMEOUT_MS   2000      // 单轴到位超时 (ms)
 
-static uint32_t g_move_pad_ms = 3000;  /* move_xy_relative 安全余量,点动时临时改为 80 */
+static uint32_t g_move_pad_ms = 500;  /* move_xy_relative 安全余量,点动时临时改为 80 */
+
 /* ================================================================
+ *  运动辅助函数 - 队列排空、原子 done bits、编码器读取
+ *  使用 LDREX / STREX 保证与 CAN_Process_Task 的位更新不竞态
+ * ================================================================ */
+
+#define MOTOR_Y_ENC_SIGN (-1)   /* Y 轴编码器增量符号 (依物理接线调整) */
+
+static void motion_drain_queue(void)
+{
+    CAN_Rx_Packet_t pkt;
+    while (osMessageQueueGet(motor_event_queue, &pkt, NULL, 0) == osOK) {
+        /* discard stale frames */
+    }
+}
+
+static uint32_t motion_read_done_bits(void)
+{
+    return g_axes_done_bits;
+}
+
+static void motion_clear_done_bits(void)
+{
+    g_axes_done_bits = 0;
+    g_axes_error     = false;
+}
+
+static void motion_set_done_bits(uint32_t bits)
+{
+    g_axes_done_bits |= bits;
+}
+
+static int motion_read_encoder(uint8_t id, int32_t *out, uint32_t timeout_ms)
+{
+    if (id < 1 || id > 3) return -1;
+    g_enc_ready[id] = false;
+    readRealTimeLocation(id);
+    uint32_t t0 = osKernelGetTickCount();
+    while (!g_enc_ready[id] && (osKernelGetTickCount() - t0) < timeout_ms) {
+        osDelay(2);
+    }
+    if (g_enc_ready[id]) {
+        *out = g_enc_pos[id];
+        return 0;
+    }
+    return -1;
+}
+
+static int motion_wait_done(uint32_t need, uint32_t poll_ms, bool *out_timeout)
+{
+    uint32_t waited = 0;
+    uint32_t ping_tick = 0;
+    while (waited < poll_ms) {
+        osDelay(10);
+        waited += 10;
+        if (g_axes_error) {
+            *out_timeout = false;
+            return -2;
+        }
+        if ((motion_read_done_bits() & need) == need) {
+            PrintDebug("[POLL] ok: bits=0x%02X waited=%lums\r\n", (unsigned)motion_read_done_bits(), (unsigned long)waited);
+            *out_timeout = false;
+            return 0;
+        }
+        /* 每 ~50ms 发一次 0x31 ping，flush MKS 电机 CAN TX mailbox */
+        ping_tick += 10;
+        if (ping_tick >= 50) {
+            ping_tick = 0;
+            if (need & EVENT_X1_DONE) readRealTimeLocation(1);
+            if (need & EVENT_X2_DONE) readRealTimeLocation(2);
+            if (need & EVENT_Y_DONE)  readRealTimeLocation(3);
+        }
+    }
+    PrintDebug("[POLL] timeout: bits=0x%02X need=0x%02X waited=%lums\r\n", (unsigned)motion_read_done_bits(), (unsigned)need, (unsigned long)waited);
+    *out_timeout = true;
+    return -1;
+}/* ================================================================
  *  座标核心 - 线程安全的机器座标系单例
  * ================================================================ */
 static MachineCoord_t g_coord;
@@ -164,17 +242,13 @@ void disable_sync_stop(void)
     axis_stop(X1_ADDR);
     axis_stop(X2_ADDR);
     axis_stop(Y_ADDR);
-    motorSyncTrigger(0);
     osDelay(5);
-}
-
-/**
- * @brief  XY 相对移动（阻塞式,按时长估算到位）
+}/**
+ * @brief  XY 相对移动（阻塞式,0x02 到位信号优先 + 时间估算兜底）
  *
- * 发送 F4 相对位置指令到指定轴 → 广播同步触发 → 按时长估算等待到位 →
- * 检测 g_axes_error 堵转标志.CAN_Process_Task 异步消费 CAN 帧并更新
- * g_axes_done_bits / g_axes_error 全局标志.
- *
+ * 发送 F4 相对位置指令到指定轴 → 广播同步触发 → 轮询 g_axes_done_bits
+ * 等待 MKS 0x02 到位信号,超时fallback到时间估算.CAN_Process_Task 异步消费
+ * CAN 帧并更新 g_axes_done_bits / g_axes_error 全局标志. *
  * @param  dx     X 轴相对位移 (步数,X1+X2 双电机同步)
  * @param  dy     Y 轴相对位移 (步数,单电机)
  * @param  speed  速度 (RPM)
@@ -197,10 +271,21 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         return 0;
     }
 
-    /* 重置到位标志,供 CAN_Process_Task 更新 */
-    g_axes_done_bits = 0;
-    g_axes_error = false;
+    /* 1. 排空旧帧，清零 done bits */
+    motion_drain_queue();
+    motion_clear_done_bits();
 
+    /* 2. 读起始编码器 */
+    int32_t enc_start_x1 = 0, enc_start_x2 = 0, enc_start_y = 0;
+    if (dx != 0) {
+        motion_read_encoder(1, &enc_start_x1, 100);
+        motion_read_encoder(2, &enc_start_x2, 100);
+    }
+    if (dy != 0) {
+        motion_read_encoder(3, &enc_start_y, 100);
+    }
+
+    /* 3. 发位置指令 */
     if (dx != 0) {
         positionMode2Run(X1_ADDR, speed, acc, dx);
         osDelay(2);
@@ -212,32 +297,155 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         osDelay(2);
     }
 
-    /* 广播同步触发: X1/X2/Y 同时执行 */
+    /* 4. 广播同步触发 */
     motorSyncTrigger(0);
 
-    /* 按时长估算到位 = max(|dx|,|dy|) / (speed ˇ PULSES_PER_REV / 60000) + 安全余量 */
-    {
-        float max_steps = fmaxf(fabsf((float)dx), fabsf((float)dy));
-        float steps_per_ms = (float)speed * MKS_PULSES_PER_REV / 60000.0f;
-        uint32_t move_ms = (uint32_t)(max_steps / steps_per_ms) + g_move_pad_ms;
-        if (move_ms < 50)  move_ms = 50;
-        if (move_ms > 5000) move_ms = 5000;
-        osDelay(move_ms);
-    }
+    /* 5. 等待 0x02 到位，超时或堵转时立即停车返回 */
+    uint32_t need = 0;
+    if (dx != 0) need |= EVENT_X1_DONE | EVENT_X2_DONE;
+    if (dy != 0) need |= EVENT_Y_DONE;
 
-    /* 检查运动期间是否发生堵转/限位 */
-    if (g_axes_error) {
+    float max_steps = fmaxf(fabsf((float)dx), fabsf((float)dy));
+    float steps_per_ms = (float)speed * MKS_PULSES_PER_REV / 60000.0f;
+    uint32_t move_ms = (uint32_t)(max_steps / steps_per_ms) + g_move_pad_ms;
+    if (move_ms < 50)   move_ms = 50;
+    if (move_ms > 5000) move_ms = 5000;
+    uint32_t poll_ms = move_ms + 200;
+    if (poll_ms > 5000) poll_ms = 5000;
+
+    bool timeout = false;
+    int ret = motion_wait_done(need, poll_ms, &timeout);
+    if (ret != 0) {
         axis_stop(X1_ADDR);
         axis_stop(X2_ADDR);
         axis_stop(Y_ADDR);
-        g_motor_error_detail = MOTOR_ERR_LIMIT;
         Coord_Invalidate();
-        return -2;
+        if (ret == -2) g_motor_error = true;
+        return ret;
+    }
+
+    /* 6. 电机停稳后读编码器验证 */
+    osDelay(50);
+    int32_t enc_end_x1 = 0, enc_end_x2 = 0, enc_end_y = 0;
+    bool enc_ok = true;
+    if (dx != 0) {
+        if (motion_read_encoder(1, &enc_end_x1, 100) != 0) enc_ok = false;
+        if (motion_read_encoder(2, &enc_end_x2, 100) != 0) enc_ok = false;
+    }
+    if (dy != 0) {
+        if (motion_read_encoder(3, &enc_end_y, 100) != 0) enc_ok = false;
+    }
+
+    if (!enc_ok) {
+        PrintDebug("[MOTION] enc read timeout, invalidate coord\r\n");
+        Coord_Invalidate();
+        return -1;
+    }
+
+    int32_t d1 = enc_end_x1 - enc_start_x1;
+    int32_t d2 = enc_end_x2 - enc_start_x2;
+    int32_t d3 = enc_end_y - enc_start_y;
+
+    bool enc_err = false;
+    if (dx != 0) {
+        if (abs(d1 - dx) > ENC_TOLERANCE_STEPS) {
+            PrintDebug("[MOTION] X1 enc err: actual=%ld expect=%ld\r\n", (long)d1, (long)dx);
+            enc_err = true;
+        }
+        if (abs(d2 - dx) > ENC_TOLERANCE_STEPS) {
+            PrintDebug("[MOTION] X2 enc err: actual=%ld expect=%ld\r\n", (long)d2, (long)dx);
+            enc_err = true;
+        }
+        if (abs(d1 - d2) > ENC_TOLERANCE_STEPS) {
+            PrintDebug("[MOTION] gantry skew: X1=%ld X2=%ld diff=%ld\r\n", (long)d1, (long)d2, (long)(d1-d2));
+            enc_err = true;
+        }
+    }
+    if (dy != 0) {
+        if (abs(d3 - MOTOR_Y_ENC_SIGN * dy) > ENC_TOLERANCE_STEPS) {
+            PrintDebug("[MOTION] Y enc err: actual=%ld expect=%ld\r\n", (long)d3, (long)(MOTOR_Y_ENC_SIGN * dy));
+            enc_err = true;
+        }
+    }
+
+    if (enc_err) {
+        /* ---- 两阶段修正：低速微调残余偏差 ---- */
+        int32_t corr_x = 0, corr_y = 0;
+        if (dx != 0) corr_x = dx - (d1 + d2) / 2;   /* X1/X2 均值残留 */
+        if (dy != 0) corr_y = MOTOR_Y_ENC_SIGN * dy - d3;
+
+#define MAX_CORR_STEPS 300
+        if (abs(corr_x) > MAX_CORR_STEPS || abs(corr_y) > MAX_CORR_STEPS ||
+            (corr_x == 0 && corr_y == 0)) {
+            PrintDebug("[MOTION] fine corr skip: dx=%ld dy=%ld\r\n", (long)corr_x, (long)corr_y);
+            Coord_Invalidate();
+            return -1;
+        }
+#undef MAX_CORR_STEPS
+
+        PrintDebug("[MOTION] fine corr: dx=%ld dy=%ld\r\n", (long)corr_x, (long)corr_y);
+
+        motion_drain_queue();
+        motion_clear_done_bits();
+        if (corr_x != 0) {
+            positionMode2Run(X1_ADDR, 50, 30, corr_x);
+            osDelay(2);
+            positionMode2Run(X2_ADDR, 50, 30, corr_x);
+            osDelay(2);
+        }
+        if (corr_y != 0) {
+            positionMode2Run(Y_ADDR, 50, 30, corr_y);
+            osDelay(2);
+        }
+        motorSyncTrigger(0);
+
+        uint32_t corr_need = 0;
+        if (corr_x != 0) corr_need |= EVENT_X1_DONE | EVENT_X2_DONE;
+        if (corr_y != 0) corr_need |= EVENT_Y_DONE;
+        int ret2 = motion_wait_done(corr_need, 1500, &timeout);
+        if (ret2 != 0) {
+            axis_stop(X1_ADDR); axis_stop(X2_ADDR); axis_stop(Y_ADDR);
+            Coord_Invalidate();
+            return ret2;
+        }
+
+        osDelay(50);
+        enc_ok = true; enc_err = false;
+        if (dx != 0) {
+            if (motion_read_encoder(1, &enc_end_x1, 100) != 0) enc_ok = false;
+            if (motion_read_encoder(2, &enc_end_x2, 100) != 0) enc_ok = false;
+        }
+        if (dy != 0) {
+            if (motion_read_encoder(3, &enc_end_y, 100) != 0) enc_ok = false;
+        }
+        if (!enc_ok) {
+            PrintDebug("[MOTION] enc timeout after corr\r\n");
+            Coord_Invalidate();
+            return -1;
+        }
+
+        d1 = enc_end_x1 - enc_start_x1;
+        d2 = enc_end_x2 - enc_start_x2;
+        d3 = enc_end_y - enc_start_y;
+
+        if (dx != 0 && abs(d1 - dx) > ENC_TOLERANCE_STEPS) {
+            PrintDebug("[MOTION] X1 enc still err: actual=%ld expect=%ld\r\n", (long)d1, (long)dx);
+            enc_err = true;
+        }
+        if (dx != 0 && abs(d2 - dx) > ENC_TOLERANCE_STEPS) {
+            PrintDebug("[MOTION] X2 enc still err: actual=%ld expect=%ld\r\n", (long)d2, (long)dx);
+            enc_err = true;
+        }
+        if (dy != 0 && abs(d3 - MOTOR_Y_ENC_SIGN * dy) > ENC_TOLERANCE_STEPS) {
+            PrintDebug("[MOTION] Y enc still err: actual=%ld expect=%ld\r\n", (long)d3, (long)(MOTOR_Y_ENC_SIGN * dy));
+            enc_err = true;
+        }
+        if (enc_err) { Coord_Invalidate(); return -1; }
     }
 
     Coord_UpdateXY(target_x, target_y);
-    return 0;}
-
+    return 0;
+}
 /**
  * @brief 阻塞等待指定电机进入"运行完成"状态 (0x02)      已被事件组代替,暂无用
  * @param addr 电机 CAN ID
@@ -257,7 +465,6 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
 //                    return 0;   // 到位
 //                }
 //                // 其他状态 (0x05 同步接收, 0x01 开始) 忽略,继续等待
-//            }
 //        }
 //    }
 //    return -1;  // 超时
@@ -273,22 +480,74 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
  */
 static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
 {
-    g_axes_done_bits = 0;
-    g_axes_error = false;
+    motion_drain_queue();
+    motion_clear_done_bits();
+
+    MachineCoord_t c0 = Coord_Get();
+    int32_t enc_start_x1 = 0, enc_start_x2 = 0, enc_start_y = 0;
+    motion_read_encoder(1, &enc_start_x1, 100);
+    motion_read_encoder(2, &enc_start_x2, 100);
+    motion_read_encoder(3, &enc_start_y, 100);
+
     send_axis_abs(X1_ADDR, x_abs, speed, acc);
     send_axis_abs(X2_ADDR, x_abs, speed, acc);
     send_axis_abs(Y_ADDR,  y_abs, speed, acc);
     motorSyncTrigger(0);
 
-    uint32_t waited = 0;
-    while (waited < ACK_TIMEOUT_MS) {
-        osDelay(10); waited += 10;
-        if (g_axes_error)                        return -2;
-        if ((g_axes_done_bits & EVENT_ALL_AXES) == EVENT_ALL_AXES) return 0;
+    bool timeout = false;
+    int ret = motion_wait_done(EVENT_ALL_AXES, ACK_TIMEOUT_MS, &timeout);
+    if (ret != 0) {
+        axis_stop(X1_ADDR);
+        axis_stop(X2_ADDR);
+        axis_stop(Y_ADDR);
+        Coord_Invalidate();
+        return ret;
     }
-    return -1;
-}
 
+    osDelay(50);
+    int32_t enc_x1_end = 0, enc_x2_end = 0, enc_y_end = 0;
+    bool enc_ok = true;
+    if (motion_read_encoder(1, &enc_x1_end, 100) != 0) enc_ok = false;
+    if (motion_read_encoder(2, &enc_x2_end, 100) != 0) enc_ok = false;
+    if (motion_read_encoder(3, &enc_y_end, 100) != 0) enc_ok = false;
+
+    if (!enc_ok) {
+        PrintDebug("[MOTION] move_to enc read timeout, invalidate coord\r\n");
+        Coord_Invalidate();
+        return -1;
+    }
+
+    int32_t d1 = enc_x1_end - enc_start_x1;
+    int32_t d2 = enc_x2_end - enc_start_x2;
+    int32_t d3 = enc_y_end - enc_start_y;
+    int32_t expected_x = x_abs - c0.x;
+    int32_t expected_y = y_abs - c0.y;
+
+    bool enc_err = false;
+    if (abs(d1 - expected_x) > ENC_TOLERANCE_STEPS) {
+        PrintDebug("[MOTION] move_to X1 enc err: actual=%ld expect=%ld\r\n", (long)d1, (long)expected_x);
+        enc_err = true;
+    }
+    if (abs(d2 - expected_x) > ENC_TOLERANCE_STEPS) {
+        PrintDebug("[MOTION] move_to X2 enc err: actual=%ld expect=%ld\r\n", (long)d2, (long)expected_x);
+        enc_err = true;
+    }
+    if (abs(d1 - d2) > ENC_TOLERANCE_STEPS) {
+        PrintDebug("[MOTION] move_to gantry skew: X1=%ld X2=%ld diff=%ld\r\n", (long)d1, (long)d2, (long)(d1-d2));
+        enc_err = true;
+    }
+    if (abs(d3 - MOTOR_Y_ENC_SIGN * expected_y) > ENC_TOLERANCE_STEPS) {
+        PrintDebug("[MOTION] move_to Y enc err: actual=%ld expect=%ld\r\n", (long)d3, (long)(MOTOR_Y_ENC_SIGN * expected_y));
+        enc_err = true;
+    }
+
+    if (enc_err) {
+        Coord_Invalidate();
+        return -1;
+    }
+
+    return 0;
+}
 void nozzle_on(void) {
     DRV8803_SetOutput(&Port_12VO1, true);
 }
@@ -528,7 +787,7 @@ void p2_scan_start(uint8_t dir, uint16_t speed, uint8_t acc)
     speedModeRun(X1_ADDR, dir, speed, acc);
     osDelay(2);
     speedModeRun(X2_ADDR, dir, speed, acc);
-    osDelay(2);
+    osDelay(20);
     motorSyncTrigger(0);
 }
 
@@ -567,22 +826,46 @@ int32_t p2_scan_estimate_x(int32_t start_x, int32_t sign, uint16_t speed, uint32
 void p2_scan_step_y(int32_t dy_steps, uint16_t speed, uint8_t acc)
 {
     if (dy_steps == 0) return;
-    g_axes_done_bits = 0;
-    g_axes_error = false;
+    motion_drain_queue();
+    motion_clear_done_bits();
+
+    int32_t enc_start = 0, enc_end = 0;
+    motion_read_encoder(3, &enc_start, 100);
+
     positionMode2Run(Y_ADDR, speed, acc, dy_steps);
     motorSyncTrigger(0);
-    {
-        float steps_per_ms = (float)speed * 32768.0f / 60000.0f;
-        uint32_t move_ms = (uint32_t)(fabsf((float)dy_steps) / steps_per_ms) + 200;
-        if (move_ms < 50)  move_ms = 50;
-        if (move_ms > 5000) move_ms = 5000;
-        osDelay(move_ms);
+
+    uint32_t poll_ms = (uint32_t)(fabsf((float)dy_steps) * 60000.0f
+                        / ((float)speed * MKS_PULSES_PER_REV)) + 200;
+    if (poll_ms < 50)  poll_ms = 50;
+    if (poll_ms > 5000) poll_ms = 5000;
+
+    bool timeout = false;
+    int ret = motion_wait_done(EVENT_Y_DONE, poll_ms, &timeout);
+    if (ret != 0) {
+        axis_stop(Y_ADDR);
+        PrintDebug("[P2] step_y failed ret=%d\r\n", ret);
+        return;
     }
+
+    osDelay(50);
+    if (motion_read_encoder(3, &enc_end, 100) != 0) {
+        PrintDebug("[P2] step_y enc read timeout\r\n");
+        return;
+    }
+
+    int32_t actual = enc_end - enc_start;
+    int32_t expected = MOTOR_Y_ENC_SIGN * dy_steps;
+    if (abs(actual - expected) > ENC_TOLERANCE_STEPS) {
+        PrintDebug("[P2] step_y enc mismatch: actual=%ld expect=%ld\r\n",
+                   (long)actual, (long)expected);
+        return;
+    }
+
     if (!g_axes_error) {
         Coord_UpdateXY(Coord_Get().x, Coord_Get().y + dy_steps);
     }
 }
-
 int32_t p2_stop_and_read_pos(int32_t enc_start_x1, int32_t enc_start_x2, int32_t coord_start_x)
 {
     g_enc_ready[X1_ADDR] = false; readRealTimeLocation(X1_ADDR);
@@ -752,18 +1035,27 @@ void Event_Init(void) {
 void CAN_Process_Task(void *argument) {
     CAN_Rx_Packet_t pkt;
     while (1) {
-        // 阻塞等待队列数据
         if (osMessageQueueGet(motor_event_queue, &pkt, NULL, osWaitForever) == osOK) {
-            if ((pkt.FuncCode == 0xF4 || pkt.FuncCode == 0xF5) && pkt.Status == 0x02) {
-                if (pkt.ID == 1)      g_axes_done_bits |= EVENT_X1_DONE;
-                else if (pkt.ID == 2) g_axes_done_bits |= EVENT_X2_DONE;
-                else if (pkt.ID == 3) g_axes_done_bits |= EVENT_Y_DONE;
+            /* 诊断计数钩子: 每个位置指令相关的 0x02/0x03 都会计入 */
+
+            /* 只处理已知电机 ID (1~3) */
+            if (pkt.ID < 1 || pkt.ID > 3) continue;
+
+            bool is_pos_cmd = (pkt.FuncCode == 0xF4 || pkt.FuncCode == 0xF5 || pkt.FuncCode == 0xFD);
+            if (is_pos_cmd && pkt.Status == 0x02) {
+                uint32_t bit = 0;
+                if (pkt.ID == 1)      bit = EVENT_X1_DONE;
+                else if (pkt.ID == 2) bit = EVENT_X2_DONE;
+                else if (pkt.ID == 3) bit = EVENT_Y_DONE;
+                if (bit) motion_set_done_bits(bit);
+#ifdef DEBUG_MOTION
+                PrintDebug("[CAN] 0x%02X done: ID=%d\r\n", pkt.FuncCode, pkt.ID);
+#endif
             }
-            else if ((pkt.FuncCode == 0xF4 || pkt.FuncCode == 0xF5) && pkt.Status == 0x03) {
+            else if (is_pos_cmd && pkt.Status == 0x03) {
                 g_axes_error = true;
             }
-            else if (pkt.FuncCode == 0x31 && pkt.ID >= 1 && pkt.ID <= 3) {
-                /* 31H encoder response: Data[1..6]=48-bit BE, use lower 32 bits */
+            else if (pkt.FuncCode == 0x31) {
                 int32_t enc = ((int32_t)pkt.Data[3] << 24) |
                               ((int32_t)pkt.Data[4] << 16) |
                               ((int32_t)pkt.Data[5] << 8)  |

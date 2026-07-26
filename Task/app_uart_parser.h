@@ -57,7 +57,8 @@ typedef enum {
     HCMD_VALVE_OFF,           // 关闭电磁阀
     HCMD_LIGHT,               // 切换下补光灯
     HCMD_CALIB_ENC,           // P2编码器比例标定
-    HCMD_SCREEN_TEST,         // 屏幕功能测试
+    HCMD_SCREEN_TEST,
+    HCMD_MOTOR_DIAG,         // 屏幕功能测试
 
     /* 未知命令 */
     HCMD_UNKNOWN

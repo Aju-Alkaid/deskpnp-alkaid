@@ -386,8 +386,8 @@ void motorSetArrivalThreshold(uint8_t slaveAddr) {
     uint8_t tx[8] = {0};
     tx[0] = 0x95;
     tx[1] = 0x01;        // enable = 1
-    tx[2] = 0x00;        // values 高字节 (0x0032 = 50)
-    tx[3] = 0x32;        // 低字节 (原默认 0x00C8 = 200)
+    tx[2] = 0x00;        // values 高字节 (0x0096 = 150)
+    tx[3] = 0x7D;        // 低字节 (50→125, 与 ENC_TOLERANCE_STEPS 对齐)
     CAN_Transmit_Data(&hfdcan1, slaveAddr, tx, 4);
 }
 
@@ -397,8 +397,11 @@ void motorSyncEnable(uint8_t enable) {
     tx[0] = 0x4A;
     tx[1] = enable ? 0x01 : 0x00;
     CAN_Transmit_Data(&hfdcan1, 0x00, tx, 2); // 广播
+    osDelay(5);
     CAN_Transmit_Data(&hfdcan1, 0x01, tx, 2); // X1
+    osDelay(5);
     CAN_Transmit_Data(&hfdcan1, 0x02, tx, 2); // X2
+    osDelay(5);
     CAN_Transmit_Data(&hfdcan1, 0x03, tx, 2); // Y
 }
 
