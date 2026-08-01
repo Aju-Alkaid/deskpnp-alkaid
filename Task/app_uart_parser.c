@@ -163,16 +163,23 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("CALIB_ENC")) {
         return HCMD_CALIB_ENC;
     }
-    if (MATCH("SCREEN_TEST")) {
-        return HCMD_SCREEN_TEST;
+    if (MATCH("LIGHT_ON")) {
+        return HCMD_LIGHT_ON;
     }
-    if (MATCH("MOTOR_DIAG")) {
-        if (space) {
-            char *p = (char*)(space + 1);
-            *param  = strtof(p, &p);
-            *param2 = strtof(p, NULL);
-        }
-        return HCMD_MOTOR_DIAG;
+    if (MATCH("LIGHT_OFF")) {
+        return HCMD_LIGHT_OFF;
+    }
+    if (len >= 14 && memcmp(line, "WIFI_CONNECT:", 13) == 0) {
+        return HCMD_WIFI_CONNECT;
+    }
+    if (MATCH("WIFI_DISCONNECT")) {
+        return HCMD_WIFI_DISCONNECT;
+    }
+    if (MATCH("IMPORT_ENTER")) {
+        return HCMD_IMPORT_ENTER;
+    }
+    if (MATCH("IMPORT_EXIT")) {
+        return HCMD_IMPORT_EXIT;
     }
     #undef MATCH
     return HCMD_UNKNOWN;
@@ -199,12 +206,14 @@ bool LineParser_Feed(LineParser_t *p, uint8_t byte, HostParsed_t *out) {
         memset(out, 0, sizeof(*out));
         out->cmd = parse_cmd(p->buf, p->idx, &out->param, &out->param2);
 
+        /* 保留原始行：WIFI_CONNECT/AUTO_HEAT 等命令需要读取参数原文 */
+        out->raw_len = (p->idx < LINE_BUF_MAX) ? p->idx : (LINE_BUF_MAX - 1);
+        memcpy(out->raw, p->buf, out->raw_len);
+        out->raw[out->raw_len] = '\0';
+
         /* 非命令 → 作为原始行(文件下载数据) */
         if (out->cmd == HCMD_UNKNOWN || out->cmd == HCMD_NONE) {
             out->cmd = HCMD_RAW_LINE;
-            out->raw_len = (p->idx < LINE_BUF_MAX) ? p->idx : (LINE_BUF_MAX - 1);
-            memcpy(out->raw, p->buf, out->raw_len);
-            out->raw[out->raw_len] = '\0';
         }
 
         p->idx = 0;

@@ -57,9 +57,12 @@ typedef enum {
     HCMD_VALVE_OFF,           // 关闭电磁阀
     HCMD_LIGHT,               // 切换下补光灯
     HCMD_CALIB_ENC,           // P2编码器比例标定
-    HCMD_SCREEN_TEST,
-    HCMD_MOTOR_DIAG,         // 屏幕功能测试
-
+    HCMD_LIGHT_ON,            // GUI: 补光灯开
+    HCMD_LIGHT_OFF,           // GUI: 补光灯关
+    HCMD_WIFI_CONNECT,        // GUI: WIFI_CONNECT:<ssid>,<password>
+    HCMD_WIFI_DISCONNECT,     // GUI: WIFI_DISCONNECT
+    HCMD_IMPORT_ENTER,        // GUI: 进入导入模式
+    HCMD_IMPORT_EXIT,         // GUI: 退出导入模式
     /* 未知命令 */
     HCMD_UNKNOWN
 } HostCmd_t;

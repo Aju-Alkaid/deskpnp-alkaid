@@ -20,7 +20,7 @@
 #include "app_esp_protocol.h"
 #include "driver_esp32.h"
 #include "app_test.h"                            /* PrintDebug */
-#include "gui/model/Data_Transfer.h"             /* now_SMT, total_SMT, Temp */
+#include "app_gui_spi.h"             /* now_SMT, total_SMT */
 #include "driver_heater.h"                       /* Heater_GetCurrentStatus */
 #include <string.h>
 
@@ -440,6 +440,7 @@ static void _handle_wifi_response(const char *payload, uint8_t len)
     if (len > 0) {
         g_esp_wifi_connected = (payload[0] == '1') ? 1 : 0;
     }
+    GUI_SPI_NotifyWifiStatus(g_esp_wifi_connected ? "CONNECTED" : "DISCONNECTED");
     PrintDebug("[ESP] WiFi status: %s\r\n",
                g_esp_wifi_connected ? "connected" : "disconnected");
 }

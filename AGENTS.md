@@ -144,7 +144,7 @@
 > - 路径一律用正斜杠 `E:/path/to/file`，避免反斜杠被转义。
 > - 所有文件视为 UTF-8，读写不得改变编码。
 > - 禁止用 `echo` / `Set-Content` / 内联多行 `node -e` 做复杂替换。
-> - 不用的临时脚本及时删除。## 一、项目概览
+> - 不用的临时脚本及时删除。
 
 ## 一、项目概览
 
@@ -152,7 +152,7 @@
 
 功能：接收上位机坐标文件 → 双目视觉定位元件 → CAN 总线控制三轴运动 → 吸嘴拾取/放置 → 加热台控温。
 
-**团队分工：** 本仓库为嵌入式固件（C 语言），视觉/硬件/GUI（TouchGFX）由其他人负责。
+**团队分工：** 本仓库为嵌入式固件（C 语言），视觉/硬件由其他人负责；GUI（TouchGFX）已迁移至独立 G0B1 板，由其他团队维护。
 
 ## 二、硬件平台
 
@@ -165,11 +165,10 @@
 | 串口3 (USART3) | PB9(TX) / PB11(RX), 115200, DMA, 连接 TMC2209(R轴) |
 | LPUART1 | PC1(TX) / PC0(RX), 115200, 半双工, 预留 |
 | CAN (FDCAN1) | PA12(TX) / PA11(RX), 500kbps, 连接 3 台 MKS SERVO42D 总线伺服电机 (ID=0x01 X1, ID=0x02 X2, ID=0x03 Y) |
-| SPI2 | PB13(SCK) / PB15(MOSI), CS=PD10, DC/RS=PD9, RST=PD8, 连接 LCD(ST7306) |
+| SPI2 | PB13(SCK) / PB14(MISO) / PB15(MOSI), CS=PD10, INT=PD8, 10.625 Mbps, 连接 G0B1 GUI 独立板（G0B1 使用其 SPI1） |
 | SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, 连接 W25Q64 Flash |
 | SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, 连接 ESP32 通信模块 |
 | TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) Z轴舵机 PWM (50Hz) / 32位时间戳基准 |
-| TIM5 | CH1(PB2) KTH7823 编码器输入捕获 (170MHz, 已弃用) / CH3(PE8) Z轴舵机 PWM (50Hz) |
 | TIM5 | CH1(PB2) KTH7823 编码器输入捕获 (170MHz, 已弃用) / CH3(PE8) 12VO3 PWM 输出 (50Hz，舵机已迁移至 TIM2_CH3/PB10) |
 | TIM6 | HAL 系统时基 |
 | CRC | 硬件 CRC 校验 |
@@ -185,7 +184,7 @@
 | 下相机补光灯 | PE12 (12VO2, DRV8803 U12 OUT2 开关) |
 | 电磁阀 | PA6 (24VO1, DRV8803 U13 OUT5, PA6=HIGH时导通 — 标准DRV8803: IN=HIGH→OUT=LOW) |
 | BOOT0 | PB8, 启动选择 |
-| LCD_LED | PD8, LCD 背光 |
+| GUI_INT | PD8, 下降沿 EXTI, G0B1 有命令待收时拉低 |
 ## 三、目录结构
 
 ```
@@ -214,8 +213,6 @@ pnp_1/
 │       ├── ringbuf.c/h          # 环形缓冲区 (CAM_RING=1024, HOST_RING=4096)
 │       ├── key.c/h              # 5键扫描（20ms 消抖 + 事件型）
 │       ├── timestamp.c/h        # TIM2 32位时间戳，overflow_count 全局溢出计数
-│       ├── lcd.c/h              # ST7306 LCD 驱动
-│       ├── lcd_config.h         # LCD 配置
 │       └── driver_CH340.c/h     # 串口文件转存（CH340 USB转串口，未实现）
 ├── Task/                        # ★ FreeRTOS 应用层任务 ★
 │   ├── app_host.c/h             # 上位机通信任务 + CSV解析 + 视觉协调 + 调试模式
@@ -228,10 +225,10 @@ pnp_1/
 │   ├── app_esp_protocol.c/h     # ESP32 SPI 协议层（组包/解包/校验）
 │   ├── app_esp_task.c/h         # ESP32 周期数据推送任务
 │   ├── app_logger.c/h           # SPI Flash 运行日志（W25Q64 0x7FE000，7种事件）
-│   ├── app_touchgfx_bridge.c/h  # TouchGFX ↔ 主控桥接层
+│   ├── app_gui_spi.c/h       # G4 SPI2 ↔ G0B1 GUI 通信（文本命令协议）
 │   └── Task_Init.c/h            # 任务创建框架（Tasks_Create，当前未激活）
-├── TouchGFX/                    # GUI 图形界面（已移植，FreeRTOS 任务驱动）
-├── Middlewares/                  # FreeRTOS + TouchGFX 中间件（系统生成，禁止修改）
+├── TouchGFX/                    # 旧 GUI 代码（已迁移至 G0B1，保留但不参与编译）
+├── Middlewares/                  # FreeRTOS 中间件（系统生成，禁止修改）
 ├── MDK-ARM/                     # Keil MDK 工程文件
 ├── build/                       # CMake 构建输出
 ├── CMakeLists.txt               # CMake 构建配置
@@ -629,15 +626,22 @@ ping，保证 0x02 在 ~360ms 内被接收。
 - **初始化顺序约束：** `Heater_Init()` 必须在 `CAN_Init()` 之前调用。`CAN_Init()` 中 `HAL_FDCAN_Start()` 使总线激活后 CAN ISR 即可触发，若 `heater_rx_queue` 尚未创建（NULL），加热台状态帧将被静默丢弃。
 - **CAN 滤波器隐患：** `FilterID2 = 0x1FFC0000` 超出 HAL 11-bit 范围（max 0x7FF），当前因 CubeMX 设 `StdFiltersNbr = 0` 恰好全通。重新生成 CubeMX 时若 `StdFiltersNbr` ≥ 1，滤波器将仅通过 ID 低 8 位为 0 的帧，所有 CAN 通信中断。详见 HISTORY.md §33.2。
 
+### 4.5 G4 ↔ G0B1 GUI（SPI2 文本协议，2026-08-01 迁移）
+
+- **物理层：** G0B1 SPI1 ↔ G4 SPI2，G4 为主机；PB13(SCK)/PB14(MISO)/PB15(MOSI)，CS=PD10，INT=PD8（下降沿，G0B1 有命令待收时拉低）。SPI2 速率 10.625 Mbps（分频 16，G0B1 最高 32 Mbps，留余量）。阻塞收发，`gui_spi_mutex` 保护 Host_Task/ESP_Task/GUI_SPI_Task 三方访问。
+- **格式：** ASCII 字符串命令，`CMD:param1,param2` 或 `CMD arg`，以 `\n` 结尾；单条 ≤128 字节；从机未使用的接收字节必须填充 0x00，主控在首个 0x00 停止解析。协议版本预留 `GUI_PROTO_VERSION 1`。
+- **G0B1 → G4（用户操作触发）：** `MOVE_UP/DOWN/LEFT/RIGHT <step>`、`MOVE_*_START <speed>`、`MOVE_STOP`、`SET_ORIGIN`、`HOME`、`SET_BOTTOM_CAM`、`SET_CAM_OFFSET`、`SET_HEATER_PLATFORM_MIN/MAX`、`SAVE_CALIB`、`RESTORE_CALIB`、`HEAT_ON/OFF`、`PUMP_ON/OFF`、`LIGHT_ON/OFF`、`VALVE_ON/OFF`、`WIFI_CONNECT:<ssid>,<password>`、`WIFI_DISCONNECT`、`IMPORT_ENTER`、`IMPORT_EXIT`。
+- **G4 → G0B1（主控主动推送）：** `TEMP_HEAT:<float>`、`TEMP_PCB:<float>`（约每秒一次）、`SMT_PROGRESS:<current>,<total>`、`LOG:<message>`（≤63 字符）、`WIFI_STATUS:<state>`、`IMPORT_DATA:<content>`（≤63 字符）、`IMPORT_TOTAL:<number>`。
+- **实现要点：** `GUI_SPI_Task`（栈 4096）轮询 INT → `HAL_SPI_Receive` 读 128 字节 → `LineParser_Feed` 解析 → `gui_cmd_queue`（16×HostParsed_t，满时 10ms 超时并计数）→ Host_Task 消费；`WIFI_CONNECT` 先校验 SSID 1-32 位数字、密码 8-63 位 ASCII，当前仅触发 ESP WiFi 开关，SSID/密码透传待扩展 ESP 协议。
+
 ## 五、任务架构
 
 | 任务 | 栈大小 | 优先级 | 功能 |
 |------|--------|--------|------|
-| `Host_Task` | 1024 | Normal | ★ 主任务：上位机通信 + 调试命令 + CSV解析 + 视觉协调 + P4基线/P2建系/P4校验 + PnP流程 |
+| `Host_Task` | 4096 | Normal | ★ 主任务：上位机通信 + 调试命令 + CSV解析 + 视觉协调 + P4基线/P2建系/P4校验 + PnP流程 |
 | `CAN_Process_Task` | 512 | Normal | 从 motor_event_queue 取 CAN 报文，更新 g_axes_done_bits / g_axes_error 全局标志 |
 | `vMotorTestTask` | 1024 | Normal | MKS 电机测试任务（已注释） |
-| `TouchGFX_Task` | 8192 | Normal | GUI 图形界面渲染 + VSYNC + 按键处理 |
-| `Key_Task` | 256 | Normal | 硬件按键扫描（10ms）+ 消抖 → keyEventQueue |
+| `guiSpi` | 4096 | Normal | G4 SPI2 ↔ G0B1 GUI：命令接收解析入队 + SPI 收发 |
 | `ESP_Task` | 512 | Normal | ESP32 通信 + WiFi 状态管理 |
 | `StartESPTestTask` | 1024 | Normal | ESP32 通信链路 8 项测试（SPI4），启用时需禁用 `ESP_Task` |
 | `PnP_Motion_Task` | 1024 | Normal | 备用运动任务（已注释，未激活） |
@@ -651,10 +655,8 @@ ping，保证 0x02 在 ~360ms 内被接收。
 - `motion_cmd_queue` (20深度) — Host_Task → MotionTask_Func
 - `host_pkt_queue` (64深) — 已弃用，Host_Task 改用 UART_PeekData 直接读取
 - `evtAxesDone` 事件组 — 已弃用（保留对象但不再使用），改为 `g_axes_done_bits`/`g_axes_error` volatile 全局变量
-- `keyEventQueue` (16深) — Key_Task → KeyController → TouchGFX 按键事件
-- `dataTransferQueue` (16深) — 主系统 Task → Model::processQueue() → UI 数据同步
-- `vsync_queue` (1深) — TouchGFX 内部 (OSWrappers.cpp)，TIM7 ISR → 渲染循环
-- `frame_buffer_sem` — TouchGFX 内部 (OSWrappers.cpp)，帧缓冲互斥锁
+- `gui_cmd_queue` (16×HostParsed_t) — GUI_SPI_Task → Host_Task 命令队列
+- `gui_spi_mutex` (互斥锁) — 保护 SPI2 收发（Host/ESP/GUI 三方共用）
 - `semX1Done/semX2Done/semYDone` 信号量 — 已废弃，统一使用 evtAxesDone 事件组（见 §9.6-5）
 - `heater_rx_queue` (10深度) — CAN ISR → Heater_ProcessStatus()，加热台状态帧专用队列
 - `g_coord_mutex` (互斥锁) — Coord_Get/Update/Invalidate 内部，保护 MachineCoord_t 读写
@@ -764,7 +766,7 @@ ping，保证 0x02 在 ~360ms 内被接收。
 1. **已创建 `host_pkt_queue`：** 64 深度 `HostMsg_t` 队列，UART 空闲中断回调 → 队列 → Host_Task。修复了原先队列未创建导致 NULL 写入的运行时 Bug。
 2. **已添加 `g_debug_mutex` + `DEBUG_CAN_ISR` 条件编译：** 互斥锁保护任务上下文 `PrintDebug` 的静态 `s_debug_buf`，解决多任务并发日志交错。ISR 中 PrintDebug 由 `DEBUG_CAN_ISR` 宏控制（默认关闭），彻底消除 ISR 阻塞 UART 问题。
 3. **`StartHostMotionTestTask` 已改为事件驱动：** 原主循环 `vTaskDelay(10ms)` 轮询改为 `osThreadFlagsWait` 阻塞等待。UART 空闲中断通过 `osThreadFlagsSet(hostMotionTaskHandle, ...)` 唤醒任务，延迟从 ≤10ms 降至 <1ms。
-4. **`Key_Task` 已改用 `osDelayUntil`：** 原 `osDelay(10)` 改为 `osDelayUntil`，消除任务执行时间导致的周期漂移，保证精确 10ms 扫描间隔。
+4. **`Key_Task` 已改用 `osDelayUntil`：** 原 `osDelay(10)` 改为 `osDelayUntil`，消除任务执行时间导致的周期漂移，保证精确 10ms 扫描间隔。（注：Key_Task 已随 GUI 独立板迁移于 2026-08-01 移除，见 §4.5）
 5. **已删除未使用的 FreeRTOS 对象：** `semX1Done`、`semX2Done`、`semYDone`、`semEmergency`（信号量）和 `can_rx_queue`（队列）已从源码中移除。到位通知统一使用 `g_axes_done_bits`/`g_axes_error` volatile 全局变量（`evtAxesDone` 对象虽已创建但未被使用）。
 
 
@@ -1352,8 +1354,8 @@ _axis_rotate 返回值未在调用方检查（与原开环行为一致，PnP 状
 | 12V_C2 PWM | PE8 | TIM5_CH3 (50Hz) |
 | KTH7823 编码器 | PB2 | TIM5_CH1 (输入捕获) |
 | 24V_C2 PWM | PB1 | |
-| SPI2_SCK/MOSI | PB13/PB15 | LCD |
-| SPI2_CS/DC/RST | PD10/PD9/PD8 | LCD 控制 |
+| SPI2_SCK/MISO/MOSI | PB13/PB14/PB15 | G0B1 GUI |
+| SPI2_CS/INT | PD10/PD8 | G0B1 GUI 片选/中断 |
 | SPI3_SCK/MISO/MOSI | PC10/PC11/PC12 | Flash |
 | SPI3_CS | PA15 | Flash 片选 |
 | SPI4_SCK/MISO/MOSI | PE2/PE5/PE6 | ESP32 |
@@ -1365,7 +1367,6 @@ _axis_rotate 返回值未在调用方检查（与原开环行为一致，PnP 状
 | CW/CCW/PUSH | PA8/PC8/PC9 | 低有效 |
 | BOOT0 | PB8 | 启动选择 |
 | 温度传感器 | PF9 / PA3 | DS18B20 |
-| LCD_LED | PD8 | LCD 背光 |
 | 12VO1(开关) | PE11 | 真空泵 / 12V输出1 |
 | 12VO2(开关) | PE12 | 12V输出2（预留） |
 | 12VO3(开关/PWM) | PE13 / PE8 | 12V输出3 + PWM(TIM5_CH3) |
@@ -1394,8 +1395,8 @@ _axis_rotate 返回值未在调用方检查（与原开环行为一致，PnP 状
 | 0x85 | EN 引脚配置 | 2 字节 |
 
 ### 10.3 C 文件编码说明
-- `Drivers/ZeMCU-G4/` 与 `Task/` 目录使用 **UTF-8（带 BOM）编码**
-- `Core/` 目录（CubeMX 生成）仍为 **GBK（CP936）编码**
+- 全部 C 源文件与文档统一使用 **UTF-8（无 BOM）编码**，新建/修改文件禁止引入 BOM
+- `Core/` 目录（CubeMX 生成）同为 UTF-8（无 BOM），CubeMX 重新生成后注意保持编码一致
 - CubeMX 生成的 CubeMX User Code 起始/结束标记：`/* USER CODE BEGIN ... */` / `/* USER CODE END ... */`
 - CubeMX 重新生成代码时，标记外内容会被覆盖
 ### 10.4 DRV8803 端口对照与使用示例

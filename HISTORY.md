@@ -182,6 +182,8 @@ osDelay(5);
 
 ## 十二、TouchGFX + FreeRTOS 移植日志（2026-05）
 
+> **【2026-08-01 校正】** TouchGFX/ST7306/Key_Task/Data_Transfer 桥接层已随 GUI 独立板迁移删除；G4 改由 SPI2 与 G0B1 GUI 板通信（协议见 AGENTS.md §4.5，本次会话见 HISTORY.md §49）。本节仅作历史参考。
+
 ### 12.1 移植概述
 
 | 项目 | 移植前状态 | 移植后状态 |
@@ -2427,6 +2429,8 @@ machine_y = (int32_t)(-rcx) + origin_y_steps;    // 相机 X → Y 电机（取�
 | Task/app_motion.c | `DEBUG_MOTION` 宏包裹 2 处 PrintDebug |
 ---
 ## 三十二、TouchGFX 屏幕对接 — 主控端 bridge 层（2026-06-28）
+
+> **【2026-08-01 校正】** 本节描述的 `app_touchgfx_bridge.c/h` 已随 GUI 独立板迁移删除，所有 `Bridge_*` 调用已由 `GUI_SPI_*` 替代（见 HISTORY.md §49）。本节仅作历史参考。
 > **状态：已完成。** 两轮代码审查已通过，5 个问题已修复（1 P0 + 3 P1 + 1 P2）。
 ### 32.1 背景
 主控端与 TouchGFX GUI 原先仅通过 `dataTransferQueue` 单向通知（主控→GUI），无 GUI→主控命令通道，且 `app_host.c` 中未调用任何 `DT_Notify*` 函数。
@@ -3595,6 +3599,8 @@ if (ping_tick >= 50) {
 循环，未迁移到 `motion_wait_done`。此路径由 TouchGFX 桥接层触发（`app_touchgfx_bridge.c:171`），
 在 0x31 ping 方案生效后仍会 2s 超时。非本次引入问题，可在后续统一迁移到 `move_to()`。
 
+> **【2026-08-01 校正】** `app_touchgfx_bridge.c` 已随 GUI 独立板迁移删除；该路径对应功能已由 `gui_process_cmd` 复用 `handle_debug_cmd` 接管，本遗留项仅作历史参考。
+
 ### 46.6 涉及文件
 
 | 文件 | 改动 |
@@ -3688,3 +3694,56 @@ P1（上摄像头找元件）原有流程：`safe_move_to` 阻塞移动到子位
 
 `place_step`、RESUME 路径、P3吸入重试、PICK重试 等过渡路径仍使用旧模式 `safe_move_to` + `Vision_Start`。
 `Vision_Start` 调用被 `FIND_IDLE` 的第二次 `Vision_Start` 覆盖（`reset_all`），功能正常但浪费一次 P1 启动。后续可逐步迁移。
+
+---
+
+## 四十九、2026-08-01/02 会话 — GUI 独立板迁移 + 代码审查修复
+
+### 49.1 背景
+
+屏幕（ST7306 LCD + TouchGFX）工作全部迁移到独立 G0B1 板，主控 G4 不再直接驱动屏幕；G4 与 G0B1 之间通过 SPI 文本命令协议通信（G0B1 SPI1 ↔ G4 SPI2），协议以《01-GUI通信接口清单.md》为准。
+
+### 49.2 物理层与协议
+
+- G4 SPI2：PB13(SCK)/PB14(MISO)/PB15(MOSI)，CS=PD10，INT=PD8（下降沿），10.625 Mbps（分频 16）
+- ASCII 行协议，`\n` 结尾，单条 ≤128 字节；G0B1 未使用字节必须填充 0x00
+- G0B1→G4：`MOVE_*` / `HOME` / `SET_*` / `HEAT` / `PUMP` / `LIGHT` / `VALVE` / `WIFI_CONNECT` / `WIFI_DISCONNECT` / `IMPORT_ENTER` / `IMPORT_EXIT`
+- G4→G0B1：`TEMP_HEAT` / `TEMP_PCB` / `SMT_PROGRESS` / `LOG` / `WIFI_STATUS` / `IMPORT_DATA` / `IMPORT_TOTAL`
+- `GUI_PROTO_VERSION 1` 预留
+
+### 49.3 代码变更
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_gui_spi.c/h` | 新增：SPI2 收发、互斥锁、行解析、gui_cmd_queue、共享状态变量、GUI_SPI_Task |
+| `Core/Src/spi.c`、`spi.h`、`main.c` | SPI2 恢复为 G0B1 GUI 通信（阻塞收发，去 DMA/IRQ），速率 10.625 Mbps |
+| `Core/Src/dma.c` | 删除 SPI2 TX 用 DMA1_Channel1 |
+| `Core/Src/tim.c`、`tim.h`、`stm32g4xx_it.c` | 删除 TIM7（TouchGFX VSYNC）、SPI2/DMA1/TIM7 残留中断；新增 EXTI9_5 与 HAL_GPIO_EXTI_Callback |
+| `Task/app_host.c` | Bridge_* 全部替换为 GUI_SPI_*；gui_process_cmd 消费 GUI 命令；IMPORT_ENTER/EXIT、WIFI_CONNECT/DISCONNECT、LIGHT_ON/OFF 映射；温度 1s 限频；if_DOWNLOAD_READY 生命周期 |
+| `Task/app_uart_parser.c/h` | 删除 SCREEN_TEST/MOTOR_DIAG；新增 LIGHT_ON/OFF、WIFI_CONNECT/DISCONNECT、IMPORT_ENTER/EXIT；所有命令保留 raw 原文 |
+| `Task/app_esp_task.c` | Data_Transfer 改为 app_gui_spi；WiFi 状态回传 WIFI_STATUS（去重） |
+| `Drivers/ZeMCU-G4/lcd.*`、`st7306/lcd.*`、`Task/app_screen_test.*`、`Task/app_touchgfx_bridge.*` | 删除 |
+| `MDK-ARM/pnp_1.uvprojx`、`pnp_1.ioc` | 移除 TouchGFX/st7306 编译组与配置，SPI2/GUI 引脚同步 |
+| `Core/Src/app_freertos.c` | guiSpi 任务（栈 4096）、gui_cmd_queue、gui_spi_mutex；移除无消费者的 Key_Task/keyEventQueue |
+
+### 49.4 审查与修复要点
+
+- 致命项：SPI2 多任务并发无锁 → `gui_spi_mutex`；GUI_SPI_Task 栈 1024 → 4096
+- 严重项：队列满静默丢命令 → 10ms 超时+计数；温度无节流 → 1s 限频；`if_DOWNLOAD_READY` 从未置位 → 下载生命周期修复；`WIFI_CONNECT` 无法解析含空格密码 → 冒号前缀解析 + SSID/密码校验；SPI 速率 21.25 Mbps 与约束不符 → 降到 10.625 Mbps
+- 建议项：重复 WIFI_STATUS 去重、bufsize==0 防护、HAL 返回值检查、static_assert、GUI_PROTO_VERSION、从机 0 填充约束文档化、旧命名清理、移除死 Key_Task/Temp
+
+### 49.5 已知限制与遗留
+
+- `WIFI_CONNECT` 的 SSID/密码目前只做校验并触发 ESP WiFi 开关，未透传 ESP32，需扩展 ESP 协议
+- IWDG 未启用，喂狗点待定
+- `TouchGFX/`、`st7306/` 目录保留但不再编译，需手动清理
+- 本机无 Keil，使用 ARM GCC 14.3.1 全量编译+链接通过；Keil 需另行实机确认
+- 旧 TouchGFX 章节（§12、§32）已标注废弃；§46.5 对 bridge 文件的引用已校正
+
+### 49.6 涉及文档
+
+| 文件 | 改动 |
+|------|------|
+| `AGENTS.md` | 硬件/目录/任务/GPIO/编码规则更新；新增 §4.5 GUI SPI 协议 |
+| `HISTORY.md` | 新增 §49；§12/§32 加废弃校正；§46.5 补校正说明 |
+

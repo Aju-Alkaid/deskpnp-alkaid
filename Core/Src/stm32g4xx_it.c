@@ -25,6 +25,7 @@
 #include "driver_uart.h"
 #include "stm32g4xx_ll_tim.h"
 #include "driver_esp32.h"
+#include "app_gui_spi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -54,7 +55,6 @@
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-extern void TouchGFX_VSYNC_IRQCallback(void);
 extern volatile uint8_t esp32_irq_flag;  /* driver_esp32.c 中定义, ESP32 IRQ 标志位 */
 
 /* USER CODE END 0 */
@@ -70,13 +70,10 @@ extern DMA_HandleTypeDef hdma_usart3_rx;
 extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart2;
 extern UART_HandleTypeDef huart3;
-extern DMA_HandleTypeDef hdma_spi2_tx;
-extern SPI_HandleTypeDef hspi2;
 extern SPI_HandleTypeDef hspi3;
 extern DMA_HandleTypeDef hdma_tim2_up;
 extern TIM_HandleTypeDef htim2;
 extern TIM_HandleTypeDef htim5;
-extern TIM_HandleTypeDef htim7;
 extern TIM_HandleTypeDef htim6;
 
 /* USER CODE BEGIN EV */
@@ -180,20 +177,6 @@ void DebugMon_Handler(void)
 /* For the available peripheral interrupt handler names,                      */
 /* please refer to the startup file (startup_stm32g4xx.s).                    */
 /******************************************************************************/
-
-/**
-  * @brief This function handles DMA1 channel1 global interrupt.
-  */
-void DMA1_Channel1_IRQHandler(void)
-{
-  /* USER CODE BEGIN DMA1_Channel1_IRQn 0 */
-
-  /* USER CODE END DMA1_Channel1_IRQn 0 */
-  HAL_DMA_IRQHandler(&hdma_spi2_tx);
-  /* USER CODE BEGIN DMA1_Channel1_IRQn 1 */
-
-  /* USER CODE END DMA1_Channel1_IRQn 1 */
-}
 
 /**
   * @brief This function handles DMA1 channel2 global interrupt.
@@ -322,20 +305,6 @@ void TIM2_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles SPI2 global interrupt.
-  */
-void SPI2_IRQHandler(void)
-{
-  /* USER CODE BEGIN SPI2_IRQn 0 */
-
-  /* USER CODE END SPI2_IRQn 0 */
-  HAL_SPI_IRQHandler(&hspi2);
-  /* USER CODE BEGIN SPI2_IRQn 1 */
-
-  /* USER CODE END SPI2_IRQn 1 */
-}
-
-/**
   * @brief This function handles USART1 global interrupt / USART1 wake-up interrupt through EXTI line 25.
   */
 void USART1_IRQHandler(void)
@@ -420,20 +389,6 @@ void TIM6_DAC_IRQHandler(void)
 }
 
 /**
-  * @brief This function handles TIM7 global interrupt, DAC2 and DAC4 channel underrun error interrupts.
-  */
-void TIM7_DAC_IRQHandler(void)
-{
-  /* USER CODE BEGIN TIM7_DAC_IRQn 0 */
-
-  /* USER CODE END TIM7_DAC_IRQn 0 */
-  HAL_TIM_IRQHandler(&htim7);
-  /* USER CODE BEGIN TIM7_DAC_IRQn 1 */
-  TouchGFX_VSYNC_IRQCallback();
-  /* USER CODE END TIM7_DAC_IRQn 1 */
-}
-
-/**
   * @brief This function handles DMA2 channel1 global interrupt.
   */
 void DMA2_Channel1_IRQHandler(void)
@@ -465,6 +420,25 @@ void EXTI2_IRQHandler(void)
   /* USER CODE BEGIN EXTI2_IRQn 1 */
   /* 不在此处处理业务逻辑，由 ESP_Task 轮询 esp32_irq_flag */
   /* USER CODE END EXTI2_IRQn 1 */
+}
+
+
+/**
+  * @brief This function handles EXTI lines 5 to 9 (GUI INT, PD8).
+  */
+void EXTI9_5_IRQHandler(void)
+{
+  HAL_GPIO_EXTI_IRQHandler(GUI_SPI_INT_PIN);
+}
+
+/**
+  * @brief GPIO EXTI callback: route GUI INT line to app_gui_spi.
+  */
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  if (GPIO_Pin == GUI_SPI_INT_PIN) {
+    GUI_SPI_IntCallback(GPIO_Pin);
+  }
 }
 
 /*******************************************************************************

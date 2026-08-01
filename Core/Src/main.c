@@ -26,7 +26,6 @@
 #include "spi.h"
 #include "tim.h"
 #include "gpio.h"
-#include "app_touchgfx.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -36,7 +35,7 @@
 #include "driver_uart.h"
 #include "driver_servo.h"
 #include "driver_motor.h"
-#include "lcd.h"
+#include "app_gui_spi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -70,7 +69,6 @@ void MX_GPIO_Init(void);
 void MX_DMA_Init(void);
 void MX_SPI2_Init(void);
 void MX_CRC_Init(void);
-void MX_TIM7_Init(void);
 /* USER CODE END PFP */
 
 /* Private user code ---------------------------------------------------------*/
@@ -119,10 +117,7 @@ int main(void)
   MX_CRC_Init();
   MX_FDCAN1_Init();
   MX_TIM5_Init();
-  MX_TIM7_Init();
-  MX_TouchGFX_Init();
-  /* Call PreOsInit function */
-  MX_TouchGFX_PreOSInit();
+  GUI_SPI_Init();
   /* USER CODE BEGIN 2 */
 	
 
@@ -198,7 +193,6 @@ void SystemClock_Config(void)
 }
 
 /* USER CODE BEGIN 4 */
-extern void touchgfxSignalVSync(void);
 /* USER CODE END 4 */
 
 /**
@@ -223,9 +217,6 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
     HAL_IncTick();
   }
   /* USER CODE BEGIN Callback 1 */
-  if (htim->Instance == TIM7) {
-    touchgfxSignalVSync();
-  }
   /* USER CODE END Callback 1 */
 }
 

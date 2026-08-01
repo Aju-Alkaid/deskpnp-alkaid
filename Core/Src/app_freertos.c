@@ -34,17 +34,14 @@
 #include "driver_drv8803.h"
 #include "app_vision.h"
 #include "app_host.h"
-#include "key.h"
-#include "gui/model/Data_Transfer.h"
+#include "app_gui_spi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
 /* USER CODE BEGIN PTD */
 osMessageQueueId_t motor_event_queue; 
 osMessageQueueId_t motion_cmd_queue;
-extern osMessageQueueId_t keyEventQueue;
-extern osMessageQueueId_t dataTransferQueue;
-extern osMessageQueueId_t guiCmdQueue;
+extern osMessageQueueId_t gui_cmd_queue;
 osMutexId_t g_debug_mutex = NULL;
 osMessageQueueId_t esp_cmd_queue;
 osMessageQueueId_t host_pkt_queue;
@@ -154,20 +151,13 @@ const osThreadAttr_t camTestTask_attributes = {
     .priority = osPriorityNormal,
 };
 
-/* Definitions for KeyTask */
-
-const osThreadAttr_t keyTask_attributes = {
-  .name = "KeyTask",
- .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 512
-};
 /* USER CODE END Variables */
-/* Definitions for touchGFX */
-osThreadId_t touchGFXHandle;
-const osThreadAttr_t touchGFX_attributes = {
-  .name = "touchGFX",
+/* Definitions for GUI_SPI */
+osThreadId_t guiSpiHandle;
+const osThreadAttr_t guiSpi_attributes = {
+  .name = "guiSpi",
   .priority = (osPriority_t) osPriorityNormal,
-  .stack_size = 2048 * 4
+  .stack_size = 4096
 };
 
 /* Private function prototypes -----------------------------------------------*/
@@ -182,11 +172,10 @@ void CAN_Process_Task(void *argument);
 void Host_Task(void *argument);
 void StartHostCommTestTask(void *argument);
 void StartHostMotionTestTask(void *argument);
-void Key_Task(void *argument);
 void ESP_Task(void *argument);
 /* USER CODE END FunctionPrototypes */
 
-void TouchGFX_Task(void *argument);
+void GUI_SPI_Task(void *argument);
 
 void MX_FREERTOS_Init(void); /* (MISRA C 2004 rule 8.1) */
 
@@ -199,7 +188,6 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE BEGIN Init */
 	UART_Driver_Init();
 	Event_Init();
-	Key_Init();
 	TMC_SetEnable(false);  /* ENN=HIGH, 关闭TMC2209驱动 */
   /* USER CODE END Init */
 
@@ -221,9 +209,8 @@ void MX_FREERTOS_Init(void) {
  
 	motor_event_queue = osMessageQueueNew(32, sizeof(CAN_Rx_Packet_t), NULL);
 	motion_cmd_queue = osMessageQueueNew(20, sizeof(MotionCmd_t), NULL);
-	keyEventQueue = osMessageQueueNew(16, sizeof(KeyEvent_t), NULL);
-	dataTransferQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
-	guiCmdQueue = osMessageQueueNew(16, sizeof(DT_Msg_t), NULL);
+	gui_cmd_queue = osMessageQueueNew(16, sizeof(HostParsed_t), NULL);
+	gui_spi_mutex = osMutexNew(NULL);
 	host_pkt_queue = osMessageQueueNew(64, sizeof(HostMsg_t), NULL);
 	esp_cmd_queue = osMessageQueueNew(8, sizeof(ESP_Cmd_t), NULL);
 	
@@ -231,8 +218,8 @@ void MX_FREERTOS_Init(void) {
   /* USER CODE END RTOS_QUEUES */
 
   /* Create the thread(s) */
-  /* creation of touchGFX */
-  touchGFXHandle = osThreadNew(TouchGFX_Task, NULL, &touchGFX_attributes);
+  /* creation of guiSpi */
+  guiSpiHandle = osThreadNew(GUI_SPI_Task, NULL, &guiSpi_attributes);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -248,7 +235,6 @@ void MX_FREERTOS_Init(void) {
 //  servoTestTaskHandle = osThreadNew(StartServoTestTask, NULL, &servoTestTask_attributes);
 
 	osThreadNew(CAN_Process_Task, NULL, &canProcTask_attr);
-	osThreadNew(Key_Task, NULL, &keyTask_attributes);
 
 	osThreadNew(Host_Task, NULL, &hostTask_attributes);
 //	osThreadNew(StartCamTestTask, NULL, &camTestTask_attributes); //cam
@@ -268,22 +254,6 @@ void MX_FREERTOS_Init(void) {
   /* add events, ... */
   /* USER CODE END RTOS_EVENTS */
 
-}
-
-/* USER CODE BEGIN Header_TouchGFX_Task */
-extern void touchgfx_taskEntry();
-/**
-  * @brief  Function implementing the touchGFX thread.
-  * @param  argument: Not used
-  * @retval None
-  */
-/* USER CODE END Header_TouchGFX_Task */
-__weak void TouchGFX_Task(void *argument)
-{
-  /* USER CODE BEGIN TouchGFX_Task */
-  /* Infinite loop */
-  touchgfx_taskEntry();
-  /* USER CODE END TouchGFX_Task */
 }
 
 /* Private application code --------------------------------------------------*/

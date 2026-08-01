@@ -14,8 +14,8 @@
 #include "driver_heater.h"
 #include "app_logger.h"
 #include "driver_spiflash_w25q64.h"
-#include "app_touchgfx_bridge.h"
-#include "app_screen_test.h"
+#include "app_gui_spi.h"
+#include "app_esp_task.h"
 #include "timestamp.h"
 
 extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
@@ -26,6 +26,10 @@ extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 
 /* 内部辅助函数前向声明 */
 static void start_p1_find_first(void);
+static void gui_notify_log_code(uint8_t code, uint8_t param);
+static void gui_process_heater_status(void);
+static void gui_handle_wifi_connect(const char *raw, uint16_t raw_len);
+static void gui_process_cmd(const HostParsed_t *p);
 
 /* ================================================================
  *  常量
@@ -58,7 +62,7 @@ static void start_p1_find_first(void);
  *  任务内全局状态
  * ================================================================ */
 static HostState_t  g_state = HOST_HOME;
-static uint8_t     s_bridge_done_notified = 0;  /* Bridge: HOST_DONE 通知已发送标志 */
+static uint8_t     s_gui_done_notified = 0;  /* GUI: HOST_DONE 通知已发送标志 */
 static bool        s_pnp_phase_logged = false;    /* PnP 阶段日志已发送标志 */
 static Component_t  g_components[MAX_COMPONENTS];
 static uint16_t     g_comp_count = 0;
@@ -358,11 +362,12 @@ static bool parse_csv_line(const char *line, uint16_t len) {
 }
 
 static void download_done(void) {
-    s_bridge_done_notified = 0;
+    s_gui_done_notified = 0;
     s_pnp_phase_logged = false;
-    Bridge_NotifyDownloadStatus(0);
-    Bridge_NotifySMTStatus(1);
-    Bridge_NotifySMTProgress(0, (uint8_t)g_comp_count);
+    GUI_SPI_NotifyImportTotal((uint16_t)g_comp_count);
+    GUI_SPI_NotifySMTStatus(1);
+    GUI_SPI_NotifySMTProgress(0, (uint16_t)g_comp_count);
+    if_DOWNLOAD_READY = 1;
     PrintDebug("[HOST] Download done. %u marks, %u components.\r\n",
                g_mark_count, g_comp_count);
     {
@@ -437,7 +442,7 @@ static void start_p2_mark_align(void)
     osDelay(50);
 
     Vision_Start(VCMD_P2, 0);
-    Bridge_NotifyLog(5, (uint8_t)g_mark_count);
+    gui_notify_log_code(5, (uint8_t)g_mark_count);
     PrintDebug("[HOST] Starting Mark alignment (P2, %u marks)...\r\n", g_mark_count);
 }
 
@@ -815,6 +820,7 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
         z_safe();
         g_error_entered = false;
         g_state = HOST_DEBUG;
+        if_DOWNLOAD_READY = 0;
         g_comp_count = 0;
         g_mark_count = 0;
         g_comp_index = 0;
@@ -847,6 +853,20 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
         else            { LowerCam_Light_Off(); host_send("LIGHT_OFF"); PrintDebug("[HOST] LIGHT: OFF\r\n"); }
         break;
 
+    case HCMD_LIGHT_ON:
+        g_light_on = true;
+        LowerCam_Light_On();
+        host_send("LIGHT_ON");
+        PrintDebug("[HOST] LIGHT: ON\r\n");
+        break;
+
+    case HCMD_LIGHT_OFF:
+        g_light_on = false;
+        LowerCam_Light_Off();
+        host_send("LIGHT_OFF");
+        PrintDebug("[HOST] LIGHT: OFF\r\n");
+        break;
+
     case HCMD_CALIB_ENC: {
         int32_t enc0_x1, enc0_x2, enc1_x1, enc1_x2;
         g_enc_ready[X1_ADDR]=false; readRealTimeLocation(X1_ADDR);
@@ -873,10 +893,6 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
     }
 
 
-    case HCMD_SCREEN_TEST:
-        osThreadNew(StartScreenTestTask, NULL, &screenTestTask_attributes);
-        host_send("SCREEN_TEST_STARTED");
-        break;
     default:
         break;
     }
@@ -1391,7 +1407,7 @@ static bool p1_try_next_subpos(Component_t *c) {
 }
 /* P1 扫描主状态机: FIND_IDLE -> FIND_MOVING -> FIND_WAITING */
 static void find_comp_step(void) {
-    if (!s_pnp_phase_logged) { s_pnp_phase_logged = true; Bridge_NotifyLog(6, (uint8_t)g_comp_count); }
+    if (!s_pnp_phase_logged) { s_pnp_phase_logged = true; gui_notify_log_code(6, (uint8_t)g_comp_count); }
     Component_t *c = &g_components[g_comp_index];
 
     // FIND_IDLE: 启动运动+视觉
@@ -1501,7 +1517,7 @@ static void offset_check_step(void) {
             osDelay(10);
             r_axis_set_zero();
             Vision_SendEnd();
-            Bridge_NotifySMTProgress(g_comp_index + 1, g_comp_count);
+            GUI_SPI_NotifySMTProgress((uint16_t)(g_comp_index + 1), (uint16_t)g_comp_count);
             PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
             phase = 0;
             g_state = HOST_MOVE_TO_PCB;
@@ -1553,7 +1569,7 @@ static void offset_check_step(void) {
         osDelay(10);
         r_axis_set_zero();
         Vision_SendEnd();
-        Bridge_NotifySMTProgress(g_comp_index + 1, g_comp_count);
+        GUI_SPI_NotifySMTProgress((uint16_t)(g_comp_index + 1), (uint16_t)g_comp_count);
         PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
         g_state = HOST_MOVE_TO_PCB;
         break;
@@ -1746,7 +1762,7 @@ static void place_step(void) {
 }
 
 static void done_step(void) {
-        Bridge_NotifySMTProgress(g_comp_count, g_comp_count);
+        GUI_SPI_NotifySMTProgress((uint16_t)g_comp_count, (uint16_t)g_comp_count);
     PrintDebug("[HOST] All %u components placed!\r\n", g_comp_count);
     { uint8_t d[8]={0}; d[0]=(uint8_t)(g_comp_count>>8); d[1]=(uint8_t)g_comp_count; Log_Write(LOG_PNP_DONE,d); }
     g_comp_count = 0; g_mark_count = 0;
@@ -1754,7 +1770,7 @@ static void done_step(void) {
     osDelay(200);
     if (g_auto_heat) {
         Heater_SendStart(); { uint8_t d[8]={0}; Log_Write(LOG_HEATER_START,d); }
-        Bridge_NotifyLog(7, 0);  /* code=7: Reflow started */
+        gui_notify_log_code(7, 0);  /* code=7: Reflow started */
         PrintDebug("[HOST] Auto reflow started\r\n"); host_send("REFLOW_STARTED");
         g_state = HOST_REFLOW;
     } else { g_state = HOST_DEBUG; }
@@ -1805,6 +1821,102 @@ void Host_UartRecvCallback(uint8_t *data, int len) {
 /* ================================================================
  *  Host_Task — 统一主任务
  * ================================================================ */
+/* ================================================================
+ * GUI SPI 通知/命令辅助（原 TouchGFX Bridge 语义迁移）
+ * ================================================================ */
+
+static void gui_notify_log_code(uint8_t code, uint8_t param)
+{
+    char _buf[24];
+    snprintf(_buf, sizeof(_buf), "EVT%d:%d", (int)code, (int)param);
+    GUI_SPI_NotifyLog(_buf);
+}
+
+static void gui_process_heater_status(void)
+{
+    static uint32_t s_last_gui_temp_tick = 0;
+    uint32_t now = osKernelGetTickCount();
+    HeaterStatus_t hs = Heater_GetCurrentStatus();
+
+    if (hs.timestamp == 0) return;
+    if ((now - s_last_gui_temp_tick) < pdMS_TO_TICKS(1000)) return;
+    s_last_gui_temp_tick = now;
+    GUI_SPI_NotifyTemp((float)hs.cur_temp / 10.0f, 0.0f);
+}
+
+static void gui_handle_wifi_connect(const char *raw, uint16_t raw_len)
+{
+    const char *body;
+    const char *comma;
+    uint16_t ssid_len;
+    uint16_t pwd_len;
+    uint16_t i;
+
+    if (raw == NULL || raw_len <= 13 || memcmp(raw, "WIFI_CONNECT:", 13) != 0) return;
+    body = raw + 13;
+    comma = memchr(body, ',', raw_len - 13);
+    if (comma == NULL) {
+        GUI_SPI_NotifyLog("WIFI_CFG_ERR");
+        return;
+    }
+    ssid_len = (uint16_t)(comma - body);
+    pwd_len  = (uint16_t)(raw_len - 13u - ssid_len - 1u);
+
+    if (ssid_len < 1 || ssid_len > 32 || pwd_len < 8 || pwd_len > 63) {
+        GUI_SPI_NotifyLog("WIFI_CFG_ERR");
+        return;
+    }
+    for (i = 0; i < ssid_len; i++) {
+        if (body[i] < '0' || body[i] > '9') {
+            GUI_SPI_NotifyLog("WIFI_CFG_ERR");
+            return;
+        }
+    }
+    for (i = 0; i < pwd_len; i++) {
+        char ch = comma[1 + i];
+        if (ch < 0x20 || ch > 0x7E) {
+            GUI_SPI_NotifyLog("WIFI_CFG_ERR");
+            return;
+        }
+    }
+
+    /* ESP 协议暂无 SSID/密码透传字段，先按开关处理；透传需扩展 ESP 协议 */
+    ESP_SendCommand(ESP_CMD_WIFI_ON);
+    GUI_SPI_NotifyWifiStatus("CONNECTING");
+    PrintDebug("[GUI] WIFI_CONNECT ssid=%.*s\r\n", (int)ssid_len, body);
+}
+
+static void gui_process_cmd(const HostParsed_t *p)
+{
+    if (p == NULL) return;
+
+    switch (p->cmd) {
+    case HCMD_IMPORT_ENTER:
+        g_gui_smt_start_req = 1;
+        PrintDebug("[GUI] IMPORT_ENTER -> start download\r\n");
+        break;
+    case HCMD_IMPORT_EXIT:
+        if (g_state == HOST_DOWNLOADING) {
+            g_state = HOST_DEBUG;
+            g_gui_smt_start_req = 0;
+            if_DOWNLOAD_READY = 0;
+            PrintDebug("[GUI] IMPORT_EXIT -> download aborted\r\n");
+        }
+        break;
+    case HCMD_WIFI_CONNECT:
+        gui_handle_wifi_connect(p->raw, p->raw_len);
+        break;
+    case HCMD_WIFI_DISCONNECT:
+        ESP_SendCommand(ESP_CMD_WIFI_OFF);
+        GUI_SPI_NotifyWifiStatus("DISCONNECTED");
+        PrintDebug("[GUI] WIFI_DISCONNECT -> ESP WiFi OFF\r\n");
+        break;
+    default:
+        handle_debug_cmd((HostParsed_t *)p);
+        break;
+    }
+}
+
 void Host_Task(void *argument) {
     (void)argument;
 
@@ -1883,9 +1995,9 @@ void Host_Task(void *argument) {
     UART_SendString(UART_CH1, "DEBUG_MODE\n");
     g_state = HOST_DEBUG;
 
-    /* ---- TouchGFX 屏幕对接初始化 ---- */
-    Bridge_Init();
-    Bridge_NotifyMotorSpeed(PNP_SPEED_FAST);
+    /* ---- GUI SPI communication init ---- */
+    GUI_SPI_NotifySMTStatus(0);
+    { char _buf[32]; snprintf(_buf, sizeof(_buf), "SPEED:%u", (unsigned)PNP_SPEED_FAST); GUI_SPI_NotifyLog(_buf); }
 
     /* ===== 主循环 ===== */
     for (;;) {
@@ -1925,8 +2037,9 @@ void Host_Task(void *argument) {
                             g_comp_count = 0;
                             g_mark_count = 0;
                             g_header_parsed = false;
+                            if_DOWNLOAD_READY = 0;
                             PrintDebug("[HOST] Download started (from debug).\r\n");
-                            Bridge_NotifyDownloadStatus(1);
+                            GUI_SPI_NotifyLog("DOWNLOAD_START");
                         }
 
                         /* 下载模式：处理 CSV 行 */
@@ -1934,6 +2047,7 @@ void Host_Task(void *argument) {
                             if (parsed.cmd == HCMD_RAW_LINE) {
                                 g_last_line_tick = osKernelGetTickCount();
                                 parse_csv_line(parsed.raw, parsed.raw_len);
+                                GUI_SPI_NotifyImportData(parsed.raw);
                             } else {
                                 PrintDebug("[HOST] WARN: non-CSV cmd %d dropped in download\r\n",
                                            (int)parsed.cmd);
@@ -1946,10 +2060,19 @@ void Host_Task(void *argument) {
             UART_ClearData(UART_CH1);
         }
 
+        /* ---- 2.5 GUI SPI 命令处理 ---- */
+        {
+            HostParsed_t gcmd;
+            while (gui_cmd_queue != NULL &&
+                   osMessageQueueGet(gui_cmd_queue, &gcmd, NULL, 0) == osOK) {
+                gui_process_cmd(&gcmd);
+            }
+        }
+
         /* ---- 3. 加热台状态处理 ---- */
         Heater_ProcessStatus();
         /* 屏幕温度更新 */
-        Bridge_ProcessHeaterStatus();
+        gui_process_heater_status();
 
         /* ---- 4. 下载超时检测 ---- */
         if (g_state == HOST_DOWNLOADING) {
@@ -1964,8 +2087,8 @@ void Host_Task(void *argument) {
         if (g_gui_smt_pause_req &&
             g_state >= HOST_FIND_COMP && g_state <= HOST_PLACE) {
             g_gui_smt_pause_req = 0;
-            Bridge_NotifySMTStatus(0);
-            Bridge_NotifyLog(4, 0);  /* code=4: SMT paused */
+            GUI_SPI_NotifySMTStatus(0);
+            gui_notify_log_code(4, 0);  /* code=4: SMT paused */
             PrintDebug("[HOST] GUI: SMT paused.\r\n");
             Vision_SendEnd();
             Vision_ForceIdle();
@@ -1991,9 +2114,10 @@ void Host_Task(void *argument) {
                 g_comp_count = 0;
                 g_mark_count = 0;
                 g_header_parsed = false;
+                if_DOWNLOAD_READY = 0;
                 g_state = HOST_DOWNLOADING;
-                Bridge_NotifyDownloadStatus(1);
-                Bridge_NotifyLog(1, 0);  /* code=1: GUI triggered download */
+                GUI_SPI_NotifyLog("DOWNLOAD_START");
+                gui_notify_log_code(1, 0);  /* code=1: GUI triggered download */
                 PrintDebug("[HOST] GUI: download started.\r\n");
             }
             /* 处理 GUI 电机运动命令（从 motion_cmd_queue） */
@@ -2053,10 +2177,10 @@ void Host_Task(void *argument) {
         case HOST_MOVE_TO_PCB:       move_to_pcb_step();     break;
         case HOST_PLACE:             place_step();           break;
         case HOST_DONE: {
-            if (!s_bridge_done_notified) {
-                Bridge_NotifySMTStatus(0);
-                Bridge_NotifyLog(2, 0);  /* code=2: PnP complete */
-                s_bridge_done_notified = 1;
+            if (!s_gui_done_notified) {
+                GUI_SPI_NotifySMTStatus(0);
+                gui_notify_log_code(2, 0);  /* code=2: PnP complete */
+                s_gui_done_notified = 1;
             }
             done_step();
             break;
@@ -2074,7 +2198,7 @@ void Host_Task(void *argument) {
             g_motor_error = false;
             if (g_state != HOST_DEBUG && g_state != HOST_HOME) {
                 { uint8_t d[8] = {0}; d[0] = (uint8_t)g_motor_error_detail; Log_Write(LOG_MOTOR_ERROR, d); }
-                Bridge_NotifyLog(3, (uint8_t)g_motor_error_detail);
+                gui_notify_log_code(3, (uint8_t)g_motor_error_detail);
                 if (g_motor_error_detail == MOTOR_ERR_TIMEOUT) {
                     PrintDebug("[HOST] Motor TIMEOUT, coordinates invalidated.\r\n");
                 } else {
