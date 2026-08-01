@@ -1,4 +1,4 @@
-﻿#ifndef __APP_MOTION_H
+#ifndef __APP_MOTION_H
 #define __APP_MOTION_H
 
 #include "cmsis_os2.h"
@@ -90,6 +90,7 @@ void      r_axis_start(float angle, float speed_rpm);  /* 内部调 r_axis_rotat
 void      r_axis_poll(void);                            /* 空操作 */
 R_State_t r_axis_state(void);                           /* 返回 R_DONE (阻塞式已执行完) */
 int  safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc);
+void move_start_async(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc);
 void move_set_pad_ms(uint32_t pad_ms);
 
 /* 电机异常分级 */
@@ -110,6 +111,8 @@ extern volatile bool     g_axes_error;      /* CAN ISR 鈫?堵转/限位标志 *
 void axis_stop(int32_t addr);
 void disable_sync_stop(void);
 int  move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc);
+int  motion_read_encoder(uint8_t id, int32_t *out, uint32_t timeout_ms);
+int  jog_stop_update_coord(const char *dir_name, int32_t enc_x1_start, int32_t enc_x2_start, int32_t enc_y_start);
 
 /* ---- P2 连续扫描运动控制 ---- */
 void p2_scan_start(uint8_t dir, uint16_t speed, uint8_t acc);

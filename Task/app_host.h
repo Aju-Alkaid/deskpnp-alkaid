@@ -17,6 +17,7 @@
 #define PNP_SPEED        300   /* 通用速度 (RPM) */
 #define PNP_ACC          25    /* 通用加速度 */
 #define PNP_SPEED_FINE   100   /* 视觉迭代微调 */
+#define P1_SCAN_SPEED     100   /* P1 扫描移动速度 (RPM) */
 #define PNP_ACC_FINE     10    /* 微调加速度 */
 
 /* 下载超时(ms) */

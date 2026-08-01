@@ -3602,3 +3602,89 @@ if (ping_tick >= 50) {
 | `Task/app_motion.c` | 新增 6 个 static 辅助函数；重构 move_xy_relative / move_to / p2_scan_step_y / CAN_Process_Task；disable_sync_stop / p2_scan_start 调整；g_move_pad_ms 3000→500 |
 | `Task/app_motion.h` | 无接口变更 |
 
+## 四十七、2026-07-27 会话 — Jog 实时位置感知功能
+
+### 47.1 背景
+
+Jog（手控连续运动）使用 `positionMode3Run` 以极远绝对位置（�}8388607）驱动电机，
+停止后仅发 `0xF7` 急停，从未更新 `MachineCoord_t` 坐标——坐标停留在 Jog 开始前的值。
+
+### 47.2 方案
+
+"先分析后行动"模式，用户确认后实施。三步走：
+1. Jog START 时读 MKS 编码器起始值（X1+X2 或 Y 轴）
+2. MOVE_STOP 时急停 → 读编码器 → 算 delta → `Coord_UpdateXY` 增量更新
+3. X1+X2 龙门偏差 > `ENC_TOLERANCE_STEPS`(125) → 低速 F4 微调（speed=50, acc=30）→ 日志报告残留偏差
+
+日志格式沿用离散移动风格，坐标转换规则一致（`host_x = -motor_y`, `host_y = +motor_x`）：
+```
+[HOST] JOG_UP STOP -> (-150,320) 12345ms
+```
+
+### 47.3 修改文件
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_motion.h` | 新增 `motion_read_encoder` 声明；新增 `jog_stop_update_coord` 声明 |
+| `Task/app_motion.c` | `motion_read_encoder` 去 `static` 供跨文件调用；新增 `jog_stop_update_coord()` — 编码器 delta 计算 + 龙门偏差检测 + 低速微调 + `Coord_UpdateXY` |
+| `Task/app_host.c` | 新增 `#include "timestamp.h"`；新增 `g_jog_name` / `g_jog_enc_x1_start` / `g_jog_enc_x2_start` / `g_jog_enc_y_start` 静态变量；四个 `MOVE_*_START` 分支各加 `motion_read_encoder` 起始读取；`MOVE_STOP` 重写为调用 `jog_stop_update_coord` + 时间戳日志 |
+
+### 47.4 设计决策
+
+| 决策 | 理由 |
+|------|------|
+| Jog 保持 `positionMode3Run`，不切速度模式 | 用户选方案 A，不改运动方向 |
+| `jog_stop_update_coord` 放在 `app_motion.c` | 靠近编码器逻辑，不在 `app_host.c` 内联 |
+| 龙门微调复用 `move_xy_relative` 框架 | 低速 F4（speed=50, acc=30），偏差 >300 步放弃 |
+| 时间戳用 `TIM2_Get_Current_Timestamp_64b() / 1000` | 毫秒精度，与 timestamp.h 一致 |
+| 日志不包含运动方向——因为 Jog 方向名已嵌在日志中 | `JOG_UP` / `JOG_DOWN` / `JOG_LEFT` / `JOG_RIGHT` |
+
+
+
+### 48. P1 扫描模式升级：运动中识别 + 成功位置记忆（2026-07-31）
+
+#### 48.1 背景
+
+P1（上摄像头找元件）原有流程：`safe_move_to` 阻塞移动到子位置 → `Vision_Start` 启动 P1
+→ 等 `stp` → 等 `VISION_DONE`。每次切子位置都有"运动等待时间 + 视觉检测时间"串行开销。
+同时，后续同 cell 元件总是从中心（子位置 0）开始扫描，不利用之前成功找到的位置信息。
+
+#### 48.2 需求
+
+1. **运动中识别**：从子位置 A 移动到子位置 B 期间，P1 视觉同步运行。若途中锁定元件则立即停机检测。
+2. **成功位置记忆**：同 cell 内存放同类型元件，找到后下一个同 cell 元件从该成功子位置开始。
+
+#### 48.3 方案
+
+`find_comp_step()` 重构为三级子状态机（`FIND_IDLE` → `FIND_MOVING` → `FIND_WAITING`），
+运动使用 `move_start_async()` 非阻塞启动，状态机同时轮询视觉状态和运动完成标志。
+
+#### 48.4 设计决策
+
+| 决策 | 选择 | 理由 |
+|------|------|------|
+| 途中 stp 归属 | 目标子位置（`g_p1_found_pos = g_p1_scan_pos`） | 代码最简，间距仅 size/4，视觉偏移补偿 |
+| wraparound | 末尾→0→记忆位置前停止 | 覆盖所有子位置 |
+| 运动完成坐标 | 设为目标坐标（同 `move_xy_relative` 逻辑） | 位置模式可靠 |
+| 途中停机坐标 | 读编码器算实际位移增量 | 任意位置都能恢复精确坐标 |
+| 扫描速度 | 100 RPM（`P1_SCAN_SPEED`） | 低速保证运动中图像不模糊 |
+| 记忆重置 | 新 PnP 开始 + RESUME 补料后 | 补料后元件分布已变 |
+
+#### 48.5 代码变更
+
+| 文件 | 变更 |
+|------|------|
+| `Task/app_motion.h:93` | 新增 `move_start_async()` 声明 |
+| `Task/app_motion.c:614` | 新增 `move_start_async()` 实现（排空帧+清零+发指令+同步触发） |
+| `Task/app_host.h:21` | 新增 `#define P1_SCAN_SPEED 100` |
+| `Task/app_host.c:158~171` | 新增全局变量：`g_scan_start_pos[4]` / `g_p1_wrapped` / `FindSubState_t` / `g_find_sub` / 运动追踪上下文 |
+| `Task/app_host.c:1347` | 新增 `p1_restore_coord()` — 运动中停机读编码器恢复坐标 |
+| `Task/app_host.c:1376` | 新增 `p1_try_next_subpos()` — 子位置推进 + wraparound |
+| `Task/app_host.c:1394~1490` | 重写 `find_comp_step()` — 三级子状态机 |
+| `Task/app_host.c:447~463` | 修改 `start_p1_find_first()` — 改为设 FIND_IDLE，移除阻塞 move+Vision_Start |
+| `Task/app_host.c:790` | 修改 RESUME 路径 — 重置 `g_scan_start_pos[]` |
+
+#### 48.6 已知问题
+
+`place_step`、RESUME 路径、P3吸入重试、PICK重试 等过渡路径仍使用旧模式 `safe_move_to` + `Vision_Start`。
+`Vision_Start` 调用被 `FIND_IDLE` 的第二次 `Vision_Start` 覆盖（`reset_all`），功能正常但浪费一次 P1 启动。后续可逐步迁移。

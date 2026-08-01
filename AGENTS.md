@@ -4,34 +4,147 @@
 
 > **文件编辑规则（AI Agent 必读）**
 > 
-> 工具链：Node.js 可用（`node -e`），无 Python。源文件 UTF-8 + CRLF。
+> 工具链：Node.js 可用，无 Python。源文件 UTF-8 + CRLF。
 > 
 > **禁止用 PowerShell 字符串拼接、行号定位、ArrayList Insert/RemoveAt 做代码编辑。**
 > 
-> **唯一可靠方式：Base64 + Node.js**
+> **速查表：**
+> 
+> | 场景 | 推荐方式 | 理由 |
+> |------|---------|------|
+> | 改 1 处（简单） | apply_patch | 不落磁盘，最快 |
+> | 改 1~3 处 | `_replace.ps1` | CRLF 自动回退 + DryRun |
+> | 改 >3 处 / 链式替换 | 临时 Node.js 脚本 | 链式 replaceAll 一次搞定 |
+> | 多行文本块替换 | `_replace.ps1` | @'...'@ 直接贴多行 |
+> | 纯删除某行 | apply_patch | `*** End of File` 标记结尾 |
+> | 改动 >50% | 整文件重写 | 注意 CRLF 事后修正 |
+> | 急修单行 | Base64 内联 | 一行命令，不建文件 |
+> 
+> ---
+> 
+> **首选：`_replace.ps1`（内置 CRLF 自动回退 + DryRun 预览）**
+> 
+> 编辑 `tools\_replace.ps1` 中的 `$TARGET_FILE` / `$OLD_TEXT` / `$NEW_TEXT`，
+> 多行文本直接粘贴在 `@'...'@` 之间，无需转义。内部自动处理 CRLF/LF 不匹配。
+> 
+> ```pwsh
+> powershell -ExecutionPolicy Bypass -File .\tools\_replace.ps1           # 执行替换
+> powershell -ExecutionPolicy Bypass -File .\tools\_replace.ps1 -DryRun   # 预览模式
+> ```
+> 
+> **v2 特性：** `-DryRun` 预览 | 4 种 CRLF/LF 自动回退匹配 | 失败诊断（首行 + 偏移）| 替换计数
+> 
+> **次选：临时 Node.js 脚本文件（链式多次替换 / `_replace.ps1` 不可用时）**
+> 
+> 将替换逻辑写入 `tools/_patch.js`，然后 `node tools/_patch.js` 执行。
+> 支持 `replaceAll` 链式调用一次改多处。脚本执行后立即删除。
+> 
+> ⚠️ **CRLF 陷阱：** 手写的 `oldText` 换行符必须和文件中一致（CRLF），
+> 否则 `includes()` / `replaceAll()` 会静默 miss。不确定时优先用 `_replace.ps1`。
+> 
+> ```js
+> const fs = require("fs");
+> const f = "E:/path/to/file.c";   // ★ 必须用正斜杠，反斜杠会被 Node.js 吃掉
+> let c = fs.readFileSync(f, "utf8");
+> // 链式多次替换
+> if (!c.includes("原文1")) { console.log("NOT FOUND: 原文1"); process.exit(1); }
+> c = c.replaceAll("原文1", "替换1");
+> c = c.replaceAll("原文2", "替换2");
+> c = c.replaceAll("原文3", "替换3");
+> fs.writeFileSync(f, c, "utf8");
+> console.log("OK");
+> ```
+> 
+> **轻量备选：apply_patch（单一简单替换，不污染磁盘）**
 > 
 > ```
+> *** Begin Patch
+> *** Update File: path/to/file.c
+> @@
+>  {前导上下文行}
+> -{要删除的行}
+> +{要添加的行}
+>  {后继上下文行}
+> *** End Patch
+> ```
+> 
+> **★ 定位机制（与 unified diff 不同）：** apply_patch 将 hunk 中所有上下文行（` ` 开头）
+> 和删除行（`-` 开头）脱掉前缀标志后串成连续文本，在文件中做全文搜索定位。
+> `+` 添加行不参与定位搜索。
+> 
+> **★ 核心约束：上下文行与删除行内容不能相同**，否则脱符号后出现重复行 → 搜索失败。
+> 纯删除（无 `+` 行）时用 `*** End of File` 标记文件结尾。
+> `@@` 行号可省略，会自动基于上下文行定位。
+> 
+> **实际通过的示例：**
+> 
+> 单行替换（`P1_SCAN_SPEED 100` → `150`）：
+> ```
+> *** Begin Patch
+> *** Update File: Task/app_host.h
+> @@
+>  
+> -#define P1_SCAN_SPEED 100
+> +#define P1_SCAN_SPEED 150
+>  #define P1_SCAN_ACC   200
+> *** End Patch
+> ```
+> 
+> 多行替换 + 纯删除：
+> ```
+> *** Begin Patch
+> *** Update File: Task/app_host.c
+> @@
+>  void old_func(void) {
+> -    int a = 1;
+> -    int b = 2;
+> -    return a + b;
+> +    return new_impl();
+>  }
+> *** End Patch
+> 
+> *** Begin Patch
+> *** Update File: Task/app_host.c
+> @@
+>  // deprecated section
+> -#define DEPRECATED_MACRO 999
+> *** End of File
+> *** End Patch
+> ```
+> 
+> 不支持链式多次替换（需分多个独立 hunk 或改用 Node.js 脚本）。
+> 若失败，回退到 Node.js 临时脚本。
+> 
+> **限急用：Base64 + Node.js 内联（仅适合短文本单行替换）**
+> 
+> ```pwsh
 > $old = "从目标文件原样复制的原文"
 > $new = "替换后的文本"
 > $f   = "E:/path/to/file.c"
 > $ob  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($old))
 > $nb  = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($new))
-> node -e "const f=require('fs');let c=f.readFileSync('$f','utf8');" +
->          "let o=Buffer.from('$ob','base64').toString('utf8');" +
->          "let n=Buffer.from('$nb','base64').toString('utf8');" +
->          "c=c.replaceAll(o,n);f.writeFileSync('$f',c,'utf8');"
+> node -e "const f=require('fs');let c=f.readFileSync('$f','utf8');let o=Buffer.from('$ob','base64').toString('utf8');let n=Buffer.from('$nb','base64').toString('utf8');c=c.replaceAll(o,n);f.writeFileSync('$f',c,'utf8');"
 > ```
 > 
-> 关键：`$old` 必须从目标文件原样复制，换行符（CRLF/LF）要一致。
-> 多次替换在同一个 node -e 内串联 replaceAll。
-> 匹配失败 node 输出 NOT FOUND，不破坏文件。
+> **极端情况：整文件重写（改动 >50% 时适用）**
 > 
-> **手动使用（推荐）：** 编辑 `tools\_replace.ps1` 中的 `$TARGET_FILE` / `$OLD_TEXT` / `$NEW_TEXT`，
-> 然后 `powershell -ExecutionPolicy Bypass -File .\tools\_replace.ps1` 运行。
-> 多行文本直接粘贴在 `@'...'@` 之间，无需转义。
+> ```pwsh
+> $content = @'
+> ... 完整的新文件内容 ...
+> '@
+> [System.IO.File]::WriteAllText("E:/path/to/file.c", $content, [System.Text.UTF8Encoding]::new($false))
+> ```
 > 
-> **v2 特性：** `-DryRun` 预览模式 | 4 种 CRLF/LF 自动回退匹配 | 失败时输出诊断（搜索文本首行 + 文件偏移）
-
+> ⚠️ PowerShell here-string (`@'...'@`) 会把 CRLF 转成 LF，若项目要求 CRLF 需事后修正。
+> 
+> ---
+> 
+> **通用注意事项：**
+> 
+> - 路径一律用正斜杠 `E:/path/to/file`，避免反斜杠被转义。
+> - 所有文件视为 UTF-8，读写不得改变编码。
+> - 禁止用 `echo` / `Set-Content` / 内联多行 `node -e` 做复杂替换。
+> - 不用的临时脚本及时删除。## 一、项目概览
 
 ## 一、项目概览
 
@@ -57,6 +170,7 @@
 | SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, 连接 ESP32 通信模块 |
 | TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) Z轴舵机 PWM (50Hz) / 32位时间戳基准 |
 | TIM5 | CH1(PB2) KTH7823 编码器输入捕获 (170MHz, 已弃用) / CH3(PE8) Z轴舵机 PWM (50Hz) |
+| TIM5 | CH1(PB2) KTH7823 编码器输入捕获 (170MHz, 已弃用) / CH3(PE8) 12VO3 PWM 输出 (50Hz，舵机已迁移至 TIM2_CH3/PB10) |
 | TIM6 | HAL 系统时基 |
 | CRC | 硬件 CRC 校验 |
 | GPIO 按键 | KEY1(PC6) / KEY2(PC7) / CW(PA8) / CCW(PC8) / PUSH(PC9), 低电平有效 |
@@ -132,8 +246,8 @@ pnp_1/
 - **协议格式：** 行文本协议，`COMMAND arg\n`
 - **命令列表：**
   - `MOVE_UP/DOWN/LEFT/RIGHT <步长mm>` — 离散移动（0.3/0.5/1/5/10）
-  - `MOVE_*_START <速度mm/s>` — 连续移动开始（1~50），第二次点击自动发 `MOVE_STOP`
-  - `MOVE_STOP` — 停止连续移动
+  - `MOVE_*_START <速度mm/s>` — 连续移动开始（1~50），第二次点击自动发 `MOVE_STOP`。启动后记录 MKS 编码器起始值（X1+X2 或 Y 轴），供停止时坐标恢复
+  - `MOVE_STOP` — 停止连续运动 → 读 MKS 编码器 → 算 delta → `Coord_UpdateXY` 增量更新坐标 → 日志格式与离散移动一致: `[HOST] JOG_方向 STOP -> (x,y) t=ms`。龙门偏差>125步自动低速F4微调
   - `MOVE_TO <x> <y>` — 运动至绝对坐标 (mm)
   - `SET_ORIGIN` — 当前位置设为零点。仅 HOST_HOME 或 HOST_DEBUG 状态下生效，PnP 途中调用被忽略（防止意外毁掉座标系）。HOST_HOME 状态触发后自动发 DEBUG_MODE 进入 HOST_DEBUG
   - `SET_SERVO <角度>` — Z 轴舵机 (0~180°, 角度越大吸嘴越低)
@@ -159,6 +273,7 @@ pnp_1/
   6. 坐标值含 `mm` 后缀（如 `"8mm"`），固件自动去后缀解析为浮点数
   7. 详细规范见上位机文档《单片机端 CSV 数据处理规范》
 - **无校验：** 纯文本协议，依赖 UART 硬件可靠性
+- **Jog 位置感知（2026-07-27 新增）：** Jog 停止后通过 MKS 31H 编码器读取实际位移 delta，增量更新机器坐标。X1+X2 龙门偏差 >125 步时自动低速 F4 微调修正（与 `move_xy_relative` 到位策略一致）。实现函数 `jog_stop_update_coord()` in `app_motion.c`，`motion_read_encoder()` 已去 static。不改变 Jog 运动方向（仍用 `positionMode3Run`）
 
 
 ### 4.2 G4 ↔ MaixCam 摄像头 (USART2, PD5/PD6)
@@ -267,9 +382,9 @@ pnp_1/
   > 角度符号：P1 `-angle*100`（取反），P3 `angle*100`（不取反）。
   > P4 为**迭代对准**，用于建系前后的吸嘴中心基线/漂移校验。
   > 详细协议参见上位机文档 `E:/聊天记录/通讯接口文档 (1).md`。
-- **固件侧实现：**- **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
+- **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
 
-**P4 — 下相机圆形标定对位（吸嘴中心）**
+### 4.2.4 P4 — 下相机圆形标定对位（吸嘴中心）
 
 **功能：** 下相机检测吸嘴圆（面积 1500-1900 px²，448×448），迭代对准吸嘴中心，用于 P2 建系前后的坐标基线/漂移校验。
 
@@ -347,6 +462,52 @@ pnp_1/
 > **诊断命令:** 串口发送 `MSCNT_TEST` 启动 5 秒 MSCNT 原始值采样测试
 > (TMC2209 定速 5000Hz, 每 20ms 读一次, 用于验证 MSCNT 寄存器行为)。
 
+### 4.2.3 P1 扫描子状态机（2026-07-31 更新）
+
+P1 扫描流程由 `find_comp_step()` 内部的三级子状态机管理：
+
+FIND_IDLE       → FIND_MOVING      → FIND_WAITING
+（启动扫描）      （运动中+检测中）    （等视觉结果）
+
+**FIND\_IDLE — 启动运动+视觉：**
+1. 若 `g_p1_found_pos >= 0`（上一次 VISION_DONE 保留的找到位置），从 `g_scan_start_pos[cl]` 恢复记忆位置并清除标志
+2. 计算目标子位置坐标 = `scatter_subpos[cl][g_p1_scan_pos] + cam_to_nozzle` 偏移
+3. `z_safe()` → `osDelay(100)` → 保存起始坐标和编码器值
+4. 调用 `move_start_async(dx, dy, P1_SCAN_SPEED, PNP_ACC)` 启动非阻塞运动
+5. 调用 `Vision_Start(VCMD_P1, class_id)` 启动 P1 视觉检测
+6. 转 `FIND_MOVING`
+
+**FIND\_MOVING — 运动中轮询：**
+- `VISION_GOT_CATEGORY_QUERY` → `Vision_ClsReply()`（运动中回复类别）
+- `VISION_GOT_STOP` → `axis_stop` 全轴停车 → `p1_restore_coord()` 恢复坐标 → `Vision_Go` → 转 `FIND_WAITING`
+- `VISION_ERROR` → 停车 → `p1_restore_coord()` → 转 `FIND_WAITING`（`return` 防竞态）
+- `g_axes_done_bits` 满足 → `Coord_UpdateXY(g_move_target)` → 转 `FIND_WAITING`
+
+**FIND\_WAITING — 电机已停，等待视觉：** 复用原有视觉结果处理逻辑。
+
+**辅助函数：**
+
+| 函数 | 文件 | 功能 |
+|------|------|------|
+| `move_start_async(dx, dy, speed, acc)` | `app_motion.c:614` | 非阻塞启动运动：排空帧+清零+发位置指令+同步触发 |
+| `p1_restore_coord()` | `app_host.c:1347` | 运动中停机后读编码器算实际位移增量 |
+| `p1_try_next_subpos(c)` | `app_host.c:1376` | 推进子位置 + wraparound；`false`=全部耗光 |
+
+**成功位置记忆：**
+
+| 变量 | 说明 |
+|------|------|
+| `g_scan_start_pos[SCATTER_CELLS]` | 每个 cell 的上次成功子位置，初始 0 |
+| `g_p1_wrapped` | 本轮是否已 wraparound |
+
+VISION_DONE 时 `g_scan_start_pos[cl] = g_p1_found_pos`。下一同 cell 元件从记忆位置开始，wraparound 兜底。重置时机：`start_p1_find_first()`（新 PnP）+ RESUME（补料后）。
+
+**关键常量：**
+
+| 常量 | 值 | 文件 |
+|------|-----|------|
+| `P1_SCAN_SPEED` | 100（扫描移动 RPM） | `app_host.h:21` |
+
 ### 4.3 G4 ? MKS SERVO42D 电机 (CAN, FDCAN1)
 
 - **物理层：** CAN 2.0A, 500kbps, 标准帧(11位ID)
@@ -364,7 +525,7 @@ pnp_1/
   - `0x92` 设为零点
   - `0x4A` 开启同步标志（须逐电机发送）
   - `0x4B` 同步执行触发（**必须发广播地址 0x00**，逐电机发会导致双 X 轴分步堵转）
-  - `0x95` 设置到位阈值（默认 200 步，已改为 50 步（0.5mm 精度））
+- `0x95` 设置到位阈值（默认 200 步，已改为 125 步，与 ENC_TOLERANCE_STEPS 对齐（0x7D））
   - `0x83` 设置工作电流 — `Motor_Init()` 中已设三轴为 1400mA（写入 RAM，断电恢复默认）
 - **状态码（电机→G4）：** （注意 0x02 的 CAN TX mailbox 行为见下文）
   - `0x01` 已接收/运行中（非同步模式立即开始运动）
@@ -573,46 +734,38 @@ ping，保证 0x02 在 ~360ms 内被接收。
 ## 九、已知问题与注意事项
 
 ### 9.2 警告问题（建议修复）
-2. **CAN ISR 中调用 PrintDebug（已修复，见 §9.6-2）：** `HAL_FDCAN_RxFifo0Callback` 中 PrintDebug 调用已用 `#ifdef DEBUG_CAN_ISR` 包裹。
-3. **`CAN_Transmit_Data` 中调试打印（已修复，见 §9.6-2）：** 每次 CAN 发送的 TX 日志同样用 `#ifdef DEBUG_CAN_ISR` 包裹。
-4. **`motor_send_move_cmd` 函数体冗余：** 该函数的 buffer 填充逻辑与 `positionMode3Run` 重复，实际调用也是转发到后者。建议移除冗余逻辑或直接废弃此函数。
+1. **CAN ISR 中调用 PrintDebug（已修复，见 §9.6-2）：** `HAL_FDCAN_RxFifo0Callback` 中 PrintDebug 调用已用 `#ifdef DEBUG_CAN_ISR` 包裹。
+2. **`CAN_Transmit_Data` 中调试打印（已修复，见 §9.6-2）：** 每次 CAN 发送的 TX 日志同样用 `#ifdef DEBUG_CAN_ISR` 包裹。
+3. **`motor_send_move_cmd` 函数体冗余：** 该函数的 buffer 填充逻辑与 `positionMode3Run` 重复，实际调用也是转发到后者。建议移除冗余逻辑或直接废弃此函数。
 
-### 9.6 R轴编码器方案已弃用
-
-6. **KTH7823磁编码器偏心问题 (2026-07-15):** 编码器的正弦偏心误差无法通过
-   软件校准彻底消除。经 MSCNT探索和验证后，R轴最终采用 TMC2209时间积分
-   开环方案。精度依赖 VACTUAL速度准确性（典型 <2%误差），对 R轴贴装角度
-   要求足够。`driver_kth7823.c/h`文件保留但未编译引用。
-
-
-### 9.6 R轴编码器方案已弃用
+**R轴编码器方案已弃用**
 
 6. **KTH7823 磁编码器偏心问题 (2026-07-15):** 编码器的正弦偏心误差无法通过
    软件校准彻底消除。经 MSCNT 探索和验证后，R 轴最终采用 TMC2209 时间积分
    开环方案（阻塞式 `r_axis_rotate`，非阻塞兼容层保留）。精度依赖 VACTUAL
    速度准确性，容差约 1~2°。`driver_kth7823.c/h` 文件保留但未编译引用。
 ### 9.3 功能性问题（部分已解决）
-5. **离散移动命令去重 BUG（已修复）：** `handle_debug_cmd` 的去重逻辑原先对所有命令生效，导致同方向同步长的离散移动（MOVE_UP/DOWN/LEFT/RIGHT）只能执行一次。已收窄为仅对 JOG START 命令去重。
-5. **正式运动任务（已解决，见 §9.8）：** `PnP_Motion_Task` 已由 `Host_Task` 取代，`Host_Task` 统一处理调试命令和 PnP 流程。
-6. **MOTION_CMD_PICK/PLACE 缺少 XY 移动到吸嘴/贴装位置：** `pick_component()` 和 `place_component()` 直接操作 Z 轴舵机，但调用前需要上层先发送 `MOTION_CMD_MOVE_TO` 到达目标位置。
-7. **连续移动（已解决，见 §9.8）：** `Host_Task` 的 `handle_debug_cmd` 已实现完整的 JOG 控制（同步模式+positionMode3Run+motorSyncTrigger）。
-8. **R 轴控制：** `r_axis_rotate` 通过 `TMC_SetSpeed`（VACTUAL 寄存器）直接驱动 TMC2209（UART3），已对接。R 轴使用「使能→旋转→关闭」模式，`TMC_Init()` 初始化后驱动默认关闭，`r_axis_rotate` 内部自动使能/关闭。P1/P3 阶段已加入两步闭环角度矫正（详见 §9.16）。详见 HISTORY.md §16.7。
-9. **LPUART1 未配置 DMA 接收：** `hdmarx = NULL`，仅用作 TMC2209 半双工阻塞通信。如果该通道用于其他用途需重新配置。
-10. **CAN 滤波器配置隐患：** `FilterID2 = 0x1FFC0000` 超出 HAL 11-bit 范围，当前因 `StdFiltersNbr = 0` 恰好全通。CubeMX 重新生成时若 `StdFiltersNbr` ≥ 1，滤波器将仅通过 ID 低 8 位为 0 的帧，所有 CAN 通信中断。修复：将 `FilterID2` 改为 `0x000`，确保 `StdFiltersNbr` ≥ 1。
+1. **离散移动命令去重 BUG（已修复）：** `handle_debug_cmd` 的去重逻辑原先对所有命令生效，导致同方向同步长的离散移动（MOVE_UP/DOWN/LEFT/RIGHT）只能执行一次。已收窄为仅对 JOG START 命令去重。
+2. **正式运动任务（已解决，见 §9.8）：** `PnP_Motion_Task` 已由 `Host_Task` 取代，`Host_Task` 统一处理调试命令和 PnP 流程。
+3. **MOTION_CMD_PICK/PLACE 缺少 XY 移动到吸嘴/贴装位置：** `pick_component()` 和 `place_component()` 直接操作 Z 轴舵机，但调用前需要上层先发送 `MOTION_CMD_MOVE_TO` 到达目标位置。
+4. **连续移动（已解决，见 §9.8）：** `Host_Task` 的 `handle_debug_cmd` 已实现完整的 JOG 控制（同步模式+positionMode3Run+motorSyncTrigger）。
+5. **R 轴控制：** `r_axis_rotate` 通过 `TMC_SetSpeed`（VACTUAL 寄存器）直接驱动 TMC2209（UART3），已对接。R 轴使用「使能→旋转→关闭」模式，`TMC_Init()` 初始化后驱动默认关闭，`r_axis_rotate` 内部自动使能/关闭。P1/P3 阶段已加入两步闭环角度矫正（详见 §9.16）。详见 HISTORY.md §16.7。
+6. **LPUART1 未配置 DMA 接收：** `hdmarx = NULL`，仅用作 TMC2209 半双工阻塞通信。如果该通道用于其他用途需重新配置。
+7. **CAN 滤波器配置隐患：** `FilterID2 = 0x1FFC0000` 超出 HAL 11-bit 范围，当前因 `StdFiltersNbr = 0` 恰好全通。CubeMX 重新生成时若 `StdFiltersNbr` ≥ 1，滤波器将仅通过 ID 低 8 位为 0 的帧，所有 CAN 通信中断。修复：将 `FilterID2` 改为 `0x000`，确保 `StdFiltersNbr` ≥ 1。
 ### 9.4 代码质量
-10. **`driver_motor.c runFail/runOK` 死循环：** 两个函数都是 `while(1){}` 空循环，无实际错误处理逻辑。
-11. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`realTimeLocation` 等，部分来自早期代码残留。注意：`CAN_ID` 在 `canCRC_ATM()` 中有实际使用（CRC 计算），`can_rx_queue` 已删除。
-12. **`app_test.h` 与 `app_motion.h` 重复声明（已修复，见 §9.6-5）：** 重复的 `semX1Done`、`evtAxesDone` 等 extern 声明已从 `app_test.h` 移除。
+1. **`driver_motor.c runFail/runOK` 死循环：** 两个函数都是 `while(1){}` 空循环，无实际错误处理逻辑。
+2. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`realTimeLocation` 等，部分来自早期代码残留。注意：`CAN_ID` 在 `canCRC_ATM()` 中有实际使用（CRC 计算），`can_rx_queue` 已删除。
+3. **`app_test.h` 与 `app_motion.h` 重复声明（已修复，见 §9.6-5）：** 重复的 `semX1Done`、`evtAxesDone` 等 extern 声明已从 `app_test.h` 移除。
 ### 9.5 编译与构建
-14. **Keil MDK 工程：** 主要使用 MDK-ARM 目录下的 Keil 工程编译。CMakeLists.txt 也可用于构建。
-15. **`overflow_count` 唯一声明在 `timestamp.c`：** `timestamp.h` 有 `extern volatile`，`main.c` 通过包含 `timestamp.h` 使用，不得在 main.c 中重复定义。
+1. **Keil MDK 工程：** 主要使用 MDK-ARM 目录下的 Keil 工程编译。CMakeLists.txt 也可用于构建。
+2. **`overflow_count` 唯一声明在 `timestamp.c`：** `timestamp.h` 有 `extern volatile`，`main.c` 通过包含 `timestamp.h` 使用，不得在 main.c 中重复定义。
 
 ### 9.6 已完成的架构改进（2026-05）
 1. **已创建 `host_pkt_queue`：** 64 深度 `HostMsg_t` 队列，UART 空闲中断回调 → 队列 → Host_Task。修复了原先队列未创建导致 NULL 写入的运行时 Bug。
 2. **已添加 `g_debug_mutex` + `DEBUG_CAN_ISR` 条件编译：** 互斥锁保护任务上下文 `PrintDebug` 的静态 `s_debug_buf`，解决多任务并发日志交错。ISR 中 PrintDebug 由 `DEBUG_CAN_ISR` 宏控制（默认关闭），彻底消除 ISR 阻塞 UART 问题。
 3. **`StartHostMotionTestTask` 已改为事件驱动：** 原主循环 `vTaskDelay(10ms)` 轮询改为 `osThreadFlagsWait` 阻塞等待。UART 空闲中断通过 `osThreadFlagsSet(hostMotionTaskHandle, ...)` 唤醒任务，延迟从 ≤10ms 降至 <1ms。
 4. **`Key_Task` 已改用 `osDelayUntil`：** 原 `osDelay(10)` 改为 `osDelayUntil`，消除任务执行时间导致的周期漂移，保证精确 10ms 扫描间隔。
-5. **已删除未使用的 FreeRTOS 对象：** `semX1Done`、`semX2Done`、`semYDone`、`semEmergency`（信号量）和 `can_rx_queue`（队列）已从源码中移除。到位通知统一使用 `evtAxesDone` 事件组。
+5. **已删除未使用的 FreeRTOS 对象：** `semX1Done`、`semX2Done`、`semYDone`、`semEmergency`（信号量）和 `can_rx_queue`（队列）已从源码中移除。到位通知统一使用 `g_axes_done_bits`/`g_axes_error` volatile 全局变量（`evtAxesDone` 对象虽已创建但未被使用）。
 
 
 ### 9.7 P2 连续速度扫描 (2026-07-14)
@@ -656,7 +809,7 @@ ping，保证 0x02 在 ~360ms 内被接收。
 
 ## 十、快速参考
 
-### 9.7 已完成的改进（2026-06）
+### 9.19 已完成的改进（2026-06）
 
 > 此三项改进的详细记录已移至 §18（舵机驱动改进记录），此处仅保留索引：
 3. TIM5 HAL State 绕过 → HISTORY.md §18.2
@@ -870,7 +1023,7 @@ CAM_MOVE_SPEED 从 300 RPM（25 mm/s）降至 **100 RPM（≈8.3 mm/s）**，配
 
 `CAN_Process_Task` 使用 `osWaitForever` 阻塞读取 `motor_event_queue`，`move_xy_relative` 原先直接轮询同一队列（0 超时）。前者优先级相同但总先抢到到位帧，后者永远看不到 0xF5+0x02 完成包。
 
-**修复：** `move_xy_relative` 改为通过 `osEventFlagsGet(evtAxesDone)` 非破坏性读事件组标志，不再直接访问队列。`CAN_Process_Task` 负责消费队列并设标志，`move_xy_relative` 只读标志，分工明确无竞争。
+**修复：** `move_xy_relative` 改为通过轮询 `g_axes_done_bits` volatile 全局变量（非破坏性读），不再直接访问队列。`CAN_Process_Task` 负责消费队列并设标志，`move_xy_relative` 只读标志，分工明确无竞争。
 
 #### 根因 2：osFlagsWaitAny auto-clear 丢失标志
 
@@ -906,11 +1059,11 @@ dy_s = -(int32_t)(r->dx * CAM_MM10000_TO_STEPS);
 
 **要点：** （1）轴映射 — cam.dx→Y电机(dy_s)，cam.dy→X1+X2(dx_s)，P1/P2/P3 三者一致；（2）P1/P2 两轴取反（dx_s/dy_s 均为负），P3 仅 r->dx 取反（dy_s 为负）、r->dy 不取反（dx_s 为正）。
 
-#### move_xy_relative 当前架构
+#### move_xy_relative 架构（2026-06-13 当时；现已改用 g_axes_done_bits 轮询，evtAxesDone 仅创建未使用）
 
 ```
 osEventFlagsClear → 发 CAN 命令 → while(真实时钟未超时) {
-    flags = osEventFlagsGet(evtAxesDone);  // 非破坏性读
+    // 轮询 g_axes_done_bits（volatile 全局变量）
     if (flags & ERROR) → return -2;
     if ((flags & done_mask) == done_mask) → return 0;
     UART_Driver_Process + 中断命令检测;
@@ -958,7 +1111,7 @@ if (pkt.ID == HEATER_STATUS_ID && heater_rx_queue != NULL) {
 
 **温度打印修复：** `Heater_ProcessStatus` 中新增 `print_temp()` 辅助函数，先取绝对值再格式化，避免 C 语言负数除/取模歧义（`-5/10=0` 导致 `-0.5°C` 错误显示为 `0.5`）。
 
-**波特率确认：** 加热台与电机共享 FDCAN1（1 Mbps），加热台从机侧已同步调整为 1 Mbps。
+**波特率确认：** 加热台与电机共享 FDCAN1（500 kbps），加热台从机侧已同步调整为 500 kbps。
 
 **涉及文件：**
 
@@ -1128,6 +1281,10 @@ P1/P2/P3 视觉 step 函数使用独立的摄像头→电机映射（§9.14, §9
 
 ### 9.18 R 轴 KTH7823 闭环控制（2026-07-11~12）
 
+> **⚠️ 此方案已于 2026-07-15 废弃。** KTH7823 闭环因编码器偏心问题无法解决，
+> R 轴最终回归 TMC2209 时间积分开环方案（阻塞式 `r_axis_rotate`，见 §4.2.2）。
+> `driver_kth7823.c/h` 文件保留但未编译引用。本节仅作历史参考。
+
 **背景：** 原先 R 轴使用 TMC2209 VACTUAL 速度模式开环控制（定时盲估到位），无位置反馈。
 新增 KTH7823 14-bit 磁编码器实现闭环 PID 位置控制。
 
@@ -1142,10 +1299,12 @@ PSC 从 169 降至 0 → 舵机 ARR 从 19999 变为 3,399,999，舵机驱动 pu
 | 层 | 文件 | 职责 |
 |----|------|------|
 | 驱动层 | driver_kth7823.c/h | PWM 双边沿输入捕获 ISR + 角度公式解算 (910Hz 更新率) |
-| 控制层 | pp_motion.c _axis_rotate() | 闭环 PID (位置式, static 复用) + 解绕 (unwrap) 角度处理 |
-| 配置层 | pp_config.h | R_CLOSED_KP/KI/KD/MAX_SPEED/THRESHOLD/TIMEOUT/KICK_MS/LOOP_MS |
+| 控制层 | app_motion.c 
+_axis_rotate() | 闭环 PID (位置式, static 复用) + 解绕 (unwrap) 角度处理 |
+| 配置层 | app_config.h | R_CLOSED_KP/KI/KD/MAX_SPEED/THRESHOLD/TIMEOUT/KICK_MS/LOOP_MS |
 
-**闭环流程：** _axis_rotate(target) → TMC2209 使能 → 初始方向开环起步 10ms →
+**闭环流程：** 
+_axis_rotate(target) → TMC2209 使能 → 初始方向开环起步 10ms →
 PID 循环 (5ms 周期): 读编码器角度 → 解绕到 target±180° → PID 计算速度 → TMC_SetSpeed →
 |error|<0.2° 到位停机 → TMC2209 关断。
 
@@ -1168,13 +1327,16 @@ PID 循环 (5ms 周期): 读编码器角度 → 解绕到 target±180° → PID 
 | Core/Src/stm32g4xx_it.c | TIM5_IRQHandler (CubeMX 生成) |
 | Drivers/ZeMCU-G4/driver_drv8803.c | Port_24VO4 移除 PB2, num_pins=1 |
 | Task/app_config.h | 新增 8 个 R_CLOSED_* PID 参数常量 |
-| Task/app_motion.c | _axis_rotate() 闭环 PID; _axis_set_zero() 编码器零点 |
+| Task/app_motion.c | 
+_axis_rotate() 闭环 PID; 
+_axis_set_zero() 编码器零点 |
 | Task/app_host.c | KTH7823_Init() 调用 + 错误检查; host_start_r_correction 阈值统一 |
 
 **已知限制：**
 - PID 参数 (KP=2.5, KI=0.05, KD=0.3) 为理论值，需实机整定
-- _axis_rotate 返回值未在调用方检查（与原开环行为一致，PnP 状态机暂无 R 轴超时恢复路径）
-- R_CORRECTION_THRESHOLD_DEG (0.1°) 仍定义但已无引用，被 R_CLOSED_THRESHOLD (0.2°) 统一替代
+- 
+_axis_rotate 返回值未在调用方检查（与原开环行为一致，PnP 状态机暂无 R 轴超时恢复路径）
+- R_CORRECTION_THRESHOLD_DEG (0.1°) 在 KTH7823 闭环期间曾被替代；KTH7823 废弃后恢复使用，host_start_r_correction 中仍活跃引用
 
 
 ### 10.1 常用 GPIO 引脚速查
@@ -1184,7 +1346,7 @@ PID 循环 (5ms 周期): 读编码器角度 → 解绕到 target±180° → PID 
 | USART2_TX/RX | PD5/PD6 | MaixCam 摄像头 |
 | USART3_TX/RX | PB9/PB11 | TMC2209(R轴) |
 | CAN_TX/RX | PA12/PA11 | 三轴伺服电机 |
-| 吸嘴气泵 | PE12 | 高有效 |
+| 吸嘴气泵 | PE11 (12VO1) | 高有效 |
 | 舵机 PWM (Z轴) | PB10 | TIM2_CH3 (50Hz) |
 | 12V_C1 PWM | PA0 | TIM2_CH1 |
 | 12V_C2 PWM | PE8 | TIM5_CH3 (50Hz) |
@@ -1211,7 +1373,7 @@ PID 循环 (5ms 周期): 读编码器角度 → 解绕到 target±180° → PID 
 | 24VO1(开关) | PA6 | 24V输出1 |
 | 24VO2(开关) | PA7 | 24V输出2 |
 | 24VO3(开关/PWM) | PC4 / PB1 | 24V输出3 + PWM(TIM3_CH4) |
-| 24VO4(开关/PWM) | PC5 / PB2 | 24V输出4 + PWM(TIM5_CH1) |
+| 24VO4(开关) | PC5 | 24V输出4（PB2 已让给 KTH7823 编码器） |
 
 ### 10.2 电机 CAN 指令速查
 | 功能码 | 功能 | 数据长度 |
@@ -1309,5 +1471,3 @@ if (DRV8803_IsChipFault(1)) {
 | 24V 端口不工作 | PA4(EN2) 是否为 LOW、PB0(RST2) 是否为 LOW |
 | 电磁阀不动 | PA6 是否有 HIGH→LOW 跳变、U13 是否使能、24V 供电是否正常 |
 | 舵机不转 | PB10 是否有 50Hz PWM、PE14(开关) 是否 HIGH |
-
-

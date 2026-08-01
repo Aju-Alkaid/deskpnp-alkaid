@@ -1,8 +1,8 @@
-﻿/**
+/**
  * @file    app_esp_protocol.c
  * @brief   ESP32 SPI 通信协议层实现
  * @note    组包 / 解包均无堆分配，栈安全
- *          版本: v2
+ *          版本: v2 (新增 CMD 0x40/0x50/0x60)
  */
 
 #include "app_esp_protocol.h"
@@ -13,9 +13,8 @@ static uint8_t s_seq_num = 0;
 
 /* ---- 内部辅助 ---- */
 
-/**
- * @brief  将无符号整数转为十进制字符串 (内部用)
- * @return  写入字节数
+/*
+ * 将无符号整数转为十进制字符串 (内部用)
  */
 static int _utoa(char *buf, unsigned int val)
 {
@@ -77,13 +76,30 @@ void ESP_BuildHeartbeatPacket(uint8_t *packet)
     packet[126] = s_seq_num++;
 }
 
+/*
+ * 构建日志发送包 (主命令 0x50, SUBCMD=0x01)
+ * 文档 v2.0 §4.7: STM32 每执行一步发送一条日志，
+ * ESP32 收到后缓存到 logBuffer，下一次云端上报打包进 JSON
+ */
+void ESP_BuildLogPacket(uint8_t *packet, const char *text)
+{
+    uint8_t len = 0;
+    if (text != NULL) {
+        len = (uint8_t)strlen(text);
+        if (len > 123) len = 123;
+    }
+    _fill_header(packet, ESP_CMD_LOG_DATA, ESP_SUB_LOG_TEXT, len);
+    if (len > 0) {
+        memcpy(&packet[3], text, len);
+    }
+}
+
 /* ================================================================
  *  解包函数
  * ================================================================ */
 
 uint8_t ESP_GetResponseType(const uint8_t *rx_buf)
 {
-    /* 响应类型在 Byte 1 (SUBCMD 位置), Byte 0 固定为 0x00 (见文档 §4.1) */
     return rx_buf[1];
 }
 

@@ -1,11 +1,11 @@
-﻿#ifndef __APP_ESP_PROTOCOL_H
+#ifndef __APP_ESP_PROTOCOL_H
 #define __APP_ESP_PROTOCOL_H
 
 /**
  * @file    app_esp_protocol.h
  * @brief   ESP32 SPI 通信协议层 — 组包 / 解包 / 命令码定义
- * @note    遵循 ESP32-C3通信接口规范_v2.0.md 中定义的 128 字节数据包格式
- *          版本: v2
+ * @note    遵循 ESP32-C3 与 STM32 主控 SPI 通讯接口文档 v2.0
+ *          128 字节固定帧: CMD(1)+SUBCMD(1)+LEN(1)+PAYLOAD(123)+SEQ(1)+RESERVED(1)
  */
 
 #include <stdint.h>
@@ -13,59 +13,74 @@
 /* ================================================================
  *  主命令码
  * ================================================================ */
-#define ESP_CMD_DATA_UPDATE    0x10   /* 数据更新 */
-#define ESP_CMD_SYS_CONTROL    0x20   /* 系统控制 */
-#define ESP_CMD_STATUS_QUERY   0x30   /* 状态查询 */
-#define ESP_CMD_HEARTBEAT      0x00   /* 心跳 / 无操作 (仅读取 ESP 响应) */
+#define ESP_CMD_HEARTBEAT      0x00   /* 心跳 / 无操作 (仅读取 ESP 响应)     */
+#define ESP_CMD_DATA_UPDATE    0x10   /* 数据更新 (STM32→ESP)                 */
+#define ESP_CMD_SYS_CONTROL    0x20   /* 系统控制 (STM32→ESP)                 */
+#define ESP_CMD_STATUS_QUERY   0x30   /* 状态查询 (STM32→ESP)                 */
+#define ESP_CMD_PROCESS_CTRL   0x40   /* 贴片流程控制 (ESP→STM32)  ★ v2 新增  */
+#define ESP_CMD_LOG_DATA       0x50   /* 日志文本 (STM32→ESP)    ★ v2 新增   */
+#define ESP_CMD_HEATER_CTRL    0x60   /* 加热台控制 (ESP→STM32)  ★ v2 新增   */
 
 /* ================================================================
  *  数据更新子命令 (主命令 0x10)
  * ================================================================ */
-#define ESP_SUB_PROGRESS       0x01   /* 贴片进度 "当前数/总数"      */
-#define ESP_SUB_SMT_STATUS     0x02   /* 贴片状态枚举字符串          */
-#define ESP_SUB_HEATER_STATE   0x03   /* 加热台状态 "1"/"0"         */
-#define ESP_SUB_HEATER_TEMP    0x04   /* 加热台温度 "85.3"          */
-/* 0x05~0x0F 保留 */
-/* 0x10~0x1F 保留 (扩展区) */
+#define ESP_SUB_PROGRESS       0x01   /* 贴片进度 "当前数/总数"              */
+#define ESP_SUB_SMT_STATUS     0x02   /* 贴片状态枚举字符串                  */
+#define ESP_SUB_HEATER_STATE   0x03   /* 加热台状态 "1"/"0"                 */
+#define ESP_SUB_HEATER_TEMP    0x04   /* 加热台温度 "85.3"                  */
 
 /* ================================================================
  *  系统控制子命令 (主命令 0x20)
  * ================================================================ */
-#define ESP_SUB_WIFI_ON        0x01   /* 打开 WiFi 功能              */
-#define ESP_SUB_WIFI_OFF       0x02   /* 关闭 WiFi 功能              */
-/* 0x03~0x0F 保留 */
+#define ESP_SUB_WIFI_ON        0x01   /* 打开 WiFi 功能                      */
+#define ESP_SUB_WIFI_OFF       0x02   /* 关闭 WiFi 功能                      */
 
 /* ================================================================
  *  状态查询子命令 (主命令 0x30)
  * ================================================================ */
-#define ESP_SUB_QUERY_FAULT    0x01   /* 查询故障码                  */
-#define ESP_SUB_QUERY_WIFI     0x02   /* 查询 WiFi 状态              */
-#define ESP_SUB_QUERY_ALL      0x03   /* 查询全部状态 (复合)         */
-/* 0x04~0x0F 保留 */
+#define ESP_SUB_QUERY_FAULT    0x01   /* 查询故障码                          */
+#define ESP_SUB_QUERY_WIFI     0x02   /* 查询 WiFi 状态                      */
+#define ESP_SUB_QUERY_ALL      0x03   /* 查询全部状态 (复合)                 */
 
 /* ================================================================
- *  ESP 响应类型 (ESP -> 主控)
+ *  贴片流程控制子命令 (主命令 0x40, ESP→STM32) ★ v2 新增
  * ================================================================ */
-#define ESP_RESP_IDLE          0x00   /* 空闲 / 无响应               */
-#define ESP_RESP_FAULT         0xF1   /* 故障报告                    */
-#define ESP_RESP_WIFI_STATUS   0xF2   /* WiFi 状态                   */
-#define ESP_RESP_COMPOUND      0xFF   /* 复合状态 (与 ESP32 文档一致, 响应类型在 Byte 1) */
-#define ESP_RESP_VERSION       0xFE   /* 协议版本 (预留)             */
+#define ESP_SUB_PROC_START     0x01   /* 开始: 设备回原点后从 P4 对准开始     */
+#define ESP_SUB_PROC_PAUSE     0x02   /* 暂停: 电机回原点, 可选继续或结束    */
+#define ESP_SUB_PROC_RESUME    0x03   /* 继续: 暂停后恢复流程                */
+#define ESP_SUB_PROC_STOP      0x04   /* 结束: 结束此次任务                  */
+#define ESP_SUB_PROC_ESTOP     0x05   /* 急停: 立即停止, 不再进行后续动作    */
+
+/* ================================================================
+ *  日志数据子命令 (主命令 0x50, STM32→ESP) ★ v2 新增
+ * ================================================================ */
+#define ESP_SUB_LOG_TEXT       0x01   /* UTF-8 日志文本 (≤123 字节)          */
+
+/* ================================================================
+ *  加热台控制子命令 (主命令 0x60, ESP→STM32) ★ v2 新增
+ * ================================================================ */
+#define ESP_SUB_HEAT_START     0x10   /* 开启加热                            */
+#define ESP_SUB_HEAT_STOP      0x11   /* 暂停加热                            */
+
+/* ================================================================
+ *  ESP 响应类型 (ESP -> 主控, 在 rx_buf[1])
+ * ================================================================ */
+#define ESP_RESP_IDLE          0x00   /* 空闲 / 无响应                       */
+#define ESP_RESP_FAULT         0xF1   /* 故障报告                            */
+#define ESP_RESP_WIFI_STATUS   0xF2   /* WiFi 状态                           */
+#define ESP_RESP_COMPOUND      0xFF   /* 复合状态 (同 ESP_RESP_COMPOSITE)     */
+#define ESP_RESP_COMPOSITE     0xFF   /* 复合状态 (文档命名, v2 对齐)        */
+#define ESP_RESP_VERSION       0xFE   /* 协议版本 (预留)                     */
 
 /* ================================================================
  *  故障码
  * ================================================================ */
-#define ESP_FAULT_NONE         0x00   /* 无故障                      */
-#define ESP_FAULT_WIFI_FAIL    0x01   /* WiFi 连接失败               */
-#define ESP_FAULT_WEB_FAIL     0x02   /* Web 服务器启动失败          */
-#define ESP_FAULT_SPI_CRC      0x03   /* SPI 数据 CRC 错误 (预留)    */
-#define ESP_FAULT_OOM          0x04   /* 内存不足                    */
-#define ESP_FAULT_TIMEOUT      0x05   /* 通信超时 (ST 端本地定义)    */
-
-/* ================================================================
- *  贴片状态枚举字符串
- * ================================================================ */
-/* 这些字符串直接发送给 ESP，由其映射到 Web 展示 */
+#define ESP_FAULT_NONE         0x00   /* 无故障                              */
+#define ESP_FAULT_WIFI_FAIL    0x01   /* WiFi 连接失败                       */
+#define ESP_FAULT_WEB_FAIL     0x02   /* Web 服务器启动失败                  */
+#define ESP_FAULT_SPI_CRC      0x03   /* SPI 数据 CRC 错误 (预留)            */
+#define ESP_FAULT_OOM          0x04   /* 内存不足                            */
+#define ESP_FAULT_TIMEOUT      0x05   /* 通信超时 (ST 端本地定义)            */
 
 /* ================================================================
  *  组包函数 (ST -> ESP)
@@ -77,98 +92,77 @@
  * @param  sub_cmd      子命令码
  * @param  payload      数据负载 (ASCII 字符串，可为 NULL)
  * @param  payload_len  负载字节数 (0~123)
- * @note   填充规则:
- *         Byte 0    = ESP_CMD_DATA_UPDATE
- *         Byte 1    = sub_cmd
- *         Byte 2    = payload_len
- *         Byte 3~125 = payload + 0x00 填充
- *         Byte 126   = 序列号 (自动递增)
- *         Byte 127   = 0x00
  */
 void ESP_BuildDataPacket(uint8_t *packet, uint8_t sub_cmd,
                          const char *payload, uint8_t payload_len);
 
 /**
  * @brief  构建系统控制包 (主命令 0x20)
- * @param  packet   输出 128 字节缓冲区
- * @param  sub_cmd  子命令 (ESP_SUB_WIFI_ON / ESP_SUB_WIFI_OFF 等)
- * @note   负载长度为 0
  */
 void ESP_BuildControlPacket(uint8_t *packet, uint8_t sub_cmd);
 
 /**
  * @brief  构建状态查询包 (主命令 0x30)
- * @param  packet   输出 128 字节缓冲区
- * @param  sub_cmd  子命令 (ESP_SUB_QUERY_FAULT / ... )
  */
 void ESP_BuildQueryPacket(uint8_t *packet, uint8_t sub_cmd);
 
 /**
  * @brief  构建心跳包 (全零，仅读取 ESP 响应)
- * @param  packet   输出 128 字节缓冲区 (全部填 0x00)
  */
 void ESP_BuildHeartbeatPacket(uint8_t *packet);
+
+/**
+ * @brief  构建日志发送包 (主命令 0x50) ★ v2 新增
+ * @param  packet   输出 128 字节缓冲区
+ * @param  text     UTF-8 日志文本 (自动截断至 123 字节)
+ */
+void ESP_BuildLogPacket(uint8_t *packet, const char *text);
 
 /* ================================================================
  *  解包函数 (ESP -> ST)
  * ================================================================ */
 
-/**
- * @brief  提取 ESP 响应类型
- * @param  rx_buf  ESP 发来的 128 字节接收缓冲区
- * @return Byte 1: 响应类型 (ESP_RESP_IDLE / _FAULT / _WIFI_STATUS / _COMPOUND, 文档 §4.1)
- */
+/** @brief 提取 ESP 响应类型 (rx_buf[1]) */
 uint8_t ESP_GetResponseType(const uint8_t *rx_buf);
 
-/**
- * @brief  提取 ESP 响应负载指针和长度
- * @param  rx_buf   ESP 发来的 128 字节接收缓冲区
- * @param  out_len  输出: 负载有效字节数 (从 Byte 2 读取)
- * @return 指向负载起始位置 (rx_buf + 3)，不拷贝
- */
+/** @brief 提取 ESP 响应负载指针和长度 */
 const char* ESP_GetResponsePayload(const uint8_t *rx_buf, uint8_t *out_len);
 
-/**
- * @brief  提取 ESP 响应的序列号
- * @param  rx_buf  ESP 发来的 128 字节接收缓冲区
- * @return Byte 126 的值
- */
+/** @brief 提取 ESP 响应的序列号 (rx_buf[126]) */
 uint8_t ESP_GetResponseSeq(const uint8_t *rx_buf);
+
+/**
+ * @brief  提取接收帧的主命令 (rx_buf[0]) ★ v2 新增
+ * @note   用于区分 STM32→ESP (0x00/0x10/0x20/0x30/0x50)
+ *         和 ESP→STM32 (0x40/0x60) 方向的命令
+ */
+static inline uint8_t ESP_GetCmd(const uint8_t *rx_buf) {
+    return rx_buf[0];
+}
+
+/**
+ * @brief  提取接收帧的子命令 (rx_buf[1]) ★ v2 新增
+ */
+static inline uint8_t ESP_GetSubCmd(const uint8_t *rx_buf) {
+    return rx_buf[1];
+}
+
+/**
+ * @brief  判断接收帧是否为 ESP→STM32 方向命令 ★ v2 新增
+ * @retval 1: ESP→STM32 (0x40 流程控制 / 0x60 加热台控制)
+ *         0: STM32→ESP 或空闲
+ */
+static inline uint8_t ESP_IsEspToStmCmd(const uint8_t *rx_buf) {
+    uint8_t cmd = rx_buf[0];
+    return (cmd == ESP_CMD_PROCESS_CTRL || cmd == ESP_CMD_HEATER_CTRL) ? 1 : 0;
+}
 
 /* ================================================================
  *  辅助格式化函数
  * ================================================================ */
 
-/**
- * @brief  将温度值 (0.1°C 单位) 格式化为 "XX.X" 字符串
- * @param  buf         输出缓冲区 (至少 6 字节)
- * @param  buf_size    缓冲区大小
- * @param  temp_0_1c   温度值 (如 853 = 85.3°C)
- * @return 写入的字节数 (不含尾 0)
- * @note   不使用 sprintf，栈安全。范围 0.0 ~ 300.0
- */
 int ESP_FormatTemp(char *buf, int buf_size, uint16_t temp_0_1c);
-
-/**
- * @brief  将进度值格式化为 "cur/total" 字符串
- * @param  buf       输出缓冲区 (至少 12 字节)
- * @param  buf_size  缓冲区大小
- * @param  current   当前数
- * @param  total     总数
- * @return 写入的字节数 (不含尾 0)
- * @note   示例: current=32, total=50 -> "32/50"
- */
-int ESP_FormatProgress(char *buf, int buf_size,
-                       uint8_t current, uint8_t total);
-
-/**
- * @brief  根据贴片机状态返回枚举字符串
- * @param  is_smt_active       1=贴片运行中
- * @param  is_downloading      1=导入中
- * @param  is_heating          1=加热中
- * @param  is_finished         1=已完毕
- * @return 常量字符串指针 ("SMTing"/"Waiting"/"Importing"/"Heating"/"Finished")
- */
+int ESP_FormatProgress(char *buf, int buf_size, uint8_t current, uint8_t total);
 const char* ESP_StateToString(uint8_t is_smt_active,
                               uint8_t is_downloading,
                               uint8_t is_heating,

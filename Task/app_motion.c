@@ -1,4 +1,4 @@
-﻿#include "app_motion.h"
+#include "app_motion.h"
 
 //#define DEBUG_MOTION  // cancel comment to enable motion debug log
 #include "driver_motor.h"
@@ -90,7 +90,7 @@ static void motion_set_done_bits(uint32_t bits)
     g_axes_done_bits |= bits;
 }
 
-static int motion_read_encoder(uint8_t id, int32_t *out, uint32_t timeout_ms)
+int motion_read_encoder(uint8_t id, int32_t *out, uint32_t timeout_ms)
 {
     if (id < 1 || id > 3) return -1;
     g_enc_ready[id] = false;
@@ -607,7 +607,81 @@ int safe_move_to(int32_t target_x, int32_t target_y, uint16_t speed, uint8_t acc
     return ret;
 }
 
+/* 非阻塞启动运动：排空帧 + 清零标志 + 发位置指令 + 同步触发。
+ * 不等待完成。调用者负责保存起始坐标与编码器值，
+ * 并在运动完成/中断后读取编码器更新坐标。
+ */
+void move_start_async(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc) {
+    if (dx == 0 && dy == 0) return;
+
+    motion_drain_queue();
+    motion_clear_done_bits();
+
+    if (dx != 0) {
+        positionMode2Run(X1_ADDR, speed, acc, dx);
+        osDelay(2);
+        positionMode2Run(X2_ADDR, speed, acc, dx);
+        osDelay(2);
+    }
+    if (dy != 0) {
+        positionMode2Run(Y_ADDR, speed, acc, dy);
+        osDelay(2);
+    }
+
+    motorSyncTrigger(0);
+}
+
 void move_set_pad_ms(uint32_t pad_ms) { g_move_pad_ms = pad_ms; }
+
+/* ---------- Jog 停止后编码器读取 + 坐标更新 ---------- */
+int jog_stop_update_coord(const char *dir_name,
+                          int32_t enc_x1_start, int32_t enc_x2_start, int32_t enc_y_start)
+{
+    MachineCoord_t c = Coord_Get();
+    int32_t dx_delta = 0, dy_delta = 0;
+    bool enc_ok = true;
+
+    if (dir_name[4] == 'U' || dir_name[4] == 'D') {
+        /* X1+X2 龙门轴 */
+        int32_t e1, e2;
+        if (motion_read_encoder(1, &e1, 150) != 0) enc_ok = false;
+        if (motion_read_encoder(2, &e2, 150) != 0) enc_ok = false;
+        if (enc_ok) {
+            int32_t d1 = e1 - enc_x1_start;
+            int32_t d2 = e2 - enc_x2_start;
+            int32_t skew = d1 - d2;
+            /* 龙门偏差 -> 低速微调 */
+            if (abs(skew) > ENC_TOLERANCE_STEPS) {
+                int32_t corr = -skew / 2;
+                if (abs(corr) <= 300) {
+                    uint8_t addr = (skew > 0) ? 2 : 1;
+                    positionMode2Run(addr, 50, 30, abs(corr));
+                    osDelay(200);
+                    motion_read_encoder(1, &e1, 100);
+                    motion_read_encoder(2, &e2, 100);
+                    d1 = e1 - enc_x1_start;
+                    d2 = e2 - enc_x2_start;
+                }
+            }
+            dx_delta = (d1 + d2) / 2;
+        }
+    } else {
+        /* Y 轴 */
+        int32_t e3;
+        if (motion_read_encoder(3, &e3, 150) != 0) enc_ok = false;
+        if (enc_ok) {
+            dy_delta = MOTOR_Y_ENC_SIGN * (e3 - enc_y_start);
+        }
+    }
+
+    if (enc_ok) {
+        Coord_UpdateXY(c.x + dx_delta, c.y + dy_delta);
+        return 0;
+    } else {
+        Coord_Invalidate();
+        return -1;
+    }
+}
 
 /* ---------- 组合的吸取 / 放置流程 ---------- */
 
