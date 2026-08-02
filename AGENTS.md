@@ -4,7 +4,7 @@
 
 > **文件编辑规则（AI Agent 必读）**
 > 
-> 工具链：Node.js 可用，无 Python。源文件 UTF-8 + CRLF。
+> 工具链：Node.js 可用，无 Python。源文件 UTF-8 + CRLF（`Task/app_motion.c` 例外：LF，见 §10.3）。
 > 
 > **禁止用 PowerShell 字符串拼接、行号定位、ArrayList Insert/RemoveAt 做代码编辑。**
 > 
@@ -230,8 +230,7 @@ pnp_1/
 ├── TouchGFX/                    # 旧 GUI 代码（已迁移至 G0B1，保留但不参与编译）
 ├── Middlewares/                  # FreeRTOS 中间件（系统生成，禁止修改）
 ├── MDK-ARM/                     # Keil MDK 工程文件
-├── build/                       # CMake 构建输出
-├── CMakeLists.txt               # CMake 构建配置
+├── build/                       # CMake 构建输出（已弃用，不参与构建）
 ├── pnp_1.ioc                    # CubeMX 工程文件
 └── STM32G474XX_FLASH.ld         # 链接脚本
 ```
@@ -273,7 +272,7 @@ pnp_1/
 - **Jog 位置感知（2026-07-27 新增）：** Jog 停止后通过 MKS 31H 编码器读取实际位移 delta，增量更新机器坐标。X1+X2 龙门偏差 >125 步时自动低速 F4 微调修正（与 `move_xy_relative` 到位策略一致）。实现函数 `jog_stop_update_coord()` in `app_motion.c`，`motion_read_encoder()` 已去 static。不改变 Jog 运动方向（仍用 `positionMode3Run`）
 
 
-### 4.2 G4 ↔ MaixCam 摄像头 (USART2, PD5/PD6)
+### 4.2 G4 ↔ MaixCAM2 摄像头 (USART2, PD5/PD6)
 
 - **物理层：** 115200, 8N1, DMA+空闲中断
 - **帧协议（v2，2026-06-17 更新）：**
@@ -288,7 +287,7 @@ pnp_1/
   - `payload`：UTF-8 字符串
   - 接收状态机：`WAIT_HEAD(0x7E) → WAIT_LEN → WAIT_DATA(len字节) → WAIT_TAIL(0x7F)`
 
-- **通信模型：** 主控 → MaixCAM，请求-响应，单任务串行
+- **通信模型：** 主控 → MaixCAM2，请求-响应，单任务串行
 
 - **P0 启动握手：**
   ```
@@ -296,49 +295,51 @@ pnp_1/
   Cam  → Host: rdy         // 握手成功（120s 超时发 err0，主控须重发 p0）
   ```
 
-- **P1 — 元件识别（上摄像头，YOLO 224×224，4 类：ccapt/cledy/cledo/crest，2026-07-11 升级为单次检测）：**
+- **P1 — 元件识别（上摄像头 320×320，YOLO11-OBB 迭代对齐（上限 8 轮），3 类：ccap/cled/cres，2026-08-03 更新）：**
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
   | 1 | Host→Cam | `p1` | 启动 P1 |
   | 2 | Cam→Host | `rdy` | **询问类别** |
   | 3 | Host→Cam | `cls` | 类别指令 |
-  | 4 | Host→Cam | `N:{class_id}` | 0=ccapt, 1=cledy, 2=cledo, 3=crest |
-  | — | — | — | 映射规则：`LED*`→cledo(2), `C0*`/`R0*`→ccapt(0), 其他→ccapt(fallback) |
+  | 4 | Host→Cam | `N:{class_id}` | 0=ccap, 1=cled, 2=cres |
+  | — | — | — | 映射规则：`LED*`→cled(1), `C0*`/`R0*`→ccap(0), 其他→ccap(fallback) |
   | 5 | Host→Cam | `end` | 结束类别询问 |
   | 6 | Cam 开始 Phase0 搜索 | | |
 
-  - **Phase0（搜索）：** Cam→Host: `stp`（连续3帧锁定确认）→ Host→Cam: `go`（停机确认）
-  - **Phase1（单次检测，无 Phase2）：** Cam 采集 20 帧位置+角度，MAD 去野值 + 圆形均值滤波 → 一次性发送：
+  - **Phase0（搜索）：** Cam→Host: `stp`（一帧识别到即锁定）→ Host→Cam: `go`（停机确认）
+  - **Phase1（迭代对齐，上限 8 轮）：** Cam 每轮采集 3 帧（`init_frames`）位置+角度取平均（角度环形平均；CLED 额外 CV 切角修正 + 帧间平滑系数 0.6），未对准时发送：
     ```
     Cam→Host: "pos"
-    Cam→Host: "N:{dx * 47.077}"     // X 偏差，**已是电机步数**
-    Cam→Host: "N:{dy * 47.077}"     // Y 偏差，**已是电机步数**
+    Cam→Host: "N:{dx}"              // X 偏差，**已是电机步数**（cam 端已换算）
+    Cam→Host: "N:{dy}"              // Y 偏差，**已是电机步数**（cam 端已换算）
     Cam→Host: "N:{final_ao}"        // final_ao = -angle * 100（百分之一度）
-    Cam→Host: "N:{class_id}"        // 0=ccapt 1=cledy 2=cledo 3=crest
+    Cam→Host: "N:{class_id}"        // 0=ccap 1=cled 2=cres
     Cam→Host: "end"
     ```
-    共 **4 字段**（dx, dy, angle, class_id）。角度×100，紧跟 pos 一次性返回，无需 Phase2。
-  - **关键参数：** `p1_initial_gain = 47.077`（像素→电机步数），`INIT_FRAMES = 20`，`HUNT_LOCK_FRAMES = 3`
-  - **错误：** `err1_1`（初始化失败）、`err1_3`（Phase0 超时）、`err1_4`（相机读取失败>50次）、`err1_5`（未检测到目标）。`err1_5/err1_1/err1_4` 每元件最多重试 3 次
+    共 **4 字段**（dx, dy, angle, class_id；class_id 仅首轮有效）。角度×100 每轮返回，主控取最后一轮。
+    - 主控收到 `pos...end` 后按 §4.2.1 轴映射修正移动 → 发 `go` 复测；对准（|dx|、|dy| 均 < 阈值，建议 5px）→ Cam 发 `ok`，主控置 VISION_DONE。
+    - cam 端 7 次复测（`align_max_iter`）仍未对准 → Cam 发 `err1_6`；主控侧另有 8 包 pos 兜底计数（`P1_ALIGN_MAX_ITER=8`，1 init + cam 7 轮），防死循环。
+  - **关键参数：** 像素→步数换算由 **cam 端**完成（理论当量 0.0734mm/px，见硬件文档 §十三）；Phase1 平均帧 `INIT_FRAMES = 3`（2026-08-02 新固件）
+  - **错误：** `err1_1`（搜索 50 帧失败）、`err1_3`（等 go 超时 30s）、`err1_4`（相机累计读取失败）、`err1_5`（未检测到目标）、`err1_6`（7 次复测仍未对准）。`err1_5/err1_6/err1_1/err1_3/err1_4` 每元件最多重试 3 次
 
-- **P2 — Mark 多点寻标对位（上摄像头 448×448，Canny 边缘检测，2026-07-11 更新增益）：**
+- **P2 — Mark 多点寻标对位（上摄像头 320×320，2026-08-02 MaixCAM2 更新）：**
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
   | 1 | Host→Cam | `p2` | 启动 P2 |
   | 2 | Cam→Host | `rdy` | 就绪 |
   | 3 | Host→Cam | `go` | 开始搜索（逐个 Mark 循环） |
-  | 4 | Cam→Host | `stp` | Mark 锁定（8帧稳定确认） |
+  | 4 | Cam→Host | `stp` | Mark 锁定（搜索到即发送） |
   | 5 | Host→Cam | `go` | 确认停机 → 精确测位 |
-  | 6 | Cam→Host | `pos` `N:{dx*48.5}` `N:{dy*48.5}` `end` | 偏移 **已是电机步数** |
+  | 6 | Cam→Host | `pos` `N:{dx}` `N:{dy}` `end` | 偏移 **已是电机步数**（cam 端换算） |
   | 7 | Host→Cam | `go` | 移动完成 → 迭代归零 |
-  | 8 | Cam→Host | `ok` | 对准完成（10帧平均，|offset|≤4.0px） |
+  | 8 | Cam→Host | `ok` | 对准完成（5帧平均，|dx|、|dy| 均 < 4px） |
   | — | — | — | 未对准 → 回到步骤 6（新 pos），最多 7 轮迭代 |
   | — | — | — | 非末 Mark 的 ok → 自动切 P2_WAIT_GO，等 Host 发 go 搜索下一个 |
   | — | — | — | 末 Mark 的 ok → VISION_DONE |
   | — | Host→Cam | `end` | 随时终止 |
-  - **关键参数：** `p2_dxdy_gain = 48.5`（像素→电机步数），`p2_target_count = 3`，`p2_align_max_iter = 7`，`p2_align_th = 4.0px`
+  - **关键参数：** `p2_target_count = 3`，`p2_align_max_iter = 7`，`p2_align_th = 4.0px`；像素→步数换算由 **cam 端**完成（理论当量 0.0697mm/px，见硬件文档 §十三）
   - **错误：** `err2_1`（空闲超时）、`err2_3`（pos_detect 未检测到 Mark）、`err2_4`（对准迭代超 7 次）
   - **P2 退出必须发送 `end` 帧：** P2 完成或异常退出后，必须通过 `Vision_SendEnd()` 发送 `end` 帧通知摄像头终止 P2 会话。Host_Task 的 `mark_align_step` 和 `app_test.c` 的 `cam_p2_full_test_run` 在所有 P2 退出路径均已添加此调用。
 
@@ -348,47 +349,53 @@ pnp_1/
 
   **速度模式脉冲常数：** 速度模式(0xF6)下电机实际位移对应 `32768` 脉冲/转，位置模式(0xF4/0xF5)为 `16384`（`MKS_PULSES_PER_REV`）。`p2_scan_estimate_x()` 和列超时计算估算的是速度模式位移，使用 32768；`p2_scan_step_y()` 使用位置模式，常数使用 `MKS_PULSES_PER_REV`（16384）。
 
-- **P3 — 下相机单次检测对位（下摄像头 640×480，YOLO model_286344，2026-07-11 升级为单次检测）：**
+- **P2 建系算法（2026-08-03 更新，替代原两点法+Mark3 验证）：** `mark_align_step` 的 VISION_DONE 使用三点最小二乘（2D Procrustes 解析解，无矩阵库）建系：实测机器坐标 a_i = `g_marks_actual[i]`（步数）→ cam 坐标 `ac=(-a_y, a_x)`；理论点 t_i = `g_marks[i].target`（mm × STEPS_PER_MM=512）去质心后求 `theta = -atan2f(cross_sum, dot_sum)` 与平移 `(o_cx, o_cy)`，origin 写入 `(o_cy, -o_cx)`、`rotation_rad = theta`（映射同 §4.2.1）。逐点残差（mm）：max < `MARK_VERIFY_ERR_MM`(0.3) → valid；否则剔除残差最大点按**原两点法公式**回退，被剔除点残差 <0.3 → valid（DEGRADED）；仍超阈值 → 重试一次 P2（`g_p2_retry_cnt`，上限 `P2_RETRY_MAX=1`，下载新文件时清零），再失败进 `HOST_ERROR`，不再静默降级贴片。
+
+- **P3 — 下相机迭代对位（下摄像头 USB 640×480，Canny + 多边形逼近检测矩形，上限 8 轮，2026-08-03 更新）：**
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
   | 1 | Host→Cam | `p3` | 启动 P3 |
   | — | Cam | Phase0：吸嘴检查（YOLO 连续 6 帧检测吸嘴圆） | |
   | — | Cam→Host | `err3_8` | 检测到吸嘴圆 → 吸嘴空取（无元件） |
-  | 2 | Cam→Host | `pos` + 数据包 + `end` | Phase1 单次检测，**已是电机步数**： |
-  | — | — | — | `N:{dx * 13.5554}` — X 偏差 |
-  | — | — | — | `N:{dy * 13.5554}` — Y 偏差 |
+  | 2 | Cam→Host | `pos` + 数据包 + `end` | Phase1 迭代检测（未对准），**已是电机步数**： |
+  | — | — | — | `N:{dx}` — X 偏差（cam 端已换算为步数） |
+  | — | — | — | `N:{dy}` — Y 偏差（cam 端已换算为步数） |
   | — | — | — | `N:{final_ao}` — final_ao = angle * 100（百分之一度） |
-  | — | — | — | 共 **3 字段**（dx, dy, angle）。角度一次返回，无 Phase2 迭代。 |
-  - **关键参数：** `p3_dx_gain = p3_dy_gain = 13.5554`（像素→电机步数），`avg_frames = 10`，`p3_nozzle_check_frames = 6`
-  - **错误码：** `err3_1`（下相机初始化失败）、`err3_5`（YOLO 检测帧数不足）、`err3_8`（**吸嘴空取**—不可降级贴装，主控回退重新吸取）
-  - **模型：** P3 使用 `model_286344.mud`（cap/res/led），P1/P2 使用 `model_284490.mud`（cCapt/cLedy/cLedo/cRest），程序自动切换。
+  | — | — | — | 共 **3 字段**（dx, dy, angle）。角度每轮返回，主控取最后一轮 |
+  | 3 | Host→Cam | `go` | 主控按偏移修正移动后复测（≤8 轮） |
+  | 4 | Cam→Host | `ok` | 对准完成（|dx|、|dy| 均 < 阈值） |
+  | — | Cam→Host | `err3_7` | cam 端 7 次复测仍未对准 |
+  | — | Cam→Host | `err3_6` | 等主控 `go` 超时 30s |
+  - **关键参数：** 像素→步数换算由 **cam 端**完成（理论当量 X≈0.0230 / Y≈0.0229mm/px，见硬件文档 §十三）；`avg_frames = 5`（2026-08-02 新固件），`p3_nozzle_check_frames = 6`
+  - **错误码：** `err3_1`（下相机初始化失败）、`err3_5`（未检测到矩形）、`err3_6`（等 go 超时 30s）、`err3_7`（7 次复测仍未对准，主控容错贴装）、`err3_8`（**吸嘴空取**—不可降级贴装，主控回退重新吸取）
+  - **检测方法：** P1/P2 上相机使用 YOLO11-OBB（3 类：ccap/cled/cres）；P3 下相机使用 Canny + 多边形逼近检测矩形（非 YOLO）。具体模型/参数见硬件文档《通讯接口(cam与主控).md》。
 
 - **pos 格式汇总：**
 
-  | 进程 | 帧序列 | 字段数 | 单位 | 增益 |
-  |------|--------|--------|------|------|
-  | P1 | `pos` N:dx N:dy N:ao N:cls `end` | 4 | **电机步数** | 47.077 |
-  | P2 | `pos` N:dx N:dy `end` | 2 | **电机步数** | 48.5 |
-  | P3 | `pos` N:dx N:dy N:ao `end` | 3 | **电机步数** | 13.5554 |
-  | P4 | `pos` N:dx N:dy `end` | 2 | **电机步数** | 下相机标定，无固定增益 |
+  | 进程 | 帧序列 | 字段数 | 单位 | 增益 | 对齐模式 |
+  |------|--------|--------|------|------|----------|
+  | P1 | `pos` N:dx N:dy N:ao N:cls `end` / `ok` | 4 | **电机步数** | cam 端换算（理论 0.0734mm/px） | 迭代 ≤8 轮 |
+  | P2 | `pos` N:dx N:dy `end` / `ok` | 2 | **电机步数** | cam 端换算（理论 0.0697mm/px） | 迭代 ≤7 轮 |
+  | P3 | `pos` N:dx N:dy N:ao `end` / `ok` | 3 | **电机步数** | cam 端换算（理论 0.0230mm/px） | 迭代 ≤8 轮 |
+  | P4 | `pos` N:dx N:dy `end` / `ok` | 2 | **电机步数** | 下相机标定，无固定增益 | 迭代 ≤5 轮 |
 
-  > **重要变更（2026-07-11）：** CAM 端已将像素值预乘增益，输出的 N: 值**直接是电机步数**。
+  > **重要变更（2026-07-11 / 2026-08-02 MaixCAM2）：** CAM 端完成像素→步数换算，输出的 N: 值**直接是电机步数**。
   > G4 固件端**不再做任何缩放**，仅进行轴映射（cam X→Y电机取反，cam Y→X1+X2）。
-  > P1/P3 改为**单次检测**，Phase1 直接返回全部数据（含角度），不再有 Phase2 迭代对齐。
+  > P1/P3 为**迭代对齐（上限 8 轮）**：每轮 pos 包字段不变（含角度），未对准 → 主控修正后发 `go` 复测，对准 → Cam 发 `ok`；cam 端 7 次复测未对准 → `err1_6`/`err3_7`（主控侧另有 8 包 pos 兜底计数，`P1/P3_ALIGN_MAX_ITER=8`）。
   > 角度符号：P1 `-angle*100`（取反），P3 `angle*100`（不取反）。
   > P4 为**迭代对准**，用于建系前后的吸嘴中心基线/漂移校验。
-  > 详细协议参见上位机文档 `E:/聊天记录/通讯接口文档 (1).md`。
+  > 详细协议参见上位机文档 `E:/聊天记录/通讯接口(cam与主控).md`（2026-08-03）。
 - **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
 
 ### 4.2.4 P4 — 下相机圆形标定对位（吸嘴中心）
 
-**功能：** 下相机检测吸嘴圆（面积 1500-1900 px²，448×448），迭代对准吸嘴中心，用于 P2 建系前后的坐标基线/漂移校验。
+**功能：** 下相机（USB 640×480）暗色团块圆形检测 + 稳定性投票，迭代对准吸嘴中心，用于 P2 建系前后的坐标基线/漂移校验。
 
 | 步骤 | 方向 | 帧 | 说明 |
 |------|------|-----|------|
 | 1 | Host→Cam | `p4` | 启动 P4 |
-| — | Cam | 初始化：打开下相机 448×448 | |
+| — | Cam | 初始化：打开下相机 640×480 | |
 | 2 | Cam→Host | `ok` | 对准完成（dx、dy 均小于 5px） |
 | — | Cam→Host | `pos` | 未对准：后跟 `N:{dx} N:{dy}`（已是电机步数） |
 | — | Cam→Host | `end` | 位置数据结束 |
@@ -399,7 +406,7 @@ pnp_1/
 
 **数据包格式：** `pos` `N:{dx}` `N:{dy}` `end`（dx/dy 已是电机步数，2 字段）。
 
-**关键参数：** `p4_cam_width=448`, `p4_cam_height=448`, `p4_circle_area_min=1500`, `p4_circle_area_max=1900`, `p4_align_threshold=5`, `p4_max_iter=5`, `p4_detect_frames=8`, `p4_stability_dist=25`。
+**关键参数：** `p4_cam_width=640`, `p4_cam_height=480`, `p4_align_threshold=5`, `p4_max_iter=5`, `p4_detect_frames=8`（其余检测参数以 cam 固件为准）。
 
 **错误码：** `err4_4`（5 轮未对准）、`err4_5`（等 `go` 超时 30s）。
 
@@ -436,7 +443,7 @@ pnp_1/
 | P3 偏移修正 | `+(r->dy)` 不取反 | `-(r->dx)` |
 | P4 偏移修正 | `+(r->dy)` 不取反 | `-(r->dx)` |
 
-> **2026-07-11 更新：** CAM 端已预乘增益（P1=47.077, P2=48.5, P3=13.5554），G4 端直接使用 r->dx/r->dy 值，不再乘 scale。上表已移除 `* scale`。
+> **2026-07-11 / 2026-08-02 更新：** CAM 端完成像素→步数换算，G4 端直接使用 r->dx/r->dy 值（**已是电机步数**），不再乘 scale。上表已移除 `* scale`。
 
 > P3/P4 的 dx 不取反是因为下相机图像左右镜像（相机朝上拍摄），X 轴自然反转。
 
@@ -486,9 +493,9 @@ FIND_IDLE       → FIND_MOVING      → FIND_WAITING
 
 | 函数 | 文件 | 功能 |
 |------|------|------|
-| `move_start_async(dx, dy, speed, acc)` | `app_motion.c:614` | 非阻塞启动运动：排空帧+清零+发位置指令+同步触发 |
-| `p1_restore_coord()` | `app_host.c:1347` | 运动中停机后读编码器算实际位移增量 |
-| `p1_try_next_subpos(c)` | `app_host.c:1376` | 推进子位置 + wraparound；`false`=全部耗光 |
+| `move_start_async(dx, dy, speed, acc)` | `app_motion.c:662` | 非阻塞启动运动：排空帧+清零+发位置指令+同步触发 |
+| `p1_restore_coord()` | `app_host.c:1505` | 运动中停机后读编码器算实际位移增量；Y 轴增量须乘 `MOTOR_Y_ENC_SIGN`（2026-08-03 修复，见 HISTORY §52） |
+| `p1_try_next_subpos(c)` | `app_host.c:1528` | 推进子位置 + wraparound；`false`=全部耗光 |
 
 **成功位置记忆：**
 
@@ -503,7 +510,7 @@ VISION_DONE 时 `g_scan_start_pos[cl] = g_p1_found_pos`。下一同 cell 元件�
 
 | 常量 | 值 | 文件 |
 |------|-----|------|
-| `P1_SCAN_SPEED` | 100（扫描移动 RPM） | `app_host.h:21` |
+| `P1_SCAN_SPEED` | 100（扫描移动 RPM） | `app_host.h:20` |
 
 ### 4.3 G4 ? MKS SERVO42D 电机 (CAN, FDCAN1)
 
@@ -540,6 +547,8 @@ VISION_DONE 时 `g_scan_start_pos[cl] = g_p1_found_pos`。下一同 cell 元件�
 简单说：**0x02 一直存在，但卡在邮箱里出不来。** 持续发送 0x31 编码器查询能周期性 flush
 TX mailbox，将 0x02 逼出。当前 `motion_wait_done()` 每 50ms 向等待中的电机发一次 0x31
 ping，保证 0x02 在 ~360ms 内被接收。
+
+> 若 0x31 ping 后仍超时，`move_xy_relative()` 超时路径会读 31H 编码器验证实际位移（各轴 |实际-指令| ≤ `ENC_TOLERANCE_STEPS`(125) 且 X1/X2 互差 ≤125）→ 通过则按成功处理（2026-08-03 新增兜底，防 0x02 卡邮箱误判失败）。
 
 **到位策略（2026-07-27 更新）：**
 
@@ -754,12 +763,13 @@ ping，保证 0x02 在 ~360ms 内被接收。
 5. **R 轴控制：** `r_axis_rotate` 通过 `TMC_SetSpeed`（VACTUAL 寄存器）直接驱动 TMC2209（UART3），已对接。R 轴使用「使能→旋转→关闭」模式，`TMC_Init()` 初始化后驱动默认关闭，`r_axis_rotate` 内部自动使能/关闭。P1/P3 阶段已加入两步闭环角度矫正（详见 §9.16）。详见 HISTORY.md §16.7。
 6. **LPUART1 未配置 DMA 接收：** `hdmarx = NULL`，仅用作 TMC2209 半双工阻塞通信。如果该通道用于其他用途需重新配置。
 7. **CAN 滤波器配置隐患：** `FilterID2 = 0x1FFC0000` 超出 HAL 11-bit 范围，当前因 `StdFiltersNbr = 0` 恰好全通。CubeMX 重新生成时若 `StdFiltersNbr` ≥ 1，滤波器将仅通过 ID 低 8 位为 0 的帧，所有 CAN 通信中断。修复：将 `FilterID2` 改为 `0x000`，确保 `StdFiltersNbr` ≥ 1。
+8. **P1 扫描停机坐标恢复漏乘符号（已修复，2026-08-03，见 HISTORY §52）：** `p1_restore_coord()` 的 `delta_y` 漏乘 `MOTOR_Y_ENC_SIGN(-1)`，导致 P1 扫描停车后 `g_coord.y` 污染（2×|dy| 误差），P3 去下相机 / HOME 回原点整体偏右 ~6.2cm。已修复（`MOTOR_Y_ENC_SIGN` 迁入 `app_motion.h`，`app_host.c` delta_y 补符号）。
 ### 9.4 代码质量
 1. **`driver_motor.c runFail/runOK` 死循环：** 两个函数都是 `while(1){}` 空循环，无实际错误处理逻辑。
 2. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`realTimeLocation` 等，部分来自早期代码残留。注意：`CAN_ID` 在 `canCRC_ATM()` 中有实际使用（CRC 计算），`can_rx_queue` 已删除。
 3. **`app_test.h` 与 `app_motion.h` 重复声明（已修复，见 §9.6-5）：** 重复的 `semX1Done`、`evtAxesDone` 等 extern 声明已从 `app_test.h` 移除。
 ### 9.5 编译与构建
-1. **Keil MDK 工程：** 主要使用 MDK-ARM 目录下的 Keil 工程编译。CMakeLists.txt 也可用于构建。
+1. **Keil MDK 工程：** 主要使用 MDK-ARM 目录下的 Keil 工程编译（CMake 配置已移除，未使用）。
 2. **`overflow_count` 唯一声明在 `timestamp.c`：** `timestamp.h` 有 `extern volatile`，`main.c` 通过包含 `timestamp.h` 使用，不得在 main.c 中重复定义。
 
 ### 9.6 已完成的架构改进（2026-05）
@@ -1396,6 +1406,7 @@ _axis_rotate 返回值未在调用方检查（与原开环行为一致，PnP 状
 
 ### 10.3 C 文件编码说明
 - 全部 C 源文件与文档统一使用 **UTF-8（无 BOM）编码**，新建/修改文件禁止引入 BOM
+- **换行例外：** 绝大多数源文件为 CRLF，但 `Task/app_motion.c` 为 **LF**（既有事实，勿整体转换）；编辑该文件时保持 LF，禁止混入 CRLF。
 - `Core/` 目录（CubeMX 生成）同为 UTF-8（无 BOM），CubeMX 重新生成后注意保持编码一致
 - CubeMX 生成的 CubeMX User Code 起始/结束标记：`/* USER CODE BEGIN ... */` / `/* USER CODE END ... */`
 - CubeMX 重新生成代码时，标记外内容会被覆盖

@@ -1148,9 +1148,7 @@ HOST_HOME → (SET_ORIGIN) → HOST_DEBUG → (CSV下载) → HOST_DOWNLOADING
 - g_mark_just_jumped 标志防止同一 Mark 的二次 VISION_GOT_STOP 触发冗余跳转
 
 **建系（VISION_DONE）：**
-- 用 Mark1+Mark2 实际位置和 CSV 理论坐标计算 	heta = atan2f(actual) - atan2f(theory)
-- PCB 原点 = 实际中点 − 旋转后的理论中点
-- Mark3 验证：预期位置 vs 实际位置误差 < 0.3mm 则 g_pcb_frame.valid = true
+- 建系算法自 2026-08-03 起为三点最小二乘 + 残差剔除 + 失败重试（详见 §50），原两点法+Mark3 验证已废弃
 - Mark 理论坐标来自 CSV 中 SMD="MARK" 行的 Mid X/Y，无需硬编码
 
 **旋转补偿（HOST_MOVE_TO_PCB）：**
@@ -1225,7 +1223,7 @@ machine_y = rotate(csv_y, theta) + pcb_origin_y + p3_offset_y
 | VISION_GOT_STOP | 条件跳转+Vision_Go() | 清扫描位+Vision_Go() | — |
 | VISION_GOT_POS | 移动+记录实际坐标 | 移动+Vision_Go() | 移动+累加偏移 |
 | VISION_GOT_ERR_RETRY | — | — | Vision_Go() 重试 |
-| VISION_DONE | 建系+Mark3验证 | R矫正→HOST_PICK | R矫正→HOST_MOVE_TO_PCB |
+| VISION_DONE | 建系(三点LS)+残差验证 | R矫正→HOST_PICK | R矫正→HOST_MOVE_TO_PCB |
 | VISION_ERROR | →HOST_ERROR | 分级处理(重试/子位扫描/跳过/WAIT_REFILL) | err3_8→回散料区重取 / 其他→MOVE_TO_PCB(容错) |
 
 
@@ -3092,7 +3090,6 @@ else:
 
 - **方向映射：** `P2_SCAN_DIR_UP=0` (CCW), `P2_SCAN_DIR_DOWN=1` (CW)。方向反了就交换这两个值重新编译。
 - 扫描速度 40 RPM 是否适配 Cam 当前识别帧率
-- 位置估算精度是否满足建系精度要求（Mark3 验证误差 < MARK_VERIFY_ERR_MM）
 
 ---
 
@@ -3345,7 +3342,7 @@ P2 建系完成后机器坐标整体偏移约 7.5mm（约为 Mark 间距的一�
 
 **直接原因：** `p2_stop_and_read_pos()` 中的 31H 编码器读取始终失败（100ms 超时），回退到 `p2_scan_estimate_x()` 估算。估算使用速度模式脉冲常数 `16384`（实际应为 `32768`），导致估算位移约为实际位移的 1/2。Coord 被设为错误估算值，而电机停在物理正确位置，Coord 与电机物理位置之间产生不可消除的偏差。
 
-**偏差传播链：** 偏差产生后，pos-detect 对齐使用相对移动（电机从物理位置移动到正确中心位置）但 Coord 基于错误估算做绝对更新，偏差无法消除 → `g_marks_actual` 全部偏移 → PCB Frame 内部一致（Mark3 verify ~0.1mm）但全局偏移 → 散料区 `safe_move_to()` 使用 Coord 算相对位移，偏差暴露。
+**偏差传播链：** 偏差产生后，pos-detect 对齐使用相对移动（电机从物理位置移动到正确中心位置）但 Coord 基于错误估算做绝对更新，偏差无法消除 → `g_marks_actual` 全部偏移 → PCB Frame 内部一致但全局偏移 → 散料区 `safe_move_to()` 使用 Coord 算相对位移，偏差暴露。
 
 **根本原因：** `CAN_Process_Task` 仅处理 0xF4/0xF5（位置模式完成/错误），未处理 0x31 编码器响应。MKS 电机正确返回了 31H 编码器数据，但响应在 `CAN_Process_Task` 中被丢弃。`g_enc_ready[id]` 和 `g_enc_pos[id]` 在整个项目中没有任何写入路径。
 
@@ -3400,7 +3397,7 @@ P2 建系完成后机器坐标整体偏移约 7.5mm（约为 Mark 间距的一�
 
 ### 44.1 背景
 
-P2 建系过程中电机停止仍存在 1~2mm 残余误差。该误差不影响 PCB 建系内部一致性（Mark3 verify 仍可通过），但会使机器内部坐标系与真实物理坐标系之间产生平移偏移，导致散料区、下相机站位等 flash 标定坐标定位不准。
+P2 建系过程中电机停止仍存在 1~2mm 残余误差。该误差不影响 PCB 建系内部一致性，但会使机器内部坐标系与真实物理坐标系之间产生平移偏移，导致散料区、下相机站位等 flash 标定坐标定位不准。
 
 为在软件层面补偿该误差，引入 P4 流程：用下相机对吸嘴中心做两次圆形标定，一次在 P2 建系前（基线），一次在 P2 建系后（校验）。两次测量得到的坐标差即为 P2 引入的整体漂移，随后做整体平移补偿。
 
@@ -3747,3 +3744,134 @@ P1（上摄像头找元件）原有流程：`safe_move_to` 阻塞移动到子位
 | `AGENTS.md` | 硬件/目录/任务/GPIO/编码规则更新；新增 §4.5 GUI SPI 协议 |
 | `HISTORY.md` | 新增 §49；§12/§32 加废弃校正；§46.5 补校正说明 |
 
+---
+
+## 五十、2026-08-03 会话 — P2 三点最小二乘建系 + 残差剔除 + 移动失败处理 + 编码器兜底
+
+### 50.1 背景
+
+实测日志出现：Mark2 对齐移动超时（`[POLL] timeout: bits=0x03 need=0x07 waited=720ms`，0x02 卡 MKS CAN TX mailbox）被忽略——`VISION_GOT_POS` 未检查 `safe_move_to()` 返回值，旧坐标进入 `g_marks_actual[1]`（误差约 150 步）→ 两点法建系产生伪 theta → Mark3 verify err=0.513mm FAIL（阈值 0.3mm），而代码在 `valid=false` 时静默降级为一条错误公式继续贴片。
+
+### 50.2 方案
+
+1. **三点最小二乘建系（2D Procrustes 解析解，无矩阵库）：** 实测机器坐标 a_i = `g_marks_actual[i]`（步数）→ cam 坐标 `ac=(-a_y, a_x)`；理论点 t_i = `g_marks[i].target`（mm × STEPS_PER_MM=512）。去质心后 `dot_sum=Σ(pcx*ptx+pcy*pty)`、`cross_sum=Σ(pcx*pty-pcy*ptx)`，`theta = -atan2f(cross_sum, dot_sum)`；平移 `(o_cx, o_cy)` 由均值差求得；origin 写入 `(o_cy, -o_cx)`、`rotation_rad = theta`（与 §4.2.1 映射一致）。逐点残差（mm）= 理论点经 R(theta)+origin 变换回机器坐标与实际 a_i 距离 ÷512。
+2. **残差剔除 + 回退两点法：** max 残差 < `MARK_VERIFY_ERR_MM`(0.3) → valid；否则剔除残差最大点，按**原两点法公式**（`theta=actual_ang-theory_ang` + 中点平移，2ccd13f/15b19ae 一系）重算，被剔除点残差 <0.3 → valid（打印 DEGRADED）；仍超阈值 → valid=false。
+3. **FAIL 处理（不再静默降级）：** valid=false → 重置 `g_mark_count_done/g_mark_offsets/g_marks_actual/g_mark_just_jumped/g_p2_pos_iter` 后 `start_p2_mark_align()` 重跑一次（`g_p2_retry_cnt`，上限 `P2_RETRY_MAX=1`，下载新文件时清零）；重试仍 FAIL → `Vision_SendEnd + Vision_ForceIdle + HOST_ERROR`。
+4. **根因修复：** `VISION_GOT_STOP`（Mark 跳转）与 `VISION_GOT_POS`（对齐移动）检查 `safe_move_to()` 返回值，失败重试一次，仍失败 → ERROR，旧坐标不再进入 `g_marks_actual`。
+5. **编码器兜底（app_motion.c `move_xy_relative` 超时路径）：** 超时后 `osDelay(80)` + 读 31H 编码器，各轴 |实际-指令| ≤ `ENC_TOLERANCE_STEPS`(125) 且 X1/X2 互差 ≤125 → 按成功处理（`Coord_UpdateXY(target)` 返回 0），避免 0x02 卡邮箱误判失败。
+6. **顺手修复：** 降级贴片公式补原点+符号（`machine_x=cy+origin_x+p3_offset_x; machine_y=-cx+origin_y+p3_offset_y`，与框架路径 θ=0 一致）；`Applied frame shift` 打印双负号修复。
+7. **临时诊断开关移除（验证通过后）：** `g_can_rx_diag/g_can_tx_diag`（P4 基线 / P2 jump / P2 align 三处 + driver_can.c 打印 + driver_can.h extern）全部删除。
+
+### 50.3 代码变更
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_host.c` | 新增 `P2_RETRY_MAX` / `g_p2_retry_cnt`；VISION_GOT_STOP / VISION_GOT_POS 移动失败重试一次 + ERROR；VISION_DONE 重写为三点 LS + 残差剔除 + 两点回退 + 重试；降级贴片公式修正；frame shift 打印修复；移除三处诊断开关 |
+| `Task/app_motion.c` | `move_xy_relative` 超时路径 31H 编码器验证兜底；移除 `[CANRX]` 诊断打印块 |
+| `Drivers/ZeMCU-G4/driver_can.c/h` | 移除 `g_can_rx_diag/g_can_tx_diag` 定义 / 声明 / `[CANTX]` 打印 |
+
+### 50.4 验证
+
+- **离线数值自检（日志数据反推）：** a=[[33988,-86224],[33988,-93904],[41804,-86449]]（步）、t=[[5,5],[20,5],[5,20]]mm：LS theta=-1.091° origin=(31572,-83642) 残差 [0.192,0.112,0.132]mm OK；剔除 mark2 回退 0.296mm DEGRADED；θ=0/5° 合成数据精确还原。
+- **真机日志（2026-08-03）：** `P2 3-point fit OK (max res=0.160mm)`（残差 [0.099,0.062,0.160]，theta=1.05°）；`[MOTION] timeout but encoder verified` 生效 2 次（P4 基线移动、Mark2 对齐移动）；P4 verify drift=(-576,-22) `Applied frame shift (576,22)` 正常；无 FAILED/ERROR。
+- **语法检查：** ARM GCC 14.3.1 `-fsyntax-only` 三文件通过（本机无 Keil / 无 make；CMakeLists.txt / CMakePresets.json 已由用户删除，不再使用 CMake）。
+
+### 50.5 遗留问题
+
+- `[DIAG] After P2` 诊断 delta 约 -15mm：旧诊断拿 `g_marks[2]` 推算位置，蛇形映射后最后一个对齐 mark 不是 mark3，公式失效，仅打印误导，建议后续修复或删除。
+- `app_test.c cam_p2_full_test_run`（CAM_TEST P2）仍是两点法建系，未同步三点 LS（仅测试诊断用，不影响生产）。
+- 旧文档处理：§22.4 / §22.11 / §40.7 / §43.2 / §44.1 中「Mark3 验证」旧描述已删除或更新（用户确认删除旧记录）；§30 / §31 仿射建系 swap 修复清单保留为历史 commit 事实。
+
+## 五十一、2026-08-03 会话 — P1/P3 由单次检测改为 5 次迭代对齐（回归 ok/go 复测模式）
+
+### 51.1 背景
+
+P1/P3 自 2026-07-11 迁到单次检测后，主控对每个元件只修正一次视觉偏移，无收敛校验：散料偏移大、吸嘴偏心、元件倾斜时，单次检测残留误差直接进入拾取/贴装坐标；而 P2（≤7 轮）与 P4（≤5 轮）已是迭代对齐。决定将 P1/P3 改为**迭代对齐（上限 5 轮）**，复用 P2/P4 已验证的 `pos...end → 主控修正 → go 复测 → ok 收敛` 模式。
+
+### 51.2 协议变化
+
+- **pos 数据包字段不变**（仍为电机步数）：P1 `pos` `N:{dx}` `N:{dy}` `N:{final_ao}` `N:{class_id}` `end`（4 字段）；P3 `pos` `N:{dx}` `N:{dy}` `N:{final_ao}` `end`（3 字段）。
+- **新增 `ok` 帧：** Cam 检测到 |dx|、|dy| 均 < 对准阈值（建议与 P4 一致 5px，cam 端可配置）→ 发 `ok`，主控置 `VISION_DONE`。
+- **`go` 复测：** 主控收到 `pos...end`（VISION_GOT_POS）后按 §4.2.1 轴映射修正移动（P1：`dx_s=-(r->dy)`、`dy_s=-(r->dx)`；P3：`dx_s=+(r->dy)`、`dy_s=-(r->dx)`）→ 发 `go` → Cam 重新采集平均后复测，循环直至 `ok`。
+- **5 轮上限：** 主控侧迭代计数（`g_p1_align_iter`/`g_p3_align_iter`）达 5 仍未 `ok` 即强制结束（P1 进 HOST_PICK、P3 进 HOST_MOVE_TO_PCB），防相机旧固件不发 ok 时死循环；Cam 端第 5 轮可发 `err1_9`/`err3_9` 结束会话。
+- **角度取最后一轮** pos 包中的值（P1 `-angle*100`、P3 `+angle*100` 符号规则不变），R 轴修正逻辑不变。
+
+### 51.3 主控端改动
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_vision.c` | `process_p1_frame()` / `process_p3_frame()`：`end` 分支由直接置 `VISION_DONE` 改为置 `VISION_GOT_POS`（保留 dx/dy/angle/class 结果）；新增 `ok` 帧解析 → 置 `VISION_DONE`；`Vision_Go()` P1/P3 分支加迭代计数与日志（`g_p1_iter`/`g_p3_iter`，`reset_all` 清零） |
+| `Task/app_host.c` | 新增 `P1_ALIGN_MAX_ITER`/`P3_ALIGN_MAX_ITER`（5）与 `g_p1_align_iter`/`g_p3_align_iter`；`find_comp_step()` 新增 `VISION_GOT_POS` 分支（P1 修正偏移→计数→超限 `p1_align_finish` 或 `Vision_Go` 复测），`VISION_DONE`（ok）重构为只收尾（新增 `p1_align_finish()`：记忆位置 + cam_to_nozzle 补偿 + HOST_PICK），FIND_IDLE 入口复位计数；`offset_check_step()` 新增 `VISION_GOT_POS` 分支（P3 修正 + `g_p3_offset_x/y` 累计→计数→超限收尾或复测），`VISION_DONE`（ok）删除偏移应用（仅角度矫正 + 过渡 PCB）；`move_to_bottom_step()` 复位计数 |
+| `Task/app_test.c` | CAM_TEST 的 P1/P3 测试：`VISION_GOT_POS` 分支换算修正（去掉过时 `STEPS_PER_MM/1000.0f` 像素缩放，直接使用电机步数）+ 新增 5 次迭代上限强制结束 |
+
+### 51.4 摄像头端配合要求（MaixCAM2 固件，其他团队）
+
+- P1：Phase0 搜索流程不变（`stp`/`go`）；Phase1 每轮检测后未对准发 `pos` 包（4 字段）+ `end`，等 `go` 复测；对准发 `ok`；第 5 轮未对准发 `err1_9` 结束会话。
+- P3：Phase0 吸嘴检查与 `err3_8` 逻辑保留；Phase1 未对准发 `pos` 包（3 字段）+ `end`，等 `go` 复测；对准发 `ok`；第 5 轮未对准发 `err3_9`。
+- 每轮复测必须重新采集平均后再判定，不得用同一帧数据重复回包；角度每轮返回，主控取最后一轮。
+
+### 51.5 风险与兼容性
+
+- **相机固件未同步升级（旧单次固件）：** 旧固件发完一次 `pos...end` 后不再响应 `go`，主控在 5 轮计数内最多再等 10s（P1 子位置超时）/ 120s（Vision 总超时）后降级收尾。升级顺序建议**先相机、后主控**（或同版本发布）。
+- **节拍影响：** P1 处于扫描流程，迭代会为每个元件增加若干轮"采集+移动"时间；`P1_SCAN_SPEED=100` 低速已就绪，需实测整板节拍。
+- **err1_9 语义：** 该错误码已在 `app_host.c` recoverable 列表（每元件最多重试 3 次），与 5 轮迭代计数叠加后的重试次数需实测确认（若不想重试需单独处理）。（2026-08-03 已更新：recoverable 列表改为 `err1_6`，`err1_9` 移出，见 §52）
+- **角度不参与收敛判定：** 迭代仅判 XY，R 轴角度仍以最后一轮为准，避免角度抖动拖死迭代。
+
+### 51.6 验证
+
+- [x] 编译：Keil UV4 (ARMCLANG V6.21) 全量编译通过，0 Error / 1 Warning（`driver_tmc2209.c` 空循环体，原有）
+- [ ] 真机：P1 对散料元件、P3 对吸嘴元件各跑 10 次，记录迭代轮数与收敛率
+- [ ] 旧相机固件兼容性回归（go 超时降级路径）
+- [ ] `app_test.c` CAM_TEST 的 P1/P3 测试回归
+
+### 51.7 遗留问题
+
+- 对齐阈值（5px 建议）当前由 cam 端判定，主控无独立校验；如需主控侧二次校验需加字段。
+- §38 的历史描述（v2→v3 单次检测迁移）保留为历史事实，不修改。
+- `app_test.c` 的 P2 测试仍是两点法建系（CAM_TEST 用），未同步三点 LS（仅测试诊断用，不影响生产）。
+## 五十二、2026-08-03 会话 — P1 坐标恢复漏乘符号 → P3/HOME 偏右 6.2cm 修复
+
+### 52.1 背景
+
+实测现象：PnP 流程中 P1 找料正常，但**移动至下相机（P3）明显偏右约 6.2cm**；随后点击 HOME 回原点也往右偏约 6.2cm。P1/P2/P4 均正常。用户确认 P1 流程本身无误，要求定位根因。
+
+### 52.2 根因分析
+
+**根因：`p1_restore_coord()`（`Task/app_host.c`）的 Y 轴增量漏乘编码器符号修正 `MOTOR_Y_ENC_SIGN(-1)`。**
+
+- 出错代码（修复前）：`int32_t delta_y = (dy != 0) ? d3 : 0;`（d3 为 Y 电机 31H 编码器原始增量）
+- 正确对照（同工程多处均乘符号）：`jog_stop_update_coord()`（`app_motion.c:723`）`dy_delta = MOTOR_Y_ENC_SIGN * (e3 - enc_y_start)`；`move_xy_relative()` 校验、`p2_scan_step_y()` 等。
+- 结构性原因：`MOTOR_Y_ENC_SIGN` 原只定义在 `app_motion.c`（非头文件），`app_host.c` 无法引用，导致该处漏乘。
+- 触发路径：P1 扫描 `FIND_MOVING` 的 `VISION_GOT_STOP` / `VISION_ERROR` / 超时分支调用 `p1_restore_coord()` 恢复坐标 → `g_coord.y` 被写入错误值（误差 = 2×|dy|）。
+- 传播机制：`safe_move_to()` 内部按**相对增量**移动（`dx = target - c0`，`app_motion.c:651-652`），`g_coord` 的误差 1:1 传导到所有绝对目标移动（`move_to_bottom_step` 去下相机、HOME `safe_move_to(0,0)`）。
+- 量化吻合：默认标定 cell0/subpos0 目标 `ty = -16281` 步（cam_to_nozzle≈0），`2×16281/512 ≈ 63.6mm`，与实测 6.2cm 吻合（差 1.6mm 属标定微差）。
+- 为何 P1/P2/P4 正常：P1 有视觉迭代闭环（`GOT_POS` 每轮相对修正），物理位置收敛但 `g_coord` 已污染；P2 建系用编码器实测绝对值 `g_marks_actual`；P4 在 P1 之前运行；三者均不经过 `p1_restore_coord` 的污染路径。
+- 溯源：`git blame` 确认由 commit `6770505a`（2026-08-01，P1 非阻塞扫描子状态机）引入，一直存在。
+
+### 52.3 修复
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_motion.h` | 新增 `#define MOTOR_Y_ENC_SIGN (-1)`（供 `app_host.c` 跨文件引用） |
+| `Task/app_motion.c` | 删除本文件内重复宏定义（该文件为 LF 换行，编辑时保持） |
+| `Task/app_host.c` | `p1_restore_coord()`：`delta_y = (dy != 0) ? (int32_t)(MOTOR_Y_ENC_SIGN * d3) : 0;` |
+
+X 轴 `delta_x = (d1+d2)/2` 与 `jog_stop_update_coord()` 一致，无需符号修正（仅 Y 轴）。
+
+### 52.4 验证
+
+- [x] 编译：Keil UV4 全量 0 Error / 1 Warning（`driver_tmc2209.c` 空循环体，既有）
+- [x] 交叉审查：2 个只读 agent 独立验证（量化 63.6mm + 传播链 + 排除项）结论一致；补丁审查 6 项全 OK
+- [x] 真机：用户确认 P3 移动与 HOME 回原点恢复正常（2026-08-03）
+
+### 52.5 相关文档同步（2026-08-03）
+
+- AGENTS.md 同步：P1/P3 迭代上限 5→8（`P1/P3_ALIGN_MAX_ITER=8`，1 init pos + cam 7 轮）；错误码按《通讯接口(cam与主控)-P1P3.md》更新（P1 增 `err1_6`、删 `err1_9`；P3 增 `err3_6/err3_7`、删 `err3_9`）；§4.2.3 辅助函数行号更新；§10.3 标注 `app_motion.c` LF 换行例外。
+- §51.7 遗留问题中「err1_9 已在 recoverable 列表」描述已过时（现为 `err1_6` 加入 recoverable、`err1_9` 移出），以本文档为准。
+- 行号提醒：`p1_restore_coord()` 现位于 `app_host.c:1505`（§48 记录 1347 已过时）。
+
+### 52.6 遗留问题
+
+- `g_p3_nozzle_retry` 在 RESUME / 新下载时不清零（既有问题，未处理）。
+- `app_test.c` CAM_TEST 的 P1/P3 测试循环仍为 5 轮上限，与新协议 8 轮不一致（测试模块按用户要求未动）。
+- `MOTOR_Y_ENC_SIGN` 依赖物理接线约定，若更换电机 / 接线需重新标定符号。

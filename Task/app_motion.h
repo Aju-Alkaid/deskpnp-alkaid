@@ -6,6 +6,7 @@
 #include <stdbool.h>
 
 #define R_AXIS_ADDR   0x04   // 虚拟地址，用于日志记录和调试，实际 R 轴控制可能复用 X/Y 的某个地址
+#define MOTOR_Y_ENC_SIGN (-1)   /* Y 轴编码器增量符号 (依物理接线调整) */
 
 /* ---- 机器座标系 (单例，线程安全) ---- */
 typedef struct {

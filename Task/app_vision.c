@@ -90,6 +90,8 @@ static int           g_p3_retry_cnt = 0;
 /* ---- Process4 子状态 ---- */
 static P4_State_t    g_p4_sub       = P4_WAITING;
 static int           g_p4_iter      = 0;  /* P4 对位迭代计数 */
+static int           g_p1_iter      = 0;  /* P1 对位迭代计数 */
+static int           g_p3_iter      = 0;  /* P3 对位迭代计数 */
 
 static int           g_p2_iter      = 0;  /* P2 aligning 迭代计数 */
 
@@ -173,6 +175,8 @@ static void reset_all(void) {
     g_p3_retry_cnt = 0;
     g_p4_sub       = P4_WAITING;
     g_p4_iter      = 0;
+    g_p1_iter      = 0;
+    g_p3_iter      = 0;
     g_p2_iter      = 0;
     g_p2_total_rx  = 0;
     g_p2_stp_ignored = 0;
@@ -259,7 +263,14 @@ static void process_p1_frame(const char *str) {
         return;
     }
 
-    /* ---- "end" -> VISION_DONE (single-shot, includes angle) ---- */
+    /* ---- "ok" -> aligned done (iterative align) ---- */
+    if (str[0] == 'o' && str[1] == 'k' && str[2] == '\0') {
+        g_collecting = false;
+        if (g_p1_sub == P1_S1_WAIT_POS) g_state = VISION_DONE;
+        return;
+    }
+
+    /* ---- "end" -> VISION_GOT_POS (not aligned, host corrects then go) ---- */
     if (str[0] == 'e' && str[1] == 'n' && str[2] == 'd' && str[3] == '\0') {
         if (!g_collecting) return;
         g_collecting = false;
@@ -270,7 +281,7 @@ static void process_p1_frame(const char *str) {
             g_result.angle_x100 = g_tmp_ao;
             g_result.angle_valid = true;
             fill_class_id(g_tmp_cls);
-            g_state = VISION_DONE;
+            g_state = VISION_GOT_POS;
         }
         return;
     }
@@ -409,7 +420,14 @@ static void process_p3_frame(const char *str) {
         return;
     }
 
-    /* ---- "end" -> VISION_DONE (single-shot, includes angle) ---- */
+    /* ---- "ok" -> aligned done (iterative align) ---- */
+    if (str[0] == 'o' && str[1] == 'k' && str[2] == '\0') {
+        g_collecting = false;
+        if (g_p3_sub == P3_PHASE1) g_state = VISION_DONE;
+        return;
+    }
+
+    /* ---- "end" -> VISION_GOT_POS (not aligned, host corrects then go) ---- */
     if (str[0] == 'e' && str[1] == 'n' && str[2] == 'd' && str[3] == '\0') {
         if (!g_collecting) return;
         g_collecting = false;
@@ -420,7 +438,7 @@ static void process_p3_frame(const char *str) {
             g_result.angle_valid = true;
             g_result.class_id   = -1;
             g_result.class_name[0] = '\0';
-            g_state = VISION_DONE;
+            g_state = VISION_GOT_POS;
         }
         return;
     }
@@ -683,8 +701,10 @@ void Vision_Go(void) {
         if (g_p1_sub == P1_S0_WAIT_STOP) {
             g_p1_sub = P1_S1_WAIT_POS;
             PrintDebug("[VISION] -> Cam: go (P1 Phase1)\r\n");
+        } else if (g_p1_sub == P1_S1_WAIT_POS) {
+            g_p1_iter++;
+            PrintDebug("[VISION] -> Cam: go (P1 align iter %d)\r\n", g_p1_iter);
         }
-        /* P1 single-shot: no Phase2 */
         return;
     }
     else if (g_active_cmd == VCMD_P2) {
@@ -704,7 +724,8 @@ void Vision_Go(void) {
         }
     }
     else if (g_active_cmd == VCMD_P3) {
-        /* P3 single-shot: no Phase2 */
+        g_p3_iter++;
+        PrintDebug("[VISION] -> Cam: go (P3 align iter %d)\r\n", g_p3_iter);
         return;
     }
     else if (g_active_cmd == VCMD_P4) {

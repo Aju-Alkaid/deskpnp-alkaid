@@ -64,8 +64,6 @@ static uint32_t g_move_pad_ms = 500;  /* move_xy_relative 安全余量,点动时
  *  使用 LDREX / STREX 保证与 CAN_Process_Task 的位更新不竞态
  * ================================================================ */
 
-#define MOTOR_Y_ENC_SIGN (-1)   /* Y 轴编码器增量符号 (依物理接线调整) */
-
 static void motion_drain_queue(void)
 {
     CAN_Rx_Packet_t pkt;
@@ -242,7 +240,9 @@ void disable_sync_stop(void)
     axis_stop(X1_ADDR);
     axis_stop(X2_ADDR);
     axis_stop(Y_ADDR);
+    motorSyncTrigger(0);  /* 0xF7 在同步模式下可能被缓存，必须触发才真正急停 */
     osDelay(5);
+    motorSyncEnable(1);   /* 触发后同步标志被消耗，立即恢复，统一三轴状态 */
 }/**
  * @brief  XY 相对移动（阻塞式,0x02 到位信号优先 + 时间估算兜底）
  *
@@ -285,7 +285,8 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         motion_read_encoder(3, &enc_start_y, 100);
     }
 
-    /* 3. 发位置指令 */
+    /* 3. 发位置指令（双保险：先重开同步标志，防止缓存/执行语义漂移） */
+    motorSyncEnable(1); osDelay(5);
     if (dx != 0) {
         positionMode2Run(X1_ADDR, speed, acc, dx);
         osDelay(2);
@@ -299,6 +300,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
 
     /* 4. 广播同步触发 */
     motorSyncTrigger(0);
+    motorSyncEnable(1); osDelay(5);  /* 触发后立即恢复同步（双保险），防止下次 X1/X2 状态漂移 */
 
     /* 5. 等待 0x02 到位，超时或堵转时立即停车返回 */
     uint32_t need = 0;
@@ -307,7 +309,8 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
 
     float max_steps = fmaxf(fabsf((float)dx), fabsf((float)dy));
     float steps_per_ms = (float)speed * MKS_PULSES_PER_REV / 60000.0f;
-    uint32_t move_ms = (uint32_t)(max_steps / steps_per_ms) + g_move_pad_ms;
+    /* 匀速时间 ×3 计入加减速段；长距离移动（如 51mm 下相机）不能只按匀速估算 */
+    uint32_t move_ms = (uint32_t)(max_steps / steps_per_ms * 3.0f) + g_move_pad_ms;
     if (move_ms < 50)   move_ms = 50;
     if (move_ms > 5000) move_ms = 5000;
     uint32_t poll_ms = move_ms + 200;
@@ -319,6 +322,43 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         axis_stop(X1_ADDR);
         axis_stop(X2_ADDR);
         axis_stop(Y_ADDR);
+        motorSyncTrigger(0);  /* 超时/异常：确保缓存的 0xF7 真正执行 */
+        motorSyncEnable(1);   /* 并恢复同步，避免三轴状态不一致 */
+
+        /* 超时兜底：0x02 可能卡在 MKS TX mailbox，读编码器确认实际是否到位 */
+        if (ret == -1) {
+            osDelay(80);
+            int32_t e1 = 0, e2 = 0, e3 = 0;
+            bool enc_ok2 = true;
+            if (dx != 0) {
+                if (motion_read_encoder(1, &e1, 100) != 0) enc_ok2 = false;
+                if (motion_read_encoder(2, &e2, 100) != 0) enc_ok2 = false;
+            }
+            if (dy != 0) {
+                if (motion_read_encoder(3, &e3, 100) != 0) enc_ok2 = false;
+            }
+            if (enc_ok2) {
+                bool enc_match = true;
+                if (dx != 0) {
+                    int32_t d1 = e1 - enc_start_x1;
+                    int32_t d2 = e2 - enc_start_x2;
+                    if (abs(d1 - dx) > ENC_TOLERANCE_STEPS ||
+                        abs(d2 - dx) > ENC_TOLERANCE_STEPS ||
+                        abs(d1 - d2) > ENC_TOLERANCE_STEPS) enc_match = false;
+                }
+                if (dy != 0) {
+                    int32_t d3 = e3 - enc_start_y;
+                    if (abs(d3 - MOTOR_Y_ENC_SIGN * dy) > ENC_TOLERANCE_STEPS) enc_match = false;
+                }
+                if (enc_match) {
+                    PrintDebug("[MOTION] timeout but encoder verified, treat as done\r\n");
+                    Coord_UpdateXY(target_x, target_y);
+                    return 0;
+                }
+            }
+            PrintDebug("[MOTION] timeout and encoder mismatch, fail\r\n");
+        }
+
         Coord_Invalidate();
         if (ret == -2) g_motor_error = true;
         return ret;
@@ -387,6 +427,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
 
         motion_drain_queue();
         motion_clear_done_bits();
+        motorSyncEnable(1); osDelay(5);
         if (corr_x != 0) {
             positionMode2Run(X1_ADDR, 50, 30, corr_x);
             osDelay(2);
@@ -398,6 +439,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
             osDelay(2);
         }
         motorSyncTrigger(0);
+        motorSyncEnable(1); osDelay(5);
 
         uint32_t corr_need = 0;
         if (corr_x != 0) corr_need |= EVENT_X1_DONE | EVENT_X2_DONE;
@@ -405,6 +447,7 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         int ret2 = motion_wait_done(corr_need, 1500, &timeout);
         if (ret2 != 0) {
             axis_stop(X1_ADDR); axis_stop(X2_ADDR); axis_stop(Y_ADDR);
+            motorSyncTrigger(0); motorSyncEnable(1);
             Coord_Invalidate();
             return ret2;
         }
@@ -482,6 +525,7 @@ static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
 {
     motion_drain_queue();
     motion_clear_done_bits();
+    motorSyncEnable(1); osDelay(5);
 
     MachineCoord_t c0 = Coord_Get();
     int32_t enc_start_x1 = 0, enc_start_x2 = 0, enc_start_y = 0;
@@ -493,6 +537,7 @@ static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
     send_axis_abs(X2_ADDR, x_abs, speed, acc);
     send_axis_abs(Y_ADDR,  y_abs, speed, acc);
     motorSyncTrigger(0);
+    motorSyncEnable(1); osDelay(5);
 
     bool timeout = false;
     int ret = motion_wait_done(EVENT_ALL_AXES, ACK_TIMEOUT_MS, &timeout);
@@ -500,6 +545,7 @@ static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
         axis_stop(X1_ADDR);
         axis_stop(X2_ADDR);
         axis_stop(Y_ADDR);
+        motorSyncTrigger(0); motorSyncEnable(1);
         Coord_Invalidate();
         return ret;
     }
@@ -616,6 +662,7 @@ void move_start_async(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc) {
 
     motion_drain_queue();
     motion_clear_done_bits();
+    motorSyncEnable(1); osDelay(5);
 
     if (dx != 0) {
         positionMode2Run(X1_ADDR, speed, acc, dx);
@@ -629,6 +676,7 @@ void move_start_async(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc) {
     }
 
     motorSyncTrigger(0);
+    motorSyncEnable(1); osDelay(5);
 }
 
 void move_set_pad_ms(uint32_t pad_ms) { g_move_pad_ms = pad_ms; }
@@ -902,12 +950,14 @@ void p2_scan_step_y(int32_t dy_steps, uint16_t speed, uint8_t acc)
     if (dy_steps == 0) return;
     motion_drain_queue();
     motion_clear_done_bits();
+    motorSyncEnable(1); osDelay(5);
 
     int32_t enc_start = 0, enc_end = 0;
     motion_read_encoder(3, &enc_start, 100);
 
     positionMode2Run(Y_ADDR, speed, acc, dy_steps);
     motorSyncTrigger(0);
+    motorSyncEnable(1); osDelay(5);
 
     uint32_t poll_ms = (uint32_t)(fabsf((float)dy_steps) * 60000.0f
                         / ((float)speed * MKS_PULSES_PER_REV)) + 200;

@@ -136,9 +136,10 @@ uint8_t CAN_Transmit_Data(FDCAN_HandleTypeDef *hfdcan, uint16_t can_id, uint8_t 
 
 #endif
 	HAL_StatusTypeDef status =  HAL_FDCAN_AddMessageToTxFifoQ(hfdcan, &tx_header,  buf);
+    uint8_t rc = (status == HAL_OK) ? 0 : 1;
 
     // 转换返回值：HAL_OK(0) -> 返回0; 其他错误 -> 返回1
-    return (status == HAL_OK) ? 0 : 1;	
+    return rc;	
 }
 
 /**

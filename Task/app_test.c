@@ -1368,6 +1368,7 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
     {
         int p1_scan_pos = 0;
         int p1_retry = 0;
+        int p1_align_iter = 0;   /* P1 迭代对齐计数 */
         float p1_angle = 0.0f;
         bool p1_done = false;
         bool p1_ok = false;
@@ -1411,15 +1412,27 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
                 break;
 
             case VISION_GOT_POS: {
-                int32_t dx_s = -(int32_t)(r->dy * (STEPS_PER_MM / 1000.0f));
-                int32_t dy_s = -(int32_t)(r->dx * (STEPS_PER_MM / 1000.0f));
-                PrintDebug("[CAM_TEST] P1 pos: offset(%ld,%ld)px move(%ld,%ld)steps\r\n",
-                           (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
+                /* 迭代对齐: 偏移已是电机步数, 修正后 go 复测; 5 次上限强制结束 */
+                int32_t dx_s = -(int32_t)(r->dy);
+                int32_t dy_s = -(int32_t)(r->dx);
+                PrintDebug("[CAM_TEST] P1 pos: offset(%ld,%ld) steps\r\n", (long)r->dx, (long)r->dy);
                 if (dx_s != 0 || dy_s != 0) {
                     safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s,
                                  PNP_SPEED_FINE, PNP_ACC_FINE);
                 }
-                Vision_Go();
+                p1_align_iter++;
+                if (p1_align_iter >= 5) {
+                    PrintDebug("[CAM_TEST] P1 align %d iters, force done\r\n", p1_align_iter);
+                    if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
+                        safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps,
+                                     Coord_Get().y - g_calib.cam_to_nozzle_dy_steps,
+                                     PNP_SPEED_FINE, PNP_ACC_FINE);
+                    }
+                    p1_done = true;
+                    p1_ok = true;
+                } else {
+                    Vision_Go();
+                }
                 break;
             }
 
@@ -1482,6 +1495,7 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
                     bool p3_done = false;
                     bool p3_ok = false;
                     float p3_angle = 0.0f;
+                    int p3_align_iter = 0;   /* P3 迭代对齐计数 */
                     uint32_t p3_start = osKernelGetTickCount();
                     const uint32_t P3_TEST_TIMEOUT_MS = 30000;
 
@@ -1511,15 +1525,22 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
                             break;
 
                         case VISION_GOT_POS: {
-                            int32_t dx_s = (int32_t)(r->dy * (STEPS_PER_MM / 1000.0f));
-                            int32_t dy_s = -(int32_t)(r->dx * (STEPS_PER_MM / 1000.0f));
-                            PrintDebug("[CAM_TEST] P3 pos: offset(%ld,%ld)px move(%ld,%ld)steps\r\n",
-                                       (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
+                            /* 迭代对齐: 偏移已是电机步数, 修正后 go 复测; 5 次上限强制结束 */
+                            int32_t dx_s = (int32_t)(r->dy);
+                            int32_t dy_s = -(int32_t)(r->dx);
+                            PrintDebug("[CAM_TEST] P3 pos: offset(%ld,%ld) steps\r\n", (long)r->dx, (long)r->dy);
                             if (dx_s != 0 || dy_s != 0) {
                                 safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s,
                                              PNP_SPEED_FINE, PNP_ACC_FINE);
                             }
-                            Vision_Go();
+                            p3_align_iter++;
+                            if (p3_align_iter >= 5) {
+                                PrintDebug("[CAM_TEST] P3 align %d iters, force done\r\n", p3_align_iter);
+                                p3_done = true;
+                                p3_ok = true;
+                            } else {
+                                Vision_Go();
+                            }
                             break;
                         }
 

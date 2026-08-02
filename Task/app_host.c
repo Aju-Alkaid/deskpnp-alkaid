@@ -45,13 +45,16 @@ static void gui_process_cmd(const HostParsed_t *p);
 #define PUMP_BLOW_MS    1000          /* 关气泵后电磁阀吹气时长(ms) */
 
 #define MARK_VERIFY_ERR_MM  0.3f   /* Mark3 验证允许误差 (mm) */
+#define P2_RETRY_MAX        1     /* P2 建系失败最大重试次数 */
 #define P2_SCAN_STEP_MM      5.0f   /* P2 横向步进宽度 (mm) */
-#define P2_SCAN_SPEED        14     /* P2 连续扫描速度 (RPM), Cam 需要低速识别 */
-#define P2_SCAN_ACC          15     /* P2 连续扫描加速度 */
+#define P2_SCAN_SPEED        20     /* P2 连续扫描速度 (RPM), Cam 需要低速识别 */
+#define P2_SCAN_ACC          20     /* P2 连续扫描加速度 */
 #define P2_SCAN_TIMEOUT       300   /* P2 非扫描模式超时 (~3s, 对齐/跳转等待) */
 #define P2_SCAN_COL_PAD_MS   500    /* 每列额外延时 (ms), 补偿加减速段 */
 #define P2_SCAN_POS_UPDATE_MS 100   /* 位置估算 Coord 更新间隔 (ms) */
 #define P2_MAX_ALIGN_ITER       7   /* P2 对齐迭代上限，防死循环 */
+#define P1_ALIGN_MAX_ITER       8   /* P1 对齐迭代上限 */
+#define P3_ALIGN_MAX_ITER       8   /* P3 对齐迭代上限 */
 
 /* speedModeRun 方向位: 0=CCW→电机x增大(上), 1=CW→电机x减小(下). 方向反了就交换 */
 #define P2_SCAN_DIR_UP        1
@@ -124,6 +127,8 @@ static int32_t g_marks_actual[P2_MARK_COUNT][2];
 
 /* P3 下相机偏移累积 (步数) */
 static int32_t g_p3_offset_x = 0;
+static int g_p1_align_iter = 0;   /* P1 对位迭代计数 */
+static int g_p3_align_iter = 0;   /* P3 对位迭代计数 */
 static int32_t g_p3_offset_y = 0;
 
 /* P4 下相机基线/校验坐标 (步数) */
@@ -139,6 +144,7 @@ static uint32_t g_busy_enter_tick = 0;
 static bool     g_in_busy = false;
 static bool    g_mark_just_jumped = false;  /* 防止 Mark 跳转后冗余二次跳转 */
 static int     g_p2_pos_iter = 0;           /* P2 对齐迭代计数，防死循环 */
+static uint8_t  g_p2_retry_cnt = 0;        /* P2 建系失败重试计数 */
 
 /* P2 连续扫描状态 */
 static bool     g_p2_scanning = false;      /* 是否正在连续扫描 */
@@ -380,6 +386,7 @@ static void download_done(void) {
     g_header_parsed = false;
     memset(&g_pcb_frame, 0, sizeof(g_pcb_frame));  /* 清除旧建系结果 */
     g_consecutive_failures = 0;
+    g_p2_retry_cnt = 0;
     g_mark_avg_dx = 0;
     g_mark_avg_dy = 0;
 
@@ -391,7 +398,12 @@ static void download_done(void) {
         g_mark_just_jumped = false;
         g_state = HOST_P4_BASELINE;
 
-        safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
+        int ret_p4 = safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
+        if (ret_p4 != 0) {
+            PrintDebug("[HOST] P4 baseline move FAILED (ret=%d), abort to ERROR\r\n", ret_p4);
+            g_state = HOST_ERROR;
+            return;
+        }
         LowerCam_Light_On();
         Vision_Start(VCMD_P4, 0);
         PrintDebug("[HOST] P4 baseline: moving to bottom cam...\r\n");
@@ -614,6 +626,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         g_jog_active = true;
         z_safe();
         osDelay(100);
+        motorSyncEnable(1); osDelay(5);
         positionMode3Run(X1_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         positionMode3Run(X2_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         motorSyncTrigger(0);
@@ -628,6 +641,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         g_jog_active = true;
         z_safe();
         osDelay(100);
+        motorSyncEnable(1); osDelay(5);
         positionMode3Run(X1_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         positionMode3Run(X2_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         motorSyncTrigger(0);
@@ -642,6 +656,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         g_jog_active = true;
         z_safe();
         osDelay(100);
+        motorSyncEnable(1); osDelay(5);
         positionMode3Run(Y_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, JOG_MAX_STEPS);
         motorSyncTrigger(0);
         g_jog_name = "JOG_LEFT";
@@ -654,6 +669,7 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         g_jog_active = true;
         z_safe();
         osDelay(100);
+        motorSyncEnable(1); osDelay(5);
         positionMode3Run(Y_ADDR, (uint16_t)(cmd->param * JOG_MMS_TO_RPM), JOG_ACC, -JOG_MAX_STEPS);
         motorSyncTrigger(0);
         g_jog_name = "JOG_RIGHT";
@@ -679,6 +695,8 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         }
         g_jog_active = false;
         g_jog_name = NULL;
+        g_last_cmd = HCMD_NONE;   /* 重置去重，保证 STOP 后下一次 START 必定执行 */
+        g_last_param = 0.0f;
         break;
 
     case HCMD_MOVE_TO: {
@@ -799,7 +817,6 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
             int cl = component_cell(rc);
             safe_move_to(g_scatter_subpos[cl][0][0] + g_calib.cam_to_nozzle_dx_steps, g_scatter_subpos[cl][0][1] + g_calib.cam_to_nozzle_dy_steps,
                          PNP_SPEED_FAST, PNP_ACC);
-            Vision_Start(VCMD_P1, footprint_to_class_id(rc->footprint));
             g_state = HOST_FIND_COMP;
             PrintDebug("[HOST] RESUME: retrying comp %u at cell %d\r\n", rc->id, cl);
         }
@@ -1055,9 +1072,22 @@ static void mark_align_step(void) {
                 float tdy = g_marks[phys_idx].target_y - g_marks[phys_prev].target_y;
                 int32_t dx = (int32_t)(tdy * STEPS_PER_MM);
                 int32_t dy = -(int32_t)(tdx * STEPS_PER_MM);
-                safe_move_to(g_marks_actual[phys_prev][0] + dx + g_calib.cam_to_nozzle_dx_steps,
-                             g_marks_actual[phys_prev][1] + dy + g_calib.cam_to_nozzle_dy_steps,
-                             PNP_SPEED, PNP_ACC);
+                int jret = safe_move_to(g_marks_actual[phys_prev][0] + dx + g_calib.cam_to_nozzle_dx_steps,
+                                     g_marks_actual[phys_prev][1] + dy + g_calib.cam_to_nozzle_dy_steps,
+                                     PNP_SPEED, PNP_ACC);
+                if (jret != 0) {
+                    /* 移动失败：重试一次 */
+                    jret = safe_move_to(g_marks_actual[phys_prev][0] + dx + g_calib.cam_to_nozzle_dx_steps,
+                                        g_marks_actual[phys_prev][1] + dy + g_calib.cam_to_nozzle_dy_steps,
+                                        PNP_SPEED, PNP_ACC);
+                }
+                if (jret != 0) {
+                    PrintDebug("[HOST] P2 jump Mark%ld move FAILED (ret=%d), abort to ERROR\r\n", (long)(phys_idx + 1), jret);
+                    Vision_SendEnd();
+                    Vision_ForceIdle();
+                    g_state = HOST_ERROR;
+                    break;
+                }
                 g_mark_just_jumped = true;
                 PrintDebug("[HOST] P2 jump Mark%ld: theory(%.1f,%.1f)mm → (%ld,%ld)\r\n",
                            (long)(phys_idx + 1), tdx, tdy, (long)Coord_Get().x, (long)Coord_Get().y);
@@ -1086,7 +1116,18 @@ static void mark_align_step(void) {
             if (r->dx != 0 || r->dy != 0) {
                 int32_t dx_s = -(int32_t)(r->dy);  // cam Y → X1+X2, value already in motor steps
                 int32_t dy_s = -(int32_t)(r->dx);  // cam X → Y 电机, value already in motor steps
-                safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, 100, 25);
+                int mret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, 100, 25);
+                if (mret != 0) {
+                    /* 移动失败：重试一次 */
+                    mret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, 100, 25);
+                }
+                if (mret != 0) {
+                    PrintDebug("[HOST] Mark%ld align move FAILED (ret=%d), abort to ERROR\r\n", (long)(phys_idx + 1), mret);
+                    Vision_SendEnd();
+                    Vision_ForceIdle();
+                    g_state = HOST_ERROR;
+                    break;
+                }
                 PrintDebug("[HOST] Mark%ld offset: (%ld,%ld)steps → move(%ld,%ld)steps\r\n",
                            (long)(phys_idx + 1), (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
             }
@@ -1103,7 +1144,7 @@ static void mark_align_step(void) {
     }
 
     /* ---- 建系 (保持不变) ---- */
-    case VISION_DONE: {
+        case VISION_DONE: {
         g_mark_scanning = false;
         g_p2_scanning = false;
         if (g_mark_count < P2_MARK_COUNT) {
@@ -1113,64 +1154,103 @@ static void mark_align_step(void) {
             g_state = HOST_ERROR;
             break;
         }
-        int32_t a1x = g_marks_actual[0][0], a1y = g_marks_actual[0][1];
-        int32_t a2x = g_marks_actual[1][0], a2y = g_marks_actual[1][1];
-        int32_t a3x = g_marks_actual[2][0], a3y = g_marks_actual[2][1];
 
-        float t1x = g_marks[0].target_x, t1y = g_marks[0].target_y;
-        float t2x = g_marks[1].target_x, t2y = g_marks[1].target_y;
-        float t3x = g_marks[2].target_x, t3y = g_marks[2].target_y;
+        /* ---- 三点最小二乘建系 (2D Procrustes 解析解) ----
+         * 实测机器坐标 a_i = g_marks_actual[i] (步数) → cam 坐标 ac_i = (-a_y, a_x)
+         * 理论点 t_i = g_marks[i].target (mm) → 步数; 求 R(theta), o 使 ac ≈ R(theta)*t + o */
+        float mean_ac_x = 0, mean_ac_y = 0, mean_t_x = 0, mean_t_y = 0;
+        float ac3[3][2], ts3[3][2];
+        for (int i = 0; i < 3; i++) {
+            ac3[i][0] = -(float)g_marks_actual[i][1];
+            ac3[i][1] =  (float)g_marks_actual[i][0];
+            ts3[i][0] = g_marks[i].target_x * STEPS_PER_MM;
+            ts3[i][1] = g_marks[i].target_y * STEPS_PER_MM;
+            mean_ac_x += ac3[i][0]; mean_ac_y += ac3[i][1];
+            mean_t_x  += ts3[i][0]; mean_t_y  += ts3[i][1];
+        }
+        mean_ac_x /= 3.0f; mean_ac_y /= 3.0f;
+        mean_t_x  /= 3.0f; mean_t_y  /= 3.0f;
 
-        float theory_ang = atan2f(t2y - t1y, t2x - t1x);
-
-        /* 电机坐标 → 相机坐标: cam_X = -(Y电机), cam_Y = X1+X2 */
-        float ac1x = -(float)a1y, ac1y = (float)a1x;
-        float ac2x = -(float)a2y, ac2y = (float)a2x;
-        float actual_ang = atan2f(ac2y - ac1y, ac2x - ac1x);
-        float theta = actual_ang - theory_ang;
-
-        float mt_x = (t1x + t2x) * 0.5f * STEPS_PER_MM;
-        float mt_y = (t1y + t2y) * 0.5f * STEPS_PER_MM;
-        float ma_x = (ac1x + ac2x) * 0.5f;
-        float ma_y = (ac1y + ac2y) * 0.5f;
-
+        float dot_sum = 0, cross_sum = 0;
+        for (int i = 0; i < 3; i++) {
+            float pcx = ac3[i][0] - mean_ac_x, pcy = ac3[i][1] - mean_ac_y;
+            float ptx = ts3[i][0] - mean_t_x,  pty = ts3[i][1] - mean_t_y;
+            dot_sum   += pcx * ptx + pcy * pty;
+            cross_sum += pcx * pty - pcy * ptx;
+        }
+        float theta = -atan2f(cross_sum, dot_sum);
         float cos_t = cosf(theta), sin_t = sinf(theta);
-        float o_cx = ma_x - (mt_x * cos_t - mt_y * sin_t);
-        float o_cy = ma_y - (mt_x * sin_t + mt_y * cos_t);
-        g_pcb_frame.origin_x_steps = (int32_t)o_cy;    /* cam_Y → X1+X2 */
-        g_pcb_frame.origin_y_steps = (int32_t)(-o_cx); /* cam_X → Y电机(取反) */
-        g_pcb_frame.rotation_rad = theta;
+        float o_cx = mean_ac_x - (mean_t_x * cos_t - mean_t_y * sin_t);
+        float o_cy = mean_ac_y - (mean_t_x * sin_t + mean_t_y * cos_t);
 
-        float t3x_s = t3x * STEPS_PER_MM;
-        float t3y_s = t3y * STEPS_PER_MM;
-        float pcx = (t3x_s * cos_t - t3y_s * sin_t) + o_cx;
-        float pcy = (t3x_s * sin_t + t3y_s * cos_t) + o_cy;
-        int32_t pred_x = (int32_t)pcy;  /* cam_Y → X1+X2 */
-        int32_t pred_y = (int32_t)(-pcx); /* cam_X → Y电机(取反) */
-        int32_t err_x = pred_x - a3x, err_y = pred_y - a3y;
-        float err_mm = sqrtf((float)(err_x*err_x + err_y*err_y)) / STEPS_PER_MM;
-        g_pcb_frame.valid = (err_mm < MARK_VERIFY_ERR_MM);
+        /* 每点残差 (mm) */
+        float res_mm[3] = {0, 0, 0};
+        float max_res = 0;
+        int bad_idx = 0;
+        for (int i = 0; i < 3; i++) {
+            float rcx = ts3[i][0] * cos_t - ts3[i][1] * sin_t;
+            float rcy = ts3[i][0] * sin_t + ts3[i][1] * cos_t;
+            float pred_x = rcy + o_cy;        /* cam_Y → X1+X2 */
+            float pred_y = -(rcx + o_cx);     /* cam_X → Y电机(取反) */
+            float ex = pred_x - (float)g_marks_actual[i][0];
+            float ey = pred_y - (float)g_marks_actual[i][1];
+            res_mm[i] = sqrtf(ex * ex + ey * ey) / STEPS_PER_MM;
+            if (res_mm[i] > max_res) { max_res = res_mm[i]; bad_idx = i; }
+        }
 
-        PrintDebug("[HOST] === PCB Frame ===\r\n");
+        PrintDebug("[HOST] === PCB Frame (3-point LS) ===\r\n");
         PrintDebug("[HOST] origin=(%ld,%ld) theta=%.4frad(%.2fdeg)\r\n",
-                   (long)g_pcb_frame.origin_x_steps, (long)g_pcb_frame.origin_y_steps,
-                   theta, theta * 57.29578f);
-        PrintDebug("[HOST] Mark3 verify: err=%.3fmm %s\r\n", err_mm,
-                   g_pcb_frame.valid ? "OK" : "FAIL");
+                   (long)(int32_t)o_cy, (long)(int32_t)(-o_cx), theta, theta * 57.29578f);
+        PrintDebug("[HOST] P2 res: mark1=%.3f mark2=%.3f mark3=%.3f max=%.3fmm\r\n",
+                   res_mm[0], res_mm[1], res_mm[2], max_res);
 
-        /* 诊断: 比较 Coord 和 建系推算位置 */
-        {
-            MachineCoord_t cc = Coord_Get();
-            /* 用 frame 反算 Mark2 相机应该在哪 */
-            float ltx = g_marks[2].target_x * STEPS_PER_MM;
-            float lty = g_marks[2].target_y * STEPS_PER_MM;
-            float rcx = ltx * cos_t - lty * sin_t;
-            float rcy = ltx * sin_t + lty * cos_t;
-            int32_t frame_x = (int32_t)rcy + g_pcb_frame.origin_x_steps + g_calib.cam_to_nozzle_dx_steps;
-            int32_t frame_y = (int32_t)(-rcx) + g_pcb_frame.origin_y_steps + g_calib.cam_to_nozzle_dy_steps;
-            PrintDebug("[DIAG] After P2: Coord=(%ld,%ld) frame_Mark2_cam=(%ld,%ld) delta=(%ld,%ld)\r\n",
-                       (long)cc.x, (long)cc.y, (long)frame_x, (long)frame_y,
-                       (long)(cc.x - frame_x), (long)(cc.y - frame_y));
+        if (max_res < MARK_VERIFY_ERR_MM) {
+            g_pcb_frame.origin_x_steps = (int32_t)o_cy;
+            g_pcb_frame.origin_y_steps = (int32_t)(-o_cx);
+            g_pcb_frame.rotation_rad = theta;
+            g_pcb_frame.valid = true;
+            PrintDebug("[HOST] P2 3-point fit OK (max res=%.3fmm)\r\n", max_res);
+        } else {
+            /* 剔除残差最大点，按原两点法公式回退 */
+            int i0 = -1, i1 = -1;
+            for (int i = 0; i < 3; i++) {
+                if (i == bad_idx) continue;
+                if (i0 < 0) i0 = i; else i1 = i;
+            }
+            float theory_ang = atan2f(g_marks[i1].target_y - g_marks[i0].target_y,
+                                      g_marks[i1].target_x - g_marks[i0].target_x);
+            float ac1x = -(float)g_marks_actual[i0][1], ac1y = (float)g_marks_actual[i0][0];
+            float ac2x = -(float)g_marks_actual[i1][1], ac2y = (float)g_marks_actual[i1][0];
+            float actual_ang = atan2f(ac2y - ac1y, ac2x - ac1x);
+            float theta2 = actual_ang - theory_ang;
+            float mt_x = (g_marks[i0].target_x + g_marks[i1].target_x) * 0.5f * STEPS_PER_MM;
+            float mt_y = (g_marks[i0].target_y + g_marks[i1].target_y) * 0.5f * STEPS_PER_MM;
+            float ma_x = (ac1x + ac2x) * 0.5f;
+            float ma_y = (ac1y + ac2y) * 0.5f;
+            float cos2 = cosf(theta2), sin2 = sinf(theta2);
+            float o_cx2 = ma_x - (mt_x * cos2 - mt_y * sin2);
+            float o_cy2 = ma_y - (mt_x * sin2 + mt_y * cos2);
+
+            float bx = g_marks[bad_idx].target_x * STEPS_PER_MM;
+            float by = g_marks[bad_idx].target_y * STEPS_PER_MM;
+            float brcx = bx * cos2 - by * sin2;
+            float brcy = bx * sin2 + by * cos2;
+            float bpred_x = brcy + o_cy2;
+            float bpred_y = -(brcx + o_cx2);
+            float bad_res = sqrtf((bpred_x - (float)g_marks_actual[bad_idx][0]) * (bpred_x - (float)g_marks_actual[bad_idx][0]) +
+                                  (bpred_y - (float)g_marks_actual[bad_idx][1]) * (bpred_y - (float)g_marks_actual[bad_idx][1])) / STEPS_PER_MM;
+
+            g_pcb_frame.origin_x_steps = (int32_t)o_cy2;
+            g_pcb_frame.origin_y_steps = (int32_t)(-o_cx2);
+            g_pcb_frame.rotation_rad = theta2;
+            if (bad_res < MARK_VERIFY_ERR_MM) {
+                g_pcb_frame.valid = true;
+                PrintDebug("[HOST] P2 DEGRADED: excl mark%d, res=%.3fmm, frame valid\r\n", bad_idx + 1, bad_res);
+            } else {
+                g_pcb_frame.valid = false;
+                PrintDebug("[HOST] P2 frame INVALID: excl mark%d res=%.3fmm (LS max=%.3fmm)\r\n",
+                           bad_idx + 1, bad_res, max_res);
+            }
         }
 
         if (g_mark_count_done >= 3) {
@@ -1178,11 +1258,54 @@ static void mark_align_step(void) {
             g_mark_avg_dy = (g_mark_offsets[0][1] + g_mark_offsets[1][1] + g_mark_offsets[2][1]) / 3;
         }
 
+        /* 诊断: 比较 Coord 和 建系推算位置 */
+        {
+            MachineCoord_t cc = Coord_Get();
+            float cf = cosf(g_pcb_frame.rotation_rad), sf = sinf(g_pcb_frame.rotation_rad);
+            float ltx = g_marks[2].target_x * STEPS_PER_MM;
+            float lty = g_marks[2].target_y * STEPS_PER_MM;
+            float rcx = ltx * cf - lty * sf;
+            float rcy = ltx * sf + lty * cf;
+            int32_t frame_x = (int32_t)rcy + g_pcb_frame.origin_x_steps + g_calib.cam_to_nozzle_dx_steps;
+            int32_t frame_y = (int32_t)(-rcx) + g_pcb_frame.origin_y_steps + g_calib.cam_to_nozzle_dy_steps;
+            PrintDebug("[DIAG] After P2: Coord=(%ld,%ld) frame_Mark2_cam=(%ld,%ld) delta=(%ld,%ld)\r\n",
+                       (long)cc.x, (long)cc.y, (long)frame_x, (long)frame_y,
+                       (long)(cc.x - frame_x), (long)(cc.y - frame_y));
+        }
+
+        if (!g_pcb_frame.valid) {
+            if (g_p2_retry_cnt < P2_RETRY_MAX) {
+                g_p2_retry_cnt++;
+                PrintDebug("[HOST] P2 frame invalid, retry %d/%d...\r\n", (int)g_p2_retry_cnt, (int)P2_RETRY_MAX);
+                g_mark_count_done = 0;
+                memset(g_mark_offsets, 0, sizeof(g_mark_offsets));
+                memset(g_marks_actual, 0, sizeof(g_marks_actual));
+                g_mark_just_jumped = false;
+                g_p2_pos_iter = 0;
+                g_p2_scanning = false;
+                g_mark_scanning = false;
+                Vision_SendEnd();
+                start_p2_mark_align();
+                break;
+            }
+            PrintDebug("[HOST] P2 frame invalid after retry, abort to ERROR\r\n");
+            Vision_SendEnd();
+            Vision_ForceIdle();
+            g_state = HOST_ERROR;
+            break;
+        }
+
         g_comp_index = 0;
         Vision_SendEnd();
         PrintDebug("[HOST] P2 done, starting P4 verify...\r\n");
         g_state = HOST_P4_VERIFY;
-        safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
+        int ret_p4v = safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
+        if (ret_p4v != 0) {
+            PrintDebug("[HOST] P4 verify move FAILED (ret=%d), abort to ERROR\r\n", ret_p4v);
+            Vision_ForceIdle();
+            g_state = HOST_ERROR;
+            break;
+        }
         LowerCam_Light_On();
         Vision_Start(VCMD_P4, 0);
         break;
@@ -1267,7 +1390,14 @@ static void p4_baseline_step(void)
         int32_t dx_s = (int32_t)(r->dy);
         int32_t dy_s = -(int32_t)(r->dx);
         if (dx_s != 0 || dy_s != 0) {
-            safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
+            int ret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
+            if (ret != 0) {
+                LowerCam_Light_Off();
+                PrintDebug("[HOST] P4 baseline compensate FAILED (ret=%d)\r\n", ret);
+                Vision_ForceIdle();
+                g_state = HOST_ERROR;
+                return;
+            }
         }
         Vision_Go();
         break;
@@ -1312,7 +1442,14 @@ static void p4_verify_step(void)
         int32_t dx_s = (int32_t)(r->dy);
         int32_t dy_s = -(int32_t)(r->dx);
         if (dx_s != 0 || dy_s != 0) {
-            safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
+            int ret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
+            if (ret != 0) {
+                LowerCam_Light_Off();
+                PrintDebug("[HOST] P4 verify compensate FAILED (ret=%d)\r\n", ret);
+                Vision_ForceIdle();
+                g_state = HOST_ERROR;
+                return;
+            }
         }
         Vision_Go();
         break;
@@ -1333,7 +1470,7 @@ static void p4_verify_step(void)
             g_pcb_frame.origin_y_steps -= e_y;
             g_mark_avg_dy -= e_x;
             g_mark_avg_dx -= e_y;
-            PrintDebug("[HOST] Applied frame shift: (-%ld,-%ld)\r\n", (long)e_x, (long)e_y);
+            PrintDebug("[HOST] Applied frame shift: (%ld,%ld)\r\n", (long)(-e_x), (long)(-e_y));
         }
 
         start_p1_find_first();
@@ -1378,7 +1515,7 @@ static void p1_restore_coord(void) {
         int32_t d2 = enc_x2 - g_move_enc_x2_start;
         int32_t d3 = enc_y - g_move_enc_y_start;
         int32_t delta_x = (dx != 0) ? (d1 + d2) / 2 : 0;
-        int32_t delta_y = (dy != 0) ? d3 : 0;
+        int32_t delta_y = (dy != 0) ? (int32_t)(MOTOR_Y_ENC_SIGN * d3) : 0;
         Coord_UpdateXY(g_move_c0.x + delta_x, g_move_c0.y + delta_y);
     } else {
         Coord_UpdateXY(g_move_c0.x + dx, g_move_c0.y + dy);
@@ -1406,12 +1543,26 @@ static bool p1_try_next_subpos(Component_t *c) {
     return true;
 }
 /* P1 扫描主状态机: FIND_IDLE -> FIND_MOVING -> FIND_WAITING */
+/* ---------- P1 对齐完成：记忆位置 + cam_to_nozzle 补偿 -> HOST_PICK ---------- */
+static void p1_align_finish(Component_t *c) {
+    int cl = component_cell(c);
+    if (g_p1_found_pos >= 0) g_scan_start_pos[cl] = g_p1_found_pos;
+    g_p1_retry_count = 0; g_p1_scan_pos = 0; g_p1_wrapped = false; g_find_sub = FIND_IDLE;
+    g_consecutive_failures = 0; g_p1_align_iter = 0;
+    Vision_SendEnd();   /* P1 会话收尾：覆盖 ok 完成与迭代超限强制结束两条路径 */
+    if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
+        safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps, Coord_Get().y - g_calib.cam_to_nozzle_dy_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
+    }
+    g_state = HOST_PICK;
+}
+
 static void find_comp_step(void) {
     if (!s_pnp_phase_logged) { s_pnp_phase_logged = true; gui_notify_log_code(6, (uint8_t)g_comp_count); }
     Component_t *c = &g_components[g_comp_index];
 
     // FIND_IDLE: 启动运动+视觉
     if (g_find_sub == FIND_IDLE) {
+        g_p1_align_iter = 0;   /* 新 P1 会话：复位迭代对齐计数 */
         int cl = component_cell(c);
         int32_t tx = g_scatter_subpos[cl][g_p1_scan_pos][0] + g_calib.cam_to_nozzle_dx_steps;
         int32_t ty = g_scatter_subpos[cl][g_p1_scan_pos][1] + g_calib.cam_to_nozzle_dy_steps;
@@ -1428,8 +1579,15 @@ static void find_comp_step(void) {
     }
 
     // 超时
-    if (Vision_IsTimedOut() || p1_subpos_timed_out()) {
+    VisionState_t vs = Vision_GetState();
+    const VisionResult_t *r = Vision_GetResult();
+
+    bool has_pending = (vs == VISION_GOT_STOP || vs == VISION_GOT_POS ||
+                        vs == VISION_GOT_CATEGORY_QUERY || vs == VISION_DONE ||
+                        vs == VISION_ERROR);
+    if (!has_pending && (Vision_IsTimedOut() || p1_subpos_timed_out())) {
         if (g_find_sub == FIND_MOVING) { disable_sync_stop(); p1_restore_coord(); }
+        Vision_SendEnd();
         Vision_ForceIdle(); g_find_sub = FIND_IDLE;
         if (p1_try_next_subpos(c)) return;
         g_p1_scan_pos = 0; g_p1_wrapped = false; g_p1_subpos_start_tick = osKernelGetTickCount();
@@ -1439,9 +1597,6 @@ static void find_comp_step(void) {
                else { int cl = component_cell(&g_components[g_comp_index]); g_p1_scan_pos = g_scan_start_pos[cl]; g_p1_wrapped = false; g_find_sub = FIND_IDLE; } }
         return;
     }
-
-    VisionState_t vs = Vision_GetState();
-    const VisionResult_t *r = Vision_GetResult();
 
     // FIND_MOVING: 运动中轮询
     if (g_find_sub == FIND_MOVING) {
@@ -1475,22 +1630,30 @@ static void find_comp_step(void) {
         g_p1_found_pos = g_p1_scan_pos; Vision_ResetTimeout();
         g_p1_subpos_start_tick = osKernelGetTickCount(); Vision_Go();
         break;
-    case VISION_DONE: {
+    case VISION_GOT_POS: {
+        /* P1 迭代对齐：修正偏移后 go 复测；8 包 pos 兜底(1 init + cam 7 轮)，正常终止由 ok/err1_6 决定 */
         int32_t dx_s = -(int32_t)(r->dy), dy_s = -(int32_t)(r->dx);
+        g_p1_align_iter++;
         if (dx_s != 0 || dy_s != 0) { safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED_FINE, PNP_ACC_FINE); }
-        { int cl = component_cell(c); if (g_p1_found_pos >= 0) g_scan_start_pos[cl] = g_p1_found_pos; }
-        g_p1_retry_count = 0; g_p1_scan_pos = 0; g_p1_wrapped = false; g_find_sub = FIND_IDLE;
-        g_consecutive_failures = 0;
-        if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
-            safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps, Coord_Get().y - g_calib.cam_to_nozzle_dy_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
+        if (g_p1_align_iter >= P1_ALIGN_MAX_ITER) {
+            PrintDebug("[HOST] P1 align %d iters no ok, force finish\r\n", g_p1_align_iter);
+            p1_align_finish(c);
+        } else {
+            g_p1_subpos_start_tick = osKernelGetTickCount();
+            Vision_ResetTimeout();
+            Vision_Go();
         }
-        g_state = HOST_PICK;
+        break;
+    }
+    case VISION_DONE: {
+        /* P1 对齐完成(ok)：偏移已在 GOT_POS 应用，直接收尾 */
+        p1_align_finish(c);
         break;
     }
     case VISION_ERROR: {
         const char *err = Vision_GetError();
         bool is_not_found = (strcmp(err, "err1_5") == 0);
-        bool recoverable  = is_not_found || (strcmp(err, "err1_8") == 0) || (strcmp(err, "err1_9") == 0) || (strcmp(err, "err1_1") == 0) || (strcmp(err, "err1_3") == 0) || (strcmp(err, "err1_4") == 0);
+        bool recoverable  = is_not_found || (strcmp(err, "err1_6") == 0) || (strcmp(err, "err1_1") == 0) || (strcmp(err, "err1_3") == 0) || (strcmp(err, "err1_4") == 0);
         if (is_not_found) { if (p1_try_next_subpos(c)) { g_p1_retry_count = 0; return; } }
         else if (recoverable && g_p1_retry_count < 3) {
             g_p1_retry_count++; g_p1_subpos_start_tick = osKernelGetTickCount(); g_find_sub = FIND_IDLE;
@@ -1548,15 +1711,37 @@ static void offset_check_step(void) {
     }
 
     switch (vs) {
-    case VISION_DONE: {
-        /* P3 single-shot: apply vision offset + accumulate */
-        int32_t dx_s = (int32_t)(r->dy);  // cam Y → X1+X2，不取反, value already in motor steps
-        int32_t dy_s = -(int32_t)(r->dx); // cam X → Y 电机，取反, value already in motor steps
+    case VISION_GOT_POS: {
+        /* P3 迭代对齐：修正偏移后 go 复测；8 包 pos 兜底(1 init + cam 7 轮)，正常终止由 ok/err3_7 决定 */
+        int32_t dx_s = (int32_t)(r->dy);
+        int32_t dy_s = -(int32_t)(r->dx);
+        g_p3_align_iter++;
         if (dx_s != 0 || dy_s != 0) {
             safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
             g_p3_offset_x += dx_s;
             g_p3_offset_y += dy_s;
         }
+        if (g_p3_align_iter >= P3_ALIGN_MAX_ITER) {
+            LowerCam_Light_Off();
+            g_p3_nozzle_retry = 0;
+            PrintDebug("[HOST] P3 align %d iters no ok, force finish\r\n", g_p3_align_iter);
+            if (host_start_r_correction(r, "P3")) { phase = 1; return; }
+            osDelay(10);
+            r_axis_set_zero();
+            Vision_SendEnd();
+            GUI_SPI_NotifySMTProgress((uint16_t)(g_comp_index + 1), (uint16_t)g_comp_count);
+            PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
+            g_state = HOST_MOVE_TO_PCB;
+        } else {
+            Vision_ResetTimeout();
+            Vision_Go();
+        }
+        break;
+    }
+
+    case VISION_DONE: {
+        /* P3 对齐完成(ok)：偏移已在 GOT_POS 应用，只做角度矫正与过渡 */
+        g_p3_align_iter = 0;
 
         /* 角度矫正: 启动非阻塞旋转，完成后过渡到 PCB */
         g_p3_nozzle_retry = 0;
@@ -1580,8 +1765,7 @@ static void offset_check_step(void) {
         Component_t *c = &g_components[g_comp_index];
         int cl;
         /* err3_8: 吸嘴空取 — 回退重新吸取，不降级贴装 */
-        if (err[0] == 'e' && err[1] == 'r' && err[2] == 'r' &&
-            err[3] == '3' && err[4] == '_' && err[5] == '8' && err[6] == '\0') {
+        if (strcmp(err, "err3_8") == 0) {
             g_p3_nozzle_retry++;
             if (g_p3_nozzle_retry >= 3) {
                 LowerCam_Light_Off();
@@ -1598,9 +1782,15 @@ static void offset_check_step(void) {
                 g_p1_subpos_start_tick = osKernelGetTickCount();
                 safe_move_to(g_scatter_subpos[cl][pos][0] + g_calib.cam_to_nozzle_dx_steps, g_scatter_subpos[cl][pos][1] + g_calib.cam_to_nozzle_dy_steps,
                              PNP_SPEED, PNP_ACC);
-                Vision_Start(VCMD_P1, footprint_to_class_id(c->footprint));
+                g_find_sub = FIND_IDLE;
                 g_state = HOST_FIND_COMP;
             }
+        } else if (strcmp(err, "err3_6") == 0 || strcmp(err, "err3_7") == 0) {
+            /* 文档: err3_6=等go超时30s / err3_7=7轮未对准 - 明确策略: 容错贴装 */
+            LowerCam_Light_Off();
+            PrintDebug("[HOST] P3 %s (align fail/timeout), tolerant place\r\n", err);
+            Coord_Invalidate();
+            g_state = HOST_MOVE_TO_PCB;
         } else {
             LowerCam_Light_Off();
             PrintDebug("[HOST] Offset check ERROR: %s\r\n", err);
@@ -1660,7 +1850,7 @@ static void pick_step(void) {
         g_p1_scan_pos = pos;
         g_p1_subpos_start_tick = osKernelGetTickCount();
         safe_move_to(g_scatter_subpos[cl][pos][0] + g_calib.cam_to_nozzle_dx_steps, g_scatter_subpos[cl][pos][1] + g_calib.cam_to_nozzle_dy_steps, PNP_SPEED, PNP_ACC);
-        Vision_Start(VCMD_P1, footprint_to_class_id(c->footprint));
+        g_find_sub = FIND_IDLE;
         g_state = HOST_FIND_COMP;
         return;
     }
@@ -1676,6 +1866,7 @@ static void pick_step(void) {
 }
 
 static void move_to_bottom_step(void) {
+    g_p3_align_iter = 0;   /* 新 P3 会话：复位迭代对齐计数 */
     g_p3_offset_x = 0; g_p3_offset_y = 0;
     safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
     LowerCam_Light_On();
@@ -1724,9 +1915,9 @@ static void move_to_pcb_step(void) {
         machine_x = (int32_t)rcy + g_pcb_frame.origin_x_steps + g_p3_offset_x;
         machine_y = (int32_t)(-rcx) + g_pcb_frame.origin_y_steps + g_p3_offset_y;
     } else {
-        /* g_mark_avg_dx/dy 已是电机步数, 直接加 */
-        machine_x = cy + g_mark_avg_dy;
-        machine_y = cx + g_mark_avg_dx;
+        /* 理论兜底：theta=0 平移（与框架路径一致；frame invalid 正常会重试/中止，此处仅防御） */
+        machine_x = cy + g_pcb_frame.origin_x_steps + g_p3_offset_x;
+        machine_y = -cx + g_pcb_frame.origin_y_steps + g_p3_offset_y;
     }
     PrintDebug("[HOST] MOVE_TO_PCB comp %u -> machine(%ld,%ld)\r\n", c->id, (long)machine_x, (long)machine_y);
 
@@ -1755,7 +1946,7 @@ static void place_step(void) {
             g_state = HOST_ERROR;
         } else {
             PrintDebug("[HOST] PLACE: scatter move OK, starting P1 for comp %u\r\n", g_components[g_comp_index].id);
-            Vision_Start(VCMD_P1, footprint_to_class_id(g_components[g_comp_index].footprint));
+            g_find_sub = FIND_IDLE;
             g_state = HOST_FIND_COMP;
         }
     }
