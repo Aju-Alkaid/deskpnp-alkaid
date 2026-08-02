@@ -208,10 +208,9 @@ static void save_error(const char *str) {
 
 static const char* class_id_to_name(int id) {
     switch (id) {
-    case 0: return "ccapt";
-    case 1: return "cledy";
-    case 2: return "cledo";
-    case 3: return "crest";
+    case 0: return "ccap";
+    case 1: return "cled";
+    case 2: return "cres";
     default: return "?";
     }
 }

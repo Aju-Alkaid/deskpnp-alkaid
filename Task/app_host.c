@@ -51,7 +51,7 @@ static void gui_process_cmd(const HostParsed_t *p);
 #define P2_SCAN_TIMEOUT       300   /* P2 非扫描模式超时 (~3s, 对齐/跳转等待) */
 #define P2_SCAN_COL_PAD_MS   500    /* 每列额外延时 (ms), 补偿加减速段 */
 #define P2_SCAN_POS_UPDATE_MS 100   /* 位置估算 Coord 更新间隔 (ms) */
-#define P2_MAX_ALIGN_ITER       5   /* P2 对齐迭代上限，防死循环 */
+#define P2_MAX_ALIGN_ITER       7   /* P2 对齐迭代上限，防死循环 */
 
 /* speedModeRun 方向位: 0=CCW→电机x增大(上), 1=CW→电机x减小(下). 方向反了就交换 */
 #define P2_SCAN_DIR_UP        1
@@ -219,10 +219,10 @@ void scatter_init_cells(void) {
     PrintDebug("[HOST] Scatter cells: size=%ld, subpos computed.\r\n", (long)size);
 }
 
-/* 封装名->P1类别ID映射 (0=ccapt 1=cledy 2=cledo 3=crest) */
+/* 封装名->P1类别ID映射 (0=ccap 1=cled 2=cres, 2026-08-02 新3类模型) */
 static int footprint_to_class_id(const char *fp) {
     if (!fp) return 0;
-    if (strncmp(fp, "LED", 3) == 0) return 2;   /* LED-SMD -> cledo */
+    if (strncmp(fp, "LED", 3) == 0) return 1;   /* LED-SMD -> cled (2026-08-02 新3类模型, 旧cledo=2已废弃) */
     if (strncmp(fp, "C0", 2) == 0 || strncmp(fp, "R0", 2) == 0) return 0;
     return 0;
 }
@@ -1087,7 +1087,7 @@ static void mark_align_step(void) {
                 int32_t dx_s = -(int32_t)(r->dy);  // cam Y → X1+X2, value already in motor steps
                 int32_t dy_s = -(int32_t)(r->dx);  // cam X → Y 电机, value already in motor steps
                 safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, 100, 25);
-                PrintDebug("[HOST] Mark%ld offset: (%ld,%ld)px → move(%ld,%ld)steps\r\n",
+                PrintDebug("[HOST] Mark%ld offset: (%ld,%ld)steps → move(%ld,%ld)steps\r\n",
                            (long)(phys_idx + 1), (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s);
             }
             /* Mark真实坐标 = 摄像头位置 = 吸嘴 - cam_to_nozzle (cam_to_nozzle为负值,减负得正) */

@@ -32,11 +32,10 @@ typedef enum {
     VCMD_P4,             /* P4: 下相机圆形标定对位（吸嘴中心） */
 } VisionCmd_t;
 
-/* P1 component class mapping (MaixCAM YOLO model_284490) */
-#define P1_CLASS_CCAPT   0
-#define P1_CLASS_CLEDY   1
-#define P1_CLASS_CLEDO   2
-#define P1_CLASS_CREST   3
+/* P1 component class mapping (MaixCAM2 YOLO 3 classes: ccap/cled/cres, 2026-08-02) */
+#define P1_CLASS_CCAP    0
+#define P1_CLASS_CLED    1
+#define P1_CLASS_CRES    2
 
 /* Single Process result data */
 typedef struct {
@@ -57,7 +56,7 @@ void Vision_Init(void);
 bool Vision_Handshake(uint32_t timeout_ms);
 
 /* Start Process (non-blocking), state becomes VISION_BUSY */
-/* class_id: component class for P1 (0~3), ignored for P2/P3 */
+/* class_id: component class for P1 (0~2), ignored for P2/P3 */
 void Vision_Start(VisionCmd_t cmd, int class_id);
 
 /* Send "go" (after host stops/moves), state becomes VISION_BUSY */
