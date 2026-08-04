@@ -1,4 +1,4 @@
-﻿## 十一、调试任务与经验总结
+## 十一、调试任务与经验总结
 
 ### 11.1 StartHostMotionTestTask
 
@@ -3875,3 +3875,36 @@ X 轴 `delta_x = (d1+d2)/2` 与 `jog_stop_update_coord()` 一致，无需符号�
 - `g_p3_nozzle_retry` 在 RESUME / 新下载时不清零（既有问题，未处理）。
 - `app_test.c` CAM_TEST 的 P1/P3 测试循环仍为 5 轮上限，与新协议 8 轮不一致（测试模块按用户要求未动）。
 - `MOTOR_Y_ENC_SIGN` 依赖物理接线约定，若更换电机 / 接线需重新标定符号。
+
+## 五十三、2026-08-04 会话 — P4 基线更新下相机站位 + P4 dx/dy 单位确认
+
+### 53.1 背景与需求
+
+- 机械回原点（原点为孔位）每次存在少量误差，导致 Flash 标定的下相机站位 `g_calib.bottom_cam_x_steps/y_steps` 与当前坐标系下真实的下相机中心存在偏移。
+- P4 基线流程本身会把吸嘴迭代对准到下相机中心，用户要求：**记录基线坐标的同时更新下相机站位**，吸收归零误差。
+
+### 53.2 改动
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_host.c` | `p4_baseline_step()` 的 `VISION_DONE` 分支：记录 `g_p4_base_x/y` 后同步 `g_calib.bottom_cam_x_steps = g_p4_base_x`、`g_calib.bottom_cam_y_steps = g_p4_base_y` |
+
+- verify 移动（`app_host.c:1302`）与 P3 站位（`move_to_bottom_step()`，`app_host.c:1871`）读取同一字段，自动使用更新后的站位。
+- 仅 RAM 生效、不落盘（归零误差每次开机不同，持久化无意义；如需保留可发 `SAVE_CALIB`）。
+- `safe_move_to` / `move_xy_relative` 不读该字段，无内部影响；无周期性 `Calib_Load`，运行中不会被覆盖。
+- 已知边界：verify 的漂移计算在 P4 对位完成后取值，与 bottom_cam 站位无关；本次更新收益主要体现在 P3 站位与下一批 baseline。
+
+### 53.3 P4 dx/dy 单位确认
+
+- 用户确认：cam 端直接发送处理好的数据（电机步数），G4 端直接使用，无需缩放。
+- 代码证据：`app_vision.c:465`（注释“已是电机步数”）；`app_host.c:1390-1393 / 1442-1445`（无缩放直接使用）。
+- `tools/_cam_doc.md`（cam 团队文档）§9.3 / §12.2 / §12.3 仍描述“发送原始像素偏差”，为过时表述，待 cam 团队同步；AGENTS.md 描述正确，无需改动。
+
+### 53.4 验证
+
+- [ ] 编译：待 Keil UV4 验证
+- [ ] 真机：待验证（P3 去下相机站位应更贴近相机中心）
+
+### 53.5 遗留问题
+
+- `RESTORE_CALIB` / `SET_BOTTOM_CAM` 无状态守卫，PnP 运行中上位机仍可覆盖站位（既有行为，未处理）。

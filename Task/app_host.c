@@ -1406,6 +1406,8 @@ static void p4_baseline_step(void)
     case VISION_DONE:
         g_p4_base_x = Coord_Get().x;
         g_p4_base_y = Coord_Get().y;
+        g_calib.bottom_cam_x_steps = g_p4_base_x;
+        g_calib.bottom_cam_y_steps = g_p4_base_y;
         LowerCam_Light_Off();
         Vision_SendEnd();
         PrintDebug("[HOST] P4 baseline recorded: (%ld,%ld)\r\n", (long)g_p4_base_x, (long)g_p4_base_y);
@@ -1926,7 +1928,7 @@ static void move_to_pcb_step(void) {
     saved_my = machine_y;
 
     /* 启动 R 轴旋转到贴装角度 */
-    r_axis_start(-c->target_angle, R_SPEED_RPM);
+    r_axis_start(c->target_angle, R_SPEED_RPM);
     phase = 1;
 }
 
