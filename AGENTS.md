@@ -414,6 +414,8 @@ pnp_1/
 - `machine_x += +r->dy`（cam Y → X1+X2，不取反）
 - `machine_y += -r->dx`（cam X → Y 电机，取反）
 
+**基线更新站位：** P4 基线（建系前）对准完成后，`p4_baseline_step()` 在记录 `g_p4_base_x/y` 的同时将当前坐标写入 `g_calib.bottom_cam_x_steps/y_steps`，用于吸收每次机械回原点（孔位）的坐标系误差；verify 移动与 P3 站位读取同一字段，自动使用更新后的站位（仅 RAM 生效，不落盘）。
+
 ### 4.2.1 物理轴约定（设计坐标 → 电机坐标映射）
 
 > **核心矛盾：** 因硬件接线，CAN ID 0x01/0x02 电机在代码中叫「X 电机」但实际驱动 Y 轴（前后），CAN ID 0x03 叫「Y 电机」但实际驱动 X 轴（左右）。下文中 `machine_x` 存储 Y 轴位置，`machine_y` 存储 X 轴位置——变量命名追随电机编号而非物理方向。
@@ -1325,7 +1327,7 @@ PID 循环 (5ms 周期): 读编码器角度 → 解绕到 target±180° → PID 
 **关键设计决策：**
 - PID 实例为函数内 static，仅首次 PID_Init，后续 PID_Reset + PID_SetParams 复用，避免 FreeRTOS mutex 堆泄漏
 - 输入滤波器 ICFilter=8 (~47ns @170MHz)，在 KTH7823_Init 中直接写 TIM5->CCMR1 覆写 CubeMX 默认值 0
-- GetAngle() 先快照 ngle_deg 再清 data_ready，避免 ISR 并发导致的数据不一致
+- GetAngle() 先快照 angle_deg 再清 data_ready，避免 ISR 并发导致的数据不一致
 - 首次编码器读数用于 PID 历史装入 (MeasurementPrev)，消除首拍 D-term 尖峰
 - 3s 超时保护 → 返回 -2，防止编码器断线时死循环阻塞 PnP 流程
 
