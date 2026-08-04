@@ -1,9 +1,9 @@
-﻿#include "driver_uart.h"  
-#include "FreeRTOS.h"     
-#include "task.h"         
+﻿#include "driver_uart.h"
+#include "FreeRTOS.h"
+#include "task.h"
 #include <string.h>       // 用于 strlen
 #include <stdio.h>        // 用于 sprintf (可选)
-#include "driver_tmc2209.h"  
+#include "driver_tmc2209.h"
 #include <stdarg.h>
 #include "driver_drv8803.h"
 #include "driver_servo.h"
@@ -44,11 +44,11 @@
 extern osMessageQueueId_t motor_event_queue;
 extern osMutexId_t g_debug_mutex;
 extern osThreadId_t hostMotionTaskHandle;
-extern UART_HandleTypeDef huart1; 
+extern UART_HandleTypeDef huart1;
 extern UART_HandleTypeDef huart3;
 extern TIM_HandleTypeDef htim5;
 extern TIM_HandleTypeDef htim2;
-static char s_debug_buf[128]; 
+static char s_debug_buf[128];
 
 
 /**
@@ -293,7 +293,7 @@ void StartDrv8803TestTask(void *argument)
     Valve_Off();                            /* 阀关断 PA6 LOW */
     vTaskDelay(pdMS_TO_TICKS(2));
     Valve_On();                             /* 阀导通 PA6 HIGH */
-    
+
 
     Pump_On();
     PrintDebug("12VO1 (PE11) 真空泵已开启.\r\n");
@@ -488,7 +488,7 @@ void vMotorTestTask(void *pvParameters)   {
 
     for (int i = 0; i < 4; i++) {
         PrintDebug("Point %d: X=%ld, Y=%ld\r\n", i, points[i].x, points[i].y);
-        
+
         osEventFlagsClear(evtAxesDone, EVENT_ALL_AXES);   // 清空旧标志
         // 向 X1/X2 发送绝对位置指令（它们同时运动，但不严格同步起步，时间差很小）
         positionMode3Run(1, speed, acc, points[i].x);
@@ -1150,13 +1150,13 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
                     int32_t idx = r->mark_index;
                     if (idx >= 0 && idx < (int32_t)P2_MARK_COUNT) {
                         if (r->dx != 0 || r->dy != 0) {
-                            int32_t dx_s = -(int32_t)(r->dy * CAM_PX_TO_STEPS);
-                            int32_t dy_s = -(int32_t)(r->dx * CAM_PX_TO_STEPS);
+                            int32_t dx_s = -(int32_t)(r->dy);
+                            int32_t dy_s = -(int32_t)(r->dx);
                             MachineCoord_t mc_before = Coord_Get();
                             int ret = safe_move_to(mc_before.x + dx_s, mc_before.y + dy_s,
                                                     CAM_MOVE_SPEED, CAM_MOVE_ACC);
                             MachineCoord_t mc_after = Coord_Get();
-                            PrintDebug("[CAM_TEST] Mark%ld offset: (%ld,%ld)px move(%ld,%ld)steps ret=%d before=(%ld,%ld) after=(%ld,%ld)\r\n",
+                            PrintDebug("[CAM_TEST] Mark%ld offset: (%ld,%ld)steps move(%ld,%ld)steps ret=%d before=(%ld,%ld) after=(%ld,%ld)\r\n",
                                        (long)idx, (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s, ret,
                                        (long)mc_before.x, (long)mc_before.y, (long)mc_after.x, (long)mc_after.y);
                         }
@@ -1280,13 +1280,13 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
     DRV8803_SetOutput(&Port_12VO4, true);  /* 舵机上电 (12VO4) */
     Valve_Off();                        /* 电磁阀初始关断 (PA6=LOW) */
     osDelay(300);
-	
+
     /* TMC2209 (R轴) 初始化 */
     if (!TMC_Init()) {
         PrintDebug("[CamTest] TMC_Init FAILED!\r\n");
     }
     TMC_SetEnable(false);          /* ENN 低有效: HIGH=关闭 */
-		
+
 //            LowerCam_Light_On();  /* 下相机补光灯 */
 //            Pump_On();
 
@@ -1404,6 +1404,19 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
             switch (vs) {
             case VISION_GOT_CATEGORY_QUERY:
                 Vision_ClsReply();
+                Vision_GoScan();
+                break;
+
+            case VISION_GOT_MOVE:
+                if (p1_scan_pos < SCATTER_SUBPOS - 1) {
+                    p1_scan_pos++;
+                    safe_move_to(g_scatter_subpos[0][p1_scan_pos][0] + g_calib.cam_to_nozzle_dx_steps,
+                                 g_scatter_subpos[0][p1_scan_pos][1] + g_calib.cam_to_nozzle_dy_steps,
+                                 PNP_SPEED, PNP_ACC);
+                    Vision_GoScan();
+                } else {
+                    p1_done = true;
+                }
                 break;
 
             case VISION_GOT_STOP:
@@ -1412,6 +1425,26 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
                 break;
 
             case VISION_GOT_POS: {
+                if (r->p1_batch_mode) {
+                    int32_t dx_s = -(int32_t)(r->dy);
+                    int32_t dy_s = -(int32_t)(r->dx);
+                    PrintDebug("[CAM_TEST] P1 batch pos: offset(%ld,%ld) steps count=%ld\r\n",
+                               (long)r->dx, (long)r->dy, (long)r->target_count);
+                    if (dx_s != 0 || dy_s != 0) {
+                        safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s,
+                                     PNP_SPEED_FINE, PNP_ACC_FINE);
+                    }
+                    p1_angle = r->angle_valid ? (float)r->angle_x100 / 100.0f : 0.0f;
+                    if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
+                        safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps,
+                                     Coord_Get().y - g_calib.cam_to_nozzle_dy_steps,
+                                     PNP_SPEED_FINE, PNP_ACC_FINE);
+                    }
+                    p1_done = true;
+                    p1_ok = true;
+                    break;
+                }
+
                 /* 迭代对齐: 偏移已是电机步数, 修正后 go 复测; 5 次上限强制结束 */
                 int32_t dx_s = -(int32_t)(r->dy);
                 int32_t dy_s = -(int32_t)(r->dx);
@@ -1473,7 +1506,7 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
             vTaskDelay(pdMS_TO_TICKS(20));
         }
 
-        if (p1_ok) 
+        if (p1_ok)
 //					if (1)
 						{
             /* P1 成功 → 吸取 */
@@ -1589,7 +1622,7 @@ void StartCamTestTask(void *argument) {                //1093和1094两处需要
 		else {
             PrintDebug("[CAM_TEST] P1 FAILED\r\n");
         }
-    }    
+    }
 
     PrintDebug("\r\n=== Camera + Motor Interactive Test Complete ===\r\n");
     vTaskSuspend(NULL);

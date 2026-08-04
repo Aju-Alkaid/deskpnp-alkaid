@@ -17,13 +17,13 @@ extern void CamUart_RecvCallback(uint8_t *data, int len);
 extern osThreadId_t hostMotionTaskHandle;
 
  /* @硬件连接 :
- * - UART1: TX=PE0, RX=PE1 
+ * - UART1: TX=PE0, RX=PE1
  * - UART2: TX=PD5, RX=PD6
  * - UART3: TX=PB9, RX=PB11
 */
 
 /* ================= 内部配置宏?================= */
-#define RX_BUFFER_SIZE      256     // DMA 鎺ユ敹缂撳啿鍖哄ぇ灏?瓒冲瀹圭撼澶氬抚鍙婂彲鑳界殑鍣０
+#define RX_BUFFER_SIZE      600     // DMA 鎺ユ敹缂撳啿鍖哄ぇ灏?瓒冲瀹圭撼澶氬抚鍙婂彲鑳界殑鍣０
 #define MAX_TIMEOUT_MS      1000
 
 /* ---- DMA TX 环形缓冲配置 ---- */
@@ -35,16 +35,16 @@ extern osThreadId_t hostMotionTaskHandle;
 typedef struct {
     UART_HandleTypeDef *huart;      // CubeMX 生成的句柄指针
     DMA_HandleTypeDef *hdmarx;      // RX DMA 句柄（用于获取剩余计数）
-    
+
     uint8_t rx_dma_buf[RX_BUFFER_SIZE]; // DMA 原始缓冲区
     uint8_t rx_app_buf[RX_BUFFER_SIZE]; // 应用层读取缓冲区
-    
+
     volatile uint16_t last_ndtr;    // 上次 NDTR (用于调试或复用)
     volatile uint16_t data_len;     // 当前待处理数据长度
     volatile uint16_t rx_app_len;   // 应用层有效数据长度（任务侧，ISR不触及）
     volatile bool data_ready;       // 数据就绪标志
     volatile bool isr_restart;    // true=ISR内重启DMA, false=由Driver_Process重启
-    
+
     volatile bool is_rx_active;     // 接收是否正在运行
     volatile uint32_t overflow_count;
 
@@ -66,9 +66,9 @@ static UART_Channel_t uart_channels[UART_DRIVER_COUNT];
  * @note 使用 HAL_UART_Transmit 确保数据立即发送完毕，避免 DMA 竞争
  */
 UART_Status_t UART_TMC_Send(Uart_Id_t id, uint8_t *data, uint16_t size) {
-	
+
     if ((int)id >= UART_DRIVER_COUNT || data == NULL || size == 0) return UART_ERROR_PARAM;
-    
+
     //  获取通道指针 (修复：定义 ch 指针)
     UART_Channel_t *ch = &uart_channels[id];
     UART_HandleTypeDef *huart = ch->huart;
@@ -80,7 +80,7 @@ UART_Status_t UART_TMC_Send(Uart_Id_t id, uint8_t *data, uint16_t size) {
     // 暂停 DMA 接收
     // 原因：TMC2209 是单线半双工。如果不停止 DMA，发送的数据会被 RX 引脚读回，
     // 导致 DMA 缓冲区填满发送的数据，而不是我们想要的回复数据。
-    if (ch->is_rx_active) { 
+    if (ch->is_rx_active) {
         HAL_UART_DMAStop(huart);
         ch->is_rx_active = false;
     }
@@ -97,12 +97,12 @@ UART_Status_t UART_TMC_Send(Uart_Id_t id, uint8_t *data, uint16_t size) {
 
         // 切回接收模式
     HAL_HalfDuplex_EnableReceiver(huart);
-		
+
     // 5. 关键步骤：重启 DMA 接收
     // 无论发送成功与否，都必须尽快恢复接收状态，以便接收 TMC 的回复
     // 注意：TMC 回复有延迟，DMA 需要处于监听状态
 //    vTaskDelay(1); // 短暂等待总线稳定，避免发送后立即启动 DMA 导致干扰
-     UART_StartReceive_DMA(ch); 
+     UART_StartReceive_DMA(ch);
     // 6. 杩斿洖缁撴灉
     if (hal_status == HAL_OK) {
         return UART_OK;
@@ -122,14 +122,14 @@ UART_Status_t UART_TMC_Send(Uart_Id_t id, uint8_t *data, uint16_t size) {
 void UART_StartReceive_DMA(UART_Channel_t *ch)
 {
 //    HAL_HalfDuplex_EnableReceiver(ch->huart);
-    if (ch->is_rx_active) 
+    if (ch->is_rx_active)
     {
         // 如果已经激活，先强制停止，防止状态混乱
         HAL_UART_DMAStop(ch->huart); // 关键：确保 DMA 停止
         ch->is_rx_active = false;
     }
 //		return; // 防止重复启动
-		
+
      //清空 DMA 缓冲区 (防止残留数据导致误判长度)
 //    memset(ch->rx_dma_buf, 0, RX_BUFFER_SIZE);
 	// 重置状态
@@ -139,12 +139,12 @@ void UART_StartReceive_DMA(UART_Channel_t *ch)
 
 	// 清除可能残留的中断标志
 		__HAL_UART_CLEAR_IDLEFLAG(ch->huart);
-		__HAL_UART_CLEAR_OREFLAG(ch->huart); // 清除溢出标志	
-		
+		__HAL_UART_CLEAR_OREFLAG(ch->huart); // 清除溢出标志
+
     // 启动接收，当总线空闲时触发回调
     if (HAL_UARTEx_ReceiveToIdle_DMA(ch->huart, ch->rx_dma_buf, RX_BUFFER_SIZE) == HAL_OK) {
         ch->is_rx_active = true;
-	
+
         // 确保空闲中断已开启（CubeMX 通常会自动开启，但显式确认更安全）
 //        __HAL_UART_ENABLE_IT(ch->huart, UART_IT_IDLE);
     } else {
@@ -178,7 +178,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
     if (Size > 0 && Size <= RX_BUFFER_SIZE) {
         // 这里我们直接操作结构体，或者放入队列
         // 注意：不要在这里做耗时操作，只做数据拷贝或标记
-        
+
         // 假设你有一个全局缓冲区或使用临界区
 
         ch->data_len = Size;
@@ -232,25 +232,25 @@ void UART_Driver_Init(void)
     uart_channels[UART_CH1].hdmarx = &hdma_usart1_rx;
     uart_channels[UART_CH1].is_rx_active = false;
     uart_channels[UART_CH1].isr_restart = false;  // 上位机：由 Driver_Process 重启
-    huart1.gState = HAL_UART_STATE_READY; 
+    huart1.gState = HAL_UART_STATE_READY;
     // 配置 UART2
     uart_channels[UART_CH2].huart = &huart2;
     uart_channels[UART_CH2].hdmarx = &hdma_usart2_rx;
     uart_channels[UART_CH2].isr_restart = true;   // 摄像头：ISR 立即重启
     uart_channels[UART_CH2].is_rx_active = false;
-    huart2.gState = HAL_UART_STATE_READY; 
+    huart2.gState = HAL_UART_STATE_READY;
     // 配置 UART3
     uart_channels[UART_CH3].huart = &huart3;
     uart_channels[UART_CH3].hdmarx = &hdma_usart3_rx;
     uart_channels[UART_CH3].isr_restart = true;   // TMC2209
     uart_channels[UART_CH3].is_rx_active = false;
-    huart3.gState = HAL_UART_STATE_READY; 
+    huart3.gState = HAL_UART_STATE_READY;
     //配置 LPUART1
     uart_channels[UART_CH4].huart = &hlpuart1;
     uart_channels[UART_CH4].hdmarx = NULL;
     uart_channels[UART_CH4].is_rx_active = false;
     uart_channels[UART_CH4].isr_restart = true;   // LPUART1 预留
-    hlpuart1.gState = HAL_UART_STATE_READY; 
+    hlpuart1.gState = HAL_UART_STATE_READY;
 
     // TX DMA 句柄绑定
     uart_channels[UART_CH1].hdmatx = &hdma_usart1_tx;
@@ -307,14 +307,14 @@ UART_Status_t UART_SendData(Uart_Id_t id, uint8_t *data, uint16_t size)
   * @brief： UART_SendString 发送字符串
   * @param： Uart_Id_t:UART 通道 ID
   * @param： 参见 UART_SendData
-  * @note  
+  * @note
  */
 
 UART_Status_t UART_SendString(Uart_Id_t id, const char *str)
 {
-    if ((int)id >= UART_DRIVER_COUNT || str == NULL) 
+    if ((int)id >= UART_DRIVER_COUNT || str == NULL)
 		return UART_ERROR_PARAM;
-    
+
     uint16_t len = strlen(str);
     if (len == 0) return UART_OK;
 		return UART_SendData(id, (uint8_t*)str, len);
@@ -342,7 +342,7 @@ UART_Status_t UART_Write_DMA(Uart_Id_t id, const uint8_t *data, uint16_t size)
 
 void TMC_UART_Transmit(uint8_t *data, uint16_t size) {
     // 发送数据 (阻塞模式)
-    HAL_UART_Transmit(&huart3, data, size, 100); 
+    HAL_UART_Transmit(&huart3, data, size, 100);
 }
 
 uint8_t TMC_UART_Receive(void) {
@@ -385,10 +385,10 @@ void UART_Driver_Process(void)
 /**
  * @brief UART_GetRxCount 获取接收到的数据长度
  * @param id UART 通道 ID
- * @note 
+ * @note
  */
 
-uint16_t UART_GetRxCount(Uart_Id_t id) 
+uint16_t UART_GetRxCount(Uart_Id_t id)
 {
     if ((int)id >= UART_DRIVER_COUNT) return 0;
     // 返回任务侧应用层有效长度（ISR 已通过 UART_Driver_Process 同步）
@@ -400,11 +400,11 @@ uint16_t UART_GetRxCount(Uart_Id_t id)
 /**
  * @brie UART_GetRxBuffer 获取应用层缓冲区指针
  * @param id UART 通道 ID
- * @note 
+ * @note
  */
-const uint8_t* UART_GetRxBuffer(Uart_Id_t id) 
+const uint8_t* UART_GetRxBuffer(Uart_Id_t id)
 	{
-    if ((int)id >= UART_DRIVER_COUNT) 
+    if ((int)id >= UART_DRIVER_COUNT)
 			return NULL;
     return uart_channels[id].rx_app_buf;
 }
@@ -418,7 +418,7 @@ const uint8_t* UART_GetRxBuffer(Uart_Id_t id)
 //void UART_IRQ_Handler(UART_HandleTypeDef *huart)
     //{
     //    UART_Channel_t *ch = NULL;
-    //		uint16_t received_len  ; 
+    //		uint16_t received_len  ;
     //    //查找对应通道
     //    for (int i = 0; i < UART_DRIVER_COUNT; i++) {
     //        if (uart_channels[i].huart == huart) {
@@ -426,12 +426,12 @@ const uint8_t* UART_GetRxBuffer(Uart_Id_t id)
     //            break;
     //        }
     //    }
-    //    
+    //
     //    if (ch == NULL )return;
-    //		
+    //
     //		// 2. 清除标志位
     //    __HAL_UART_CLEAR_IDLEFLAG(huart);
-    //		
+    //
 
     //    // 公式：接收到的长度 = 缓冲区总大小 - DMA 当前剩余计数
     //    received_len = RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(ch->hdmarx);
@@ -441,9 +441,9 @@ const uint8_t* UART_GetRxBuffer(Uart_Id_t id)
     //        // 5. 保存数据长度
     //        ch->data_len = received_len;
     //        ch->data_ready = true;
-    //        
+    //
         //        // 6. 标记接收停止，等待 Process 重启
-    //        ch->is_rx_active = false; 
+    //        ch->is_rx_active = false;
     //    }
     //    else
     //    {
@@ -480,7 +480,7 @@ void UART_Error_Handler(UART_HandleTypeDef *huart)
     }
     if (ch == NULL) return;
 
-    //  清除错误标志 
+    //  清除错误标志
     __HAL_UART_CLEAR_OREFLAG(huart);
     __HAL_UART_CLEAR_NEFLAG(huart);
     __HAL_UART_CLEAR_FEFLAG(huart);
@@ -521,8 +521,8 @@ void HAL_UART_TxCpltCallback(UART_HandleTypeDef *huart)
         }
     }
 }
-		
-		
+
+
 /**
  * @brief 暂停指定通道的 DMA 接收，为阻塞发送做准备
  */
@@ -537,13 +537,13 @@ void UART_SuspendRX(Uart_Id_t id) {
 /**
  * @brief 恢复指定通道的 DMA 空闲中断接收
  */
- 
+
 void UART_ResumeRX(Uart_Id_t id) {
     if ((int)id >= UART_DRIVER_COUNT) return;
     UART_Channel_t *ch = &uart_channels[id];
     UART_StartReceive_DMA(ch);    // 内部 static 但这里可以调用
 }
-		
+
 bool UART_HasData(Uart_Id_t id)
 {
     if ((int)id >= UART_DRIVER_COUNT) return false;

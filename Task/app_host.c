@@ -36,10 +36,10 @@ static void gui_process_cmd(const HostParsed_t *p);
  * ================================================================ */
 #define DEBUG_SPEED     200            /* 调试模式离散移动速度 */
 #define DEBUG_ACC       25             /* 调试模式加速度 */
-#define JOG_SPEED        200            /* 连续移动速度 (RPM) */
-#define JOG_ACC          25             /* 连续移动加速度 */
+#define JOG_SPEED        400            /* 连续移动速度 (RPM) */
+#define JOG_ACC          30             /* 连续移动加速度 */
 #define JOG_MMS_TO_RPM  12.0f   /* mm/s → RPM: STEPS_PER_MM/16384*60 */
-#define PNP_SPEED_FAST   200   /* 长途移动 */
+#define PNP_SPEED_FAST   400   /* 长途移动 */
 #define PICK_DELAY_MS    800   /* R轴停稳 + 真空建立前余量 */
 #define PLACE_DELAY_MS   300
 #define PUMP_BLOW_MS    1000          /* 关气泵后电磁阀吹气时长(ms) */
@@ -160,6 +160,8 @@ static int32_t  g_p2_enc_start_x2 = 0;       /* 列起点 X2 31H 编码器值 */
 int32_t g_scatter_subpos[SCATTER_CELLS][SCATTER_SUBPOS][2];
 static int     g_p1_scan_pos = 0;   /* P1 当前子扫描位 0..4 */
 static int     g_p1_found_pos  = -1;  /* P1 实际找到元件的子位置，-1=无效 */
+static int     g_p1_refill_comp_index = 0;  /* 全部子位为空时保存的当前元件 */
+static int     g_p1_refill_scan_pos   = 0;  /* 补料后重新识别的起始子位 */
 
 #define P1_SUBPOS_TIMEOUT_MS  10000 /* P1 单个子位置超时 10s */
 static uint32_t g_p1_subpos_start_tick = 0;  /* P1 当前子位置起始 tick */
@@ -167,6 +169,28 @@ static uint32_t g_p1_subpos_start_tick = 0;  /* P1 当前子位置起始 tick */
 /* P1 成功位置记忆 + wraparound */
 static int  g_scan_start_pos[SCATTER_CELLS] = {0}; /* per-cell 上次成功子位置 */
 static bool g_p1_wrapped = false;                   /* 本轮是否 wraparound */
+static bool g_p1_cls_sent = false;                  /* cam 等待类别后的 go 再开始 Phase0 */
+
+/* P1 batch 队列: 一次识别得到的元件先存储，批内消费完后再重新识别 */
+typedef struct {
+    int32_t x_steps;        /* 吸嘴取料坐标 X (电机步数) */
+    int32_t y_steps;        /* 吸嘴取料坐标 Y (电机步数) */
+    int32_t angle_x100;     /* 元件角度 x100 */
+    int32_t class_id;       /* P1 class: 0=ccap 1=cled 2=cres */
+    int32_t source_subpos;  /* 该批目标来自哪个散料子位 */
+} P1QueuedComponent_t;
+
+static P1QueuedComponent_t g_p1_queue[P1_MAX_TARGETS];
+static int g_p1_queue_count = 0;
+static int g_p1_queue_idx   = 0;
+static int g_p1_queue_class = -1;
+
+static void p1_queue_clear(void);
+static bool p1_queue_fill(const VisionResult_t *r);
+static bool p1_queue_has_next(void);
+static const P1QueuedComponent_t *p1_queue_current(void);
+static void p1_queue_consume_current(void);
+static void p1_start_pick_from_queue(Component_t *c);
 
 /* P1 运动中识别子状态 */
 typedef enum { FIND_IDLE, FIND_MOVING, FIND_WAITING } FindSubState_t;
@@ -470,6 +494,8 @@ static void start_p1_find_first(void)
     }
 
     g_comp_index = 0;
+    p1_queue_clear();
+    g_p1_cls_sent = false;
     for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start_pos[i] = 0;
     g_p1_wrapped = false;
     g_p1_scan_pos = 0;
@@ -822,6 +848,32 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
         }
         break;
 
+    case HCMD_CONTINUE:
+        if (g_state == HOST_WAIT_REFILL) {
+            if (g_p1_refill_comp_index >= (int)g_comp_count) {
+                PrintDebug("[HOST] CONTINUE: saved comp index invalid, going DEBUG\r\n");
+                g_error_entered = false;
+                g_state = HOST_DEBUG;
+                break;
+            }
+            g_comp_index = g_p1_refill_comp_index;
+            g_p1_scan_pos = g_p1_refill_scan_pos;
+            p1_queue_clear();
+            g_consecutive_failures = 0;
+            g_p1_wrapped = false;
+            g_p1_found_pos = -1;
+            g_p1_subpos_start_tick = osKernelGetTickCount();
+            g_find_sub = FIND_IDLE;
+            g_error_entered = false;
+            g_state = HOST_FIND_COMP;
+            PrintDebug("[HOST] CONTINUE: refill assumed, resume comp %u at subpos %d\r\n",
+                       (unsigned)g_components[g_comp_index].id, g_p1_scan_pos);
+            host_send("CONTINUE_OK");
+        } else {
+            PrintDebug("[HOST] CONTINUE ignored, state=%d\r\n", (int)g_state);
+        }
+        break;
+
     case HCMD_AUTO_HEAT:
     if (strstr(cmd->raw, "ON"))  { g_auto_heat = true;  PrintDebug("[HOST] AUTO_HEAT ON\r\n");  host_send("AUTO_HEAT ON"); }
     if (strstr(cmd->raw, "OFF")) { g_auto_heat = false; PrintDebug("[HOST] AUTO_HEAT OFF\r\n"); host_send("AUTO_HEAT OFF"); }
@@ -836,6 +888,7 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
         Valve_On(); osDelay(200); Valve_Off();
         z_safe();
         g_error_entered = false;
+        p1_queue_clear();
         g_state = HOST_DEBUG;
         if_DOWNLOAD_READY = 0;
         g_comp_count = 0;
@@ -934,6 +987,31 @@ static inline int32_t p2_mark_physical_idx(int32_t scan_idx) {
     return scan_idx;
 }
 
+/* P2/P3/P4 未识别或不可恢复的视觉错误: 停运动 -> 回机械原点 -> 进入错误态并报错 */
+static void enter_vision_fatal_error(const char *err) {
+    Vision_SendEnd();
+    Vision_ForceIdle();
+    LowerCam_Light_Off();
+    Heater_SendStop();
+
+    axis_stop(X1_ADDR);
+    axis_stop(X2_ADDR);
+    axis_stop(Y_ADDR);
+    disable_sync_stop();
+    motorSyncEnable(0);
+    motorSyncTrigger(0x00);
+    osDelay(100);
+
+    z_safe();
+    safe_move_to(0, 0, PNP_SPEED_FAST, PNP_ACC);
+
+    GUI_SPI_NotifySMTStatus(0);
+    GUI_SPI_NotifyLog(err);
+    PrintDebug("[HOST] Vision fatal: %s -> home (0,0), ERROR\r\n", err);
+    g_error_entered = false;
+    g_state = HOST_ERROR;
+}
+
 /* Mark 对齐一步 (HOST_MARK_ALIGN 时调用) */
 static void mark_align_step(void) {
     VisionState_t vs = Vision_GetState();
@@ -1027,6 +1105,7 @@ static void mark_align_step(void) {
                                (long)g_scan_cols);
                     g_p2_scanning = false;
                     g_mark_scanning = false;
+                    Vision_SendEnd();
                     Vision_ForceIdle();
                     g_state = HOST_ERROR;
                     break;
@@ -1107,6 +1186,7 @@ static void mark_align_step(void) {
         if (g_p2_pos_iter > P2_MAX_ALIGN_ITER) {
             PrintDebug("[HOST] Mark%ld P2 align max iter (%d) exceeded\r\n",
                        (long)(phys_idx + 1), P2_MAX_ALIGN_ITER);
+            Vision_SendEnd();
             Vision_ForceIdle();
             g_state = HOST_ERROR;
             break;
@@ -1312,7 +1392,16 @@ static void mark_align_step(void) {
     }
 
     case VISION_ERROR:
-        PrintDebug("[HOST] Mark alignment ERROR: %s\r\n", Vision_GetError());
+    {
+        const char *err = Vision_GetError();
+        bool known_p2 = (strcmp(err, "err2_1") == 0) ||
+                        (strcmp(err, "err2_3") == 0) ||
+                        (strcmp(err, "err2_4") == 0);
+        if (!known_p2) {
+            enter_vision_fatal_error(err);
+            break;
+        }
+        PrintDebug("[HOST] Mark alignment ERROR: %s\r\n", err);
         if (g_p2_scanning) {
             p2_scan_stop();
             g_p2_col++;
@@ -1346,12 +1435,14 @@ static void mark_align_step(void) {
             g_state = HOST_ERROR;
         }
         break;
+    }
     default:
         break;
     }
 
     if (Vision_IsTimedOut()) {
         PrintDebug("[HOST] Mark align timeout!\r\n");
+        Vision_SendEnd();
         Vision_ForceIdle();
         g_state = HOST_ERROR;
         return;
@@ -1359,13 +1450,19 @@ static void mark_align_step(void) {
 }
 
 /* ---- R 轴角度矫正辅助：从视觉结果提取角度，超过阈值则启动非阻塞旋转 ---- */
-bool host_start_r_correction(const VisionResult_t *r, const char *stage) {
-    if (!r || !r->angle_valid) return false;
-    float ang = (float)r->angle_x100 / 100.0f;
+static bool host_start_r_correction_angle(int32_t angle_x100, bool angle_valid,
+                                          const char *stage) {
+    if (!angle_valid) return false;
+    float ang = (float)angle_x100 / 100.0f;
     if (fabsf(ang) <= R_CORRECTION_THRESHOLD_DEG) return false;
     PrintDebug("[HOST] %s: R correction %.2f deg\r\n", stage, (double)ang);
     r_axis_rotate(ang, R_SPEED_RPM);
     return false;  /* 阻塞已完成, 无需 phase 等待 */
+}
+
+bool host_start_r_correction(const VisionResult_t *r, const char *stage) {
+    if (!r || !r->angle_valid) return false;
+    return host_start_r_correction_angle(r->angle_x100, true, stage);
 }
 
 /* ================================================================
@@ -1415,10 +1512,7 @@ static void p4_baseline_step(void)
         break;
 
     case VISION_ERROR:
-        LowerCam_Light_Off();
-        PrintDebug("[HOST] P4 baseline ERROR: %s\r\n", Vision_GetError());
-        Vision_ForceIdle();
-        g_state = HOST_ERROR;
+        enter_vision_fatal_error(Vision_GetError());
         break;
 
     default:
@@ -1480,10 +1574,7 @@ static void p4_verify_step(void)
     }
 
     case VISION_ERROR:
-        LowerCam_Light_Off();
-        PrintDebug("[HOST] P4 verify ERROR: %s\r\n", Vision_GetError());
-        Vision_ForceIdle();
-        g_state = HOST_ERROR;
+        enter_vision_fatal_error(Vision_GetError());
         break;
 
     default:
@@ -1544,6 +1635,116 @@ static bool p1_try_next_subpos(Component_t *c) {
     g_find_sub = FIND_IDLE;
     return true;
 }
+
+/* mv 时切换下一子位，但保持当前 P1 会话，等电机到位后再发 go */
+static bool p1_advance_subpos_keep_session(Component_t *c) {
+    if (!p1_try_next_subpos(c)) return false;
+    g_find_sub = FIND_WAITING;
+    return true;
+}
+
+static void p1_queue_clear(void) {
+    memset(g_p1_queue, 0, sizeof(g_p1_queue));
+    g_p1_queue_count = 0;
+    g_p1_queue_idx   = 0;
+    g_p1_queue_class = -1;
+}
+
+/* 将 cam 一次返回的全部目标换算成吸嘴取料坐标后入队 */
+static bool p1_queue_fill(const VisionResult_t *r) {
+    p1_queue_clear();
+    if (r == NULL || !r->p1_batch_mode || r->target_count <= 0) return false;
+
+    int n = r->target_count;
+    if (n > P1_MAX_TARGETS) n = P1_MAX_TARGETS;
+    MachineCoord_t cam = Coord_Get();
+
+    for (int i = 0; i < n; i++) {
+        int32_t cam_x = cam.x - r->targets[i].dy;   /* cam Y -> X1+X2 */
+        int32_t cam_y = cam.y - r->targets[i].dx;   /* cam X -> Y 电机 */
+        g_p1_queue[i].x_steps       = cam_x - g_calib.cam_to_nozzle_dx_steps;
+        g_p1_queue[i].y_steps       = cam_y - g_calib.cam_to_nozzle_dy_steps;
+        g_p1_queue[i].angle_x100    = r->targets[i].angle_x100;
+        g_p1_queue[i].class_id      = r->class_id;
+        g_p1_queue[i].source_subpos = g_p1_scan_pos;
+    }
+
+    g_p1_queue_count = n;
+    g_p1_queue_idx   = 0;
+    g_p1_queue_class = r->class_id;
+    return true;
+}
+
+static bool p1_queue_has_next(void) {
+    return g_p1_queue_count > 0 && g_p1_queue_idx < g_p1_queue_count;
+}
+
+static const P1QueuedComponent_t *p1_queue_current(void) {
+    if (!p1_queue_has_next()) return NULL;
+    return &g_p1_queue[g_p1_queue_idx];
+}
+
+static void p1_queue_consume_current(void) {
+    if (g_p1_queue_idx < g_p1_queue_count) g_p1_queue_idx++;
+}
+
+/* 直接消费队列当前元件，不再打开摄像头 */
+static void p1_start_pick_from_queue(Component_t *c) {
+    const P1QueuedComponent_t *q = p1_queue_current();
+    if (q == NULL) {
+        PrintDebug("[HOST] P1 queue empty, cannot pick\r\n");
+        g_state = HOST_ERROR;
+        return;
+    }
+
+    int cl = component_cell(c);
+    if (g_p1_found_pos >= 0) g_scan_start_pos[cl] = g_p1_found_pos;
+    g_p1_retry_count = 0;
+    g_p1_wrapped = false;
+    g_find_sub = FIND_IDLE;
+    g_consecutive_failures = 0;
+    g_p1_align_iter = 0;
+    g_p1_cls_sent = false;
+
+    g_p1_found_pos = q->source_subpos;
+    z_safe();
+    safe_move_to(q->x_steps, q->y_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
+    PrintDebug("[HOST] P1 queue %d/%d -> pick(%ld,%ld) class=%ld\r\n",
+               g_p1_queue_idx + 1, g_p1_queue_count,
+               (long)q->x_steps, (long)q->y_steps, (long)q->class_id);
+    g_state = HOST_PICK;
+}
+
+/* 散料区全部子位都为空: 回原点、报错、保存进度并等待 CONTINUE */
+static void enter_p1_refill_error(void) {
+    Vision_SendEnd();
+    Vision_ForceIdle();
+    g_p1_cls_sent = false;
+    p1_queue_clear();
+    g_p1_refill_comp_index = g_comp_index;
+    g_p1_refill_scan_pos   = 0;   /* 补料后从当前元件散料区开头重新识别 */
+
+    Heater_SendStop();
+    axis_stop(X1_ADDR);
+    axis_stop(X2_ADDR);
+    axis_stop(Y_ADDR);
+    disable_sync_stop();
+    motorSyncEnable(0);
+    motorSyncTrigger(0x00);
+    osDelay(100);
+    z_safe();
+    safe_move_to(0, 0, PNP_SPEED_FAST, PNP_ACC);
+
+    GUI_SPI_NotifySMTStatus(0);
+    GUI_SPI_NotifyLog("REFILL_NEEDED");
+    host_send("ERROR");
+    host_send("REFILL_NEEDED");
+    PrintDebug("[HOST] P1 all subpos empty, comp %u -> home, waiting CONTINUE\r\n",
+               (unsigned)g_components[g_comp_index].id);
+    g_error_entered = false;
+    g_state = HOST_WAIT_REFILL;
+}
+
 /* P1 扫描主状态机: FIND_IDLE -> FIND_MOVING -> FIND_WAITING */
 /* ---------- P1 对齐完成：记忆位置 + cam_to_nozzle 补偿 -> HOST_PICK ---------- */
 static void p1_align_finish(Component_t *c) {
@@ -1551,6 +1752,7 @@ static void p1_align_finish(Component_t *c) {
     if (g_p1_found_pos >= 0) g_scan_start_pos[cl] = g_p1_found_pos;
     g_p1_retry_count = 0; g_p1_scan_pos = 0; g_p1_wrapped = false; g_find_sub = FIND_IDLE;
     g_consecutive_failures = 0; g_p1_align_iter = 0;
+    g_p1_cls_sent = false;
     Vision_SendEnd();   /* P1 会话收尾：覆盖 ok 完成与迭代超限强制结束两条路径 */
     if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
         safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps, Coord_Get().y - g_calib.cam_to_nozzle_dy_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
@@ -1564,7 +1766,15 @@ static void find_comp_step(void) {
 
     // FIND_IDLE: 启动运动+视觉
     if (g_find_sub == FIND_IDLE) {
+        int cur_class = footprint_to_class_id(c->footprint);
+        if (p1_queue_has_next() && g_p1_queue_class == cur_class) {
+            p1_start_pick_from_queue(c);
+            return;
+        }
+        if (g_p1_queue_count > 0) p1_queue_clear();   /* 类别变化或队列耗尽 */
+
         g_p1_align_iter = 0;   /* 新 P1 会话：复位迭代对齐计数 */
+        g_p1_cls_sent = false;
         int cl = component_cell(c);
         int32_t tx = g_scatter_subpos[cl][g_p1_scan_pos][0] + g_calib.cam_to_nozzle_dx_steps;
         int32_t ty = g_scatter_subpos[cl][g_p1_scan_pos][1] + g_calib.cam_to_nozzle_dy_steps;
@@ -1586,34 +1796,54 @@ static void find_comp_step(void) {
 
     bool has_pending = (vs == VISION_GOT_STOP || vs == VISION_GOT_POS ||
                         vs == VISION_GOT_CATEGORY_QUERY || vs == VISION_DONE ||
-                        vs == VISION_ERROR);
+                        vs == VISION_GOT_MOVE || vs == VISION_ERROR);
     if (!has_pending && (Vision_IsTimedOut() || p1_subpos_timed_out())) {
         if (g_find_sub == FIND_MOVING) { disable_sync_stop(); p1_restore_coord(); }
+        g_p1_cls_sent = false;
         Vision_SendEnd();
         Vision_ForceIdle(); g_find_sub = FIND_IDLE;
         if (p1_try_next_subpos(c)) return;
-        g_p1_scan_pos = 0; g_p1_wrapped = false; g_p1_subpos_start_tick = osKernelGetTickCount();
-        g_consecutive_failures++;
-        if (g_consecutive_failures >= 3) { host_send("REFILL_NEEDED"); g_state = HOST_WAIT_REFILL; }
-        else { g_comp_index++; if (g_comp_index >= g_comp_count) { g_state = HOST_DONE; }
-               else { int cl = component_cell(&g_components[g_comp_index]); g_p1_scan_pos = g_scan_start_pos[cl]; g_p1_wrapped = false; g_find_sub = FIND_IDLE; } }
+        enter_p1_refill_error();
         return;
     }
 
     // FIND_MOVING: 运动中轮询
     if (g_find_sub == FIND_MOVING) {
-        if (vs == VISION_GOT_CATEGORY_QUERY) { Vision_ClsReply(); return; }
+        if (vs == VISION_GOT_CATEGORY_QUERY) {
+            Vision_ClsReply();
+            g_p1_cls_sent = true;
+            PrintDebug("[HOST] P1 category sent while moving, wait stop then go\r\n");
+            return;
+        }
+        if (vs == VISION_GOT_MOVE) {
+            axis_stop(X1_ADDR); axis_stop(X2_ADDR); axis_stop(Y_ADDR); disable_sync_stop();
+            p1_restore_coord();
+            if (p1_advance_subpos_keep_session(c)) {
+                int cl = component_cell(c);
+                safe_move_to(g_scatter_subpos[cl][g_p1_scan_pos][0] + g_calib.cam_to_nozzle_dx_steps,
+                             g_scatter_subpos[cl][g_p1_scan_pos][1] + g_calib.cam_to_nozzle_dy_steps,
+                             PNP_SPEED, PNP_ACC);
+                Vision_GoScan();
+                g_p1_cls_sent = false;
+                PrintDebug("[HOST] P1 mv: moved to subpos %d, go\r\n", g_p1_scan_pos);
+                return;
+            }
+            enter_p1_refill_error();
+            return;
+        }
         if (vs == VISION_GOT_STOP) {
             axis_stop(X1_ADDR); axis_stop(X2_ADDR); axis_stop(Y_ADDR); disable_sync_stop();
             p1_restore_coord();
             g_p1_found_pos = g_p1_scan_pos; Vision_ResetTimeout();
             g_p1_subpos_start_tick = osKernelGetTickCount();
+            g_p1_cls_sent = false;
             Vision_Go(); g_find_sub = FIND_WAITING;
             return;
         }
         if (vs == VISION_ERROR) {
             axis_stop(X1_ADDR); axis_stop(X2_ADDR); axis_stop(Y_ADDR); disable_sync_stop();
             p1_restore_coord(); g_find_sub = FIND_WAITING;
+            g_p1_cls_sent = false;
             return;
         }
         uint32_t done = 0;
@@ -1621,18 +1851,71 @@ static void find_comp_step(void) {
         if (ddx != 0) done |= EVENT_X1_DONE | EVENT_X2_DONE;
         if (ddy != 0) done |= EVENT_Y_DONE;
         if (done && (g_axes_done_bits & done) == done) {
-            Coord_UpdateXY(g_move_target_x, g_move_target_y); g_find_sub = FIND_WAITING; return;
+            Coord_UpdateXY(g_move_target_x, g_move_target_y);
+            g_find_sub = FIND_WAITING;
+            if (g_p1_cls_sent) {
+                Vision_GoScan();
+                g_p1_cls_sent = false;
+                PrintDebug("[HOST] P1 stopped, go to start Phase0\r\n");
+            }
+            return;
         }
         return;
     }
     switch (vs) {
-    case VISION_GOT_CATEGORY_QUERY: Vision_ClsReply(); break;
+    case VISION_GOT_CATEGORY_QUERY:
+        Vision_ClsReply();
+        if (g_find_sub == FIND_WAITING) {
+            Vision_GoScan();
+            g_p1_cls_sent = false;
+            PrintDebug("[HOST] P1 category done, stopped, go\r\n");
+        } else {
+            g_p1_cls_sent = true;
+        }
+        break;
+    case VISION_BUSY:
+        if (g_p1_cls_sent) {
+            Vision_GoScan();
+            g_p1_cls_sent = false;
+            PrintDebug("[HOST] P1 busy after category, go\r\n");
+        }
+        break;
     case VISION_GOT_STOP:
         if (g_jog_active) { disable_sync_stop(); g_jog_active = false; }
         g_p1_found_pos = g_p1_scan_pos; Vision_ResetTimeout();
-        g_p1_subpos_start_tick = osKernelGetTickCount(); Vision_Go();
+        g_p1_subpos_start_tick = osKernelGetTickCount();
+        g_p1_cls_sent = false;
+        Vision_Go();
+        break;
+    case VISION_GOT_MOVE:
+        if (p1_advance_subpos_keep_session(c)) {
+            int cl = component_cell(c);
+            safe_move_to(g_scatter_subpos[cl][g_p1_scan_pos][0] + g_calib.cam_to_nozzle_dx_steps,
+                         g_scatter_subpos[cl][g_p1_scan_pos][1] + g_calib.cam_to_nozzle_dy_steps,
+                         PNP_SPEED, PNP_ACC);
+            Vision_GoScan();
+            g_p1_cls_sent = false;
+            PrintDebug("[HOST] P1 mv: moved to subpos %d, go\r\n", g_p1_scan_pos);
+            break;
+        }
+        enter_p1_refill_error();
         break;
     case VISION_GOT_POS: {
+        /* P1 batch single-shot: 全部目标入队，先消费队列当前项 */
+        if (r->p1_batch_mode) {
+            if (p1_queue_fill(r)) {
+                Vision_SendEnd();
+                p1_start_pick_from_queue(c);
+            } else {
+                PrintDebug("[HOST] P1 batch result invalid, count=%ld\r\n",
+                           (long)r->target_count);
+                Vision_SendEnd();
+                Vision_ForceIdle();
+                g_state = HOST_ERROR;
+            }
+            break;
+        }
+
         /* P1 迭代对齐：修正偏移后 go 复测；8 包 pos 兜底(1 init + cam 7 轮)，正常终止由 ok/err1_6 决定 */
         int32_t dx_s = -(int32_t)(r->dy), dy_s = -(int32_t)(r->dx);
         g_p1_align_iter++;
@@ -1654,9 +1937,14 @@ static void find_comp_step(void) {
     }
     case VISION_ERROR: {
         const char *err = Vision_GetError();
+        g_p1_cls_sent = false;
         bool is_not_found = (strcmp(err, "err1_5") == 0);
         bool recoverable  = is_not_found || (strcmp(err, "err1_6") == 0) || (strcmp(err, "err1_1") == 0) || (strcmp(err, "err1_3") == 0) || (strcmp(err, "err1_4") == 0);
-        if (is_not_found) { if (p1_try_next_subpos(c)) { g_p1_retry_count = 0; return; } }
+        if (is_not_found) {
+            if (p1_try_next_subpos(c)) { g_p1_retry_count = 0; return; }
+            enter_p1_refill_error();
+            return;
+        }
         else if (recoverable && g_p1_retry_count < 3) {
             g_p1_retry_count++; g_p1_subpos_start_tick = osKernelGetTickCount(); g_find_sub = FIND_IDLE;
             return;
@@ -1664,7 +1952,7 @@ static void find_comp_step(void) {
         g_p1_retry_count = 0; g_p1_scan_pos = 0; g_p1_wrapped = false; g_p1_found_pos = -1;
         g_p1_subpos_start_tick = osKernelGetTickCount(); g_find_sub = FIND_IDLE;
         g_consecutive_failures++;
-        if (g_consecutive_failures >= 3) { host_send("REFILL_NEEDED"); g_state = HOST_WAIT_REFILL; }
+        if (g_consecutive_failures >= 3) { p1_queue_clear(); host_send("REFILL_NEEDED"); g_state = HOST_WAIT_REFILL; }
         else { g_comp_index++; if (g_comp_index >= g_comp_count) { g_state = HOST_DONE; }
                else { int cl = component_cell(&g_components[g_comp_index]); g_p1_scan_pos = g_scan_start_pos[cl]; g_p1_wrapped = false; } }
         break;
@@ -1790,14 +2078,13 @@ static void offset_check_step(void) {
         } else if (strcmp(err, "err3_6") == 0 || strcmp(err, "err3_7") == 0) {
             /* 文档: err3_6=等go超时30s / err3_7=7轮未对准 - 明确策略: 容错贴装 */
             LowerCam_Light_Off();
+            Vision_SendEnd();
             PrintDebug("[HOST] P3 %s (align fail/timeout), tolerant place\r\n", err);
             Coord_Invalidate();
             g_state = HOST_MOVE_TO_PCB;
         } else {
             LowerCam_Light_Off();
-            PrintDebug("[HOST] Offset check ERROR: %s\r\n", err);
-            Coord_Invalidate();  /* P3 失败，R 轴位置不可信 */
-            g_state = HOST_MOVE_TO_PCB;  /* 容错：仍然贴装 */
+            enter_vision_fatal_error(err);
         }
         break;
     }
@@ -1858,7 +2145,19 @@ static void pick_step(void) {
     }
 
     /* R轴矫正: P1识别完成，吸取后旋转。无矫正则直接过渡 */
-    if (host_start_r_correction(Vision_GetResult(), "P1")) {
+    int32_t angle_x100 = 0;
+    bool    angle_valid = false;
+    if (p1_queue_has_next()) {
+        const P1QueuedComponent_t *q = p1_queue_current();
+        angle_x100  = q->angle_x100;
+        angle_valid = true;
+        p1_queue_consume_current();
+    } else {
+        const VisionResult_t *vr = Vision_GetResult();
+        angle_x100  = vr->angle_x100;
+        angle_valid = vr->angle_valid;
+    }
+    if (host_start_r_correction_angle(angle_x100, angle_valid, "P1")) {
         phase = 1;
         return;   /* 等待 r_axis_poll 完成旋转 */
     }
@@ -1879,9 +2178,6 @@ static void move_to_bottom_step(void) {
 static void move_to_pcb_step(void) {
     static int     phase = 0;
     static int32_t saved_mx, saved_my;
-
-    /* pick 确认成功，子位置信息生命周期结束 */
-    g_p1_found_pos = -1;
 
     /* ---- Phase 1: 等待 R 轴旋转完成，然后 XY 移动 ---- */
     if (phase == 1) {
@@ -1937,20 +2233,19 @@ static void place_step(void) {
     place_component(); c->placed = true; g_comp_index++;
     if (g_comp_index >= g_comp_count) { g_state = HOST_DONE; }
     else {
-        int cl = component_cell(&g_components[g_comp_index]); g_p1_scan_pos = 0;
+        int cl = component_cell(&g_components[g_comp_index]);
+        int next_class = footprint_to_class_id(g_components[g_comp_index].footprint);
         g_p1_found_pos  = -1;
         g_p1_subpos_start_tick = osKernelGetTickCount();
-        PrintDebug("[HOST] PLACE: moving to scatter cell=%d subpos=0 target=(%ld,%ld)\r\n",
-                   cl, (long)(g_scatter_subpos[cl][0][0] + g_calib.cam_to_nozzle_dx_steps),
-                   (long)(g_scatter_subpos[cl][0][1] + g_calib.cam_to_nozzle_dy_steps));
-        if (safe_move_to(g_scatter_subpos[cl][0][0] + g_calib.cam_to_nozzle_dx_steps, g_scatter_subpos[cl][0][1] + g_calib.cam_to_nozzle_dy_steps, PNP_SPEED_FAST, PNP_ACC) != 0) {
-            PrintDebug("[HOST] PLACE: scatter move FAILED, entering ERROR\r\n");
-            g_state = HOST_ERROR;
-        } else {
-            PrintDebug("[HOST] PLACE: scatter move OK, starting P1 for comp %u\r\n", g_components[g_comp_index].id);
-            g_find_sub = FIND_IDLE;
-            g_state = HOST_FIND_COMP;
+        if (!p1_queue_has_next() || g_p1_queue_class != next_class) {
+            g_p1_scan_pos = g_scan_start_pos[cl];
         }
+        g_find_sub = FIND_IDLE;
+        PrintDebug("[HOST] PLACE: next comp %u, queue=%d class=%d subpos=%d\r\n",
+                   g_components[g_comp_index].id,
+                   p1_queue_has_next() ? g_p1_queue_idx : -1,
+                   next_class, g_p1_scan_pos);
+        g_state = HOST_FIND_COMP;
     }
 }
 
@@ -1959,6 +2254,7 @@ static void done_step(void) {
     PrintDebug("[HOST] All %u components placed!\r\n", g_comp_count);
     { uint8_t d[8]={0}; d[0]=(uint8_t)(g_comp_count>>8); d[1]=(uint8_t)g_comp_count; Log_Write(LOG_PNP_DONE,d); }
     g_comp_count = 0; g_mark_count = 0;
+    p1_queue_clear();
     safe_move_to(0, 0, PNP_SPEED_FAST, PNP_ACC);
     osDelay(200);
     if (g_auto_heat) {
@@ -1989,6 +2285,7 @@ static void reflow_step(void) {
 
 static void error_step(void) {
     if (!g_error_entered) {
+        p1_queue_clear();
         Heater_SendStop(); z_safe();
         { uint8_t d[8]={0}; d[0]=1; d[1]=(uint8_t)(g_comp_index>>8); d[2]=(uint8_t)g_comp_index; Log_Write(LOG_PNP_ERROR,d); }
         PrintDebug("[HOST] ERROR state. Waiting RESUME or ABORT (30s timeout)...\r\n");

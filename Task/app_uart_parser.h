@@ -49,6 +49,7 @@ typedef enum {
     HCMD_SAVE_CALIB,          // 保存标定值到 Flash
     HCMD_RESTORE_CALIB,       // 恢复标定值（调试用）
     HCMD_RESUME,              // 从暂停/WAIT_REFILL/ERROR 恢复
+    HCMD_CONTINUE,            // continue after refill
     HCMD_ABORT,               // 中止当前流程 -> HOST_IDLE
     HCMD_AUTO_HEAT,           // AUTO_HEAT ON/OFF — 自动回流焊开关
 

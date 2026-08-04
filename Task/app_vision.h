@@ -7,28 +7,32 @@
 /* Mark point count (for app_host.c) */
 #define P2_MARK_COUNT  3
 
+/* P1 batch result cap: cam max_det is 10, one frame reports all targets */
+#define P1_MAX_TARGETS 10
+
 /*
  * Vision module external states (MaixCAM 2026 v2 protocol)
  */
 
 /* External states */
 typedef enum {
-    VISION_IDLE = 0,     
-    VISION_BUSY,         
+    VISION_IDLE = 0,
+    VISION_BUSY,
     VISION_RDY,          /* Cam responded rdy, host should send go */
-    VISION_GOT_STOP,     
-    VISION_GOT_POS,      
-    VISION_DONE,         
-    VISION_ERROR,        
+    VISION_GOT_STOP,
+    VISION_GOT_POS,
+    VISION_DONE,
+    VISION_ERROR,
     VISION_GOT_ERR_RETRY,
     VISION_GOT_CATEGORY_QUERY,/* P1: Cam asked for category, host must call Vision_ClsReply() */
+    VISION_GOT_MOVE,          /* P1: cam requests host to move to next view */
 } VisionState_t;
 
 /* Command types */
 typedef enum {
-    VCMD_P1,             
-    VCMD_P2,             
-    VCMD_P3,             
+    VCMD_P1,
+    VCMD_P2,
+    VCMD_P3,
     VCMD_P4,             /* P4: 下相机圆形标定对位（吸嘴中心） */
 } VisionCmd_t;
 
@@ -37,15 +41,27 @@ typedef enum {
 #define P1_CLASS_CLED    1
 #define P1_CLASS_CRES    2
 
+/* Single visual target result */
+typedef struct {
+    int32_t dx;
+    int32_t dy;
+    int32_t angle_x100;
+    bool    angle_valid;
+    int32_t class_id;
+} VisionTarget_t;
+
 /* Single Process result data */
 typedef struct {
-    int32_t dx, dy;           
-    int32_t angle_x100;       
-    bool    angle_valid;      
-    int32_t class_id;         
-    char    class_name[8];    
-    int32_t mark_index;       
-    int32_t mark_count;       
+    VisionTarget_t targets[P1_MAX_TARGETS];
+    int32_t  target_count;         /* P1 batch: number of targets reported by cam */
+    bool     p1_batch_mode;        /* P1 single-shot batch: do not iterate with go */
+    int32_t dx, dy;
+    int32_t angle_x100;
+    bool    angle_valid;
+    int32_t class_id;
+    char    class_name[8];
+    int32_t mark_index;
+    int32_t mark_count;
 } VisionResult_t;
 
 /* ---- New protocol API ---- */
@@ -61,6 +77,9 @@ void Vision_Start(VisionCmd_t cmd, int class_id);
 
 /* Send "go" (after host stops/moves), state becomes VISION_BUSY */
 void Vision_Go(void);
+
+/* P1 scan-start "go": after category/mv, cam starts Phase0 but still waits stp */
+void Vision_GoScan(void);
 
 /* P1 category reply: send cls + N:{id} + end (task context only) */
 void Vision_ClsReply(void);
@@ -92,5 +111,6 @@ uint32_t Vision_GetAlignRxCount(void);
 int Vision_GetGotPosFromISR(void);
 uint32_t Vision_GetP2TotalRxCount(void);
 uint32_t Vision_GetP2StpIgnoredCount(void);
+uint32_t Vision_GetFrameCrcErrors(void);
 
 #endif

@@ -5,20 +5,24 @@
 #include <string.h>
 
 /* ================================================================
- *  Frame protocol constants (MaixCAM 2026 v2)
- *  Format: 0x7E | LEN(1B) | PAYLOAD(LEN bytes, UTF-8) | 0x7F
+ *  Frame protocol constants (MaixCAM2 2026-08-04)
+ *  Format: 0x7E | LEN_H | LEN_L | PAYLOAD | CRC_H | CRC_L | 0x7F
+ *  CRC-16/MODBUS over PAYLOAD only, big-endian output.
  * ================================================================ */
 #define FRAME_HEAD         0x7E
 #define FRAME_TAIL         0x7F
-#define FRAME_PAYLOAD_MAX  255
+#define FRAME_PAYLOAD_MAX  512
 
 /* ================================================================
  *  Frame parser states
  * ================================================================ */
 typedef enum {
     FS_WAIT_HEAD,
-    FS_WAIT_LEN,
+    FS_WAIT_LEN_H,
+    FS_WAIT_LEN_L,
     FS_WAIT_DATA,
+    FS_WAIT_CRC_H,
+    FS_WAIT_CRC_L,
     FS_WAIT_TAIL,
 } FrameState_t;
 
@@ -67,9 +71,19 @@ typedef enum {
 
 /* ---- 帧解析器 ---- */
 static FrameState_t  g_fs           = FS_WAIT_HEAD;
-static uint8_t       g_frame_len    = 0;
-static uint8_t       g_frame_idx    = 0;
+static uint16_t      g_frame_len    = 0;
+static uint16_t      g_frame_idx    = 0;
+static uint16_t      g_frame_crc_rx = 0;
+static uint16_t      g_frame_crc_calc = 0;
 static uint8_t       g_frame_buf[FRAME_PAYLOAD_MAX + 1];
+static volatile uint32_t g_frame_crc_errors = 0;
+
+/* ---- P1 batch collection state ---- */
+static bool    g_p1_count_done  = false;
+static int32_t g_p1_batch_count = 0;
+static int32_t g_p1_batch_idx   = 0;
+static int32_t g_p1_batch_field = 0;
+static bool    g_p1_class_done  = false;
 
 /* ---- 对外状态 ---- */
 static volatile VisionState_t g_state = VISION_IDLE;  /* ISR写入，必须volatile */
@@ -132,29 +146,55 @@ static void process_frame(const char *str);
  *  内部辅助函数
  * ================================================================ */
 
+static uint16_t crc16_modbus_byte(uint16_t crc, uint8_t byte) {
+    crc ^= byte;
+    for (int i = 0; i < 8; i++) {
+        if (crc & 1U) crc = (uint16_t)((crc >> 1) ^ 0xA001U);
+        else          crc = (uint16_t)(crc >> 1);
+    }
+    return crc;
+}
+
+static uint16_t crc16_modbus(const uint8_t *data, uint16_t len) {
+    uint16_t crc = 0xFFFFU;
+    for (uint16_t i = 0; i < len; i++) {
+        crc = crc16_modbus_byte(crc, data[i]);
+    }
+    return crc;
+}
+
 static bool parse_number_frame(const char *str, int32_t *out) {
-    if (str[0] != (char)0x4E || str[1] != (char)0x3A) return false;
-    const char *p = str + 2;
+    if (str[0] != (char)0x4E) return false;
+    const char *p = str + 1;
+    while (*p >= '0' && *p <= '9') p++;   /* optional target index: N1:.. */
+    if (*p != (char)0x3A) return false;
+    p++;
     int sign = 1;
     if (*p == '-') { sign = -1; p++; }
+    if (*p < '0' || *p > '9') return false;
     int32_t val = 0;
     while (*p >= '0' && *p <= '9') {
         val = val * 10 + (int32_t)(*p - '0');
         p++;
     }
+    if (*p != '\0') return false;
     *out = val * sign;
     return true;
 }
 
 static void send_frame(const char *str) {
-    uint8_t len = (uint8_t)strlen(str);
+    uint16_t len = (uint16_t)strlen(str);
     if (len > FRAME_PAYLOAD_MAX) len = FRAME_PAYLOAD_MAX;
-    uint8_t buf[FRAME_PAYLOAD_MAX + 3];
+    static uint8_t buf[FRAME_PAYLOAD_MAX + 6];
+    uint16_t crc = crc16_modbus((const uint8_t *)str, len);
     buf[0] = FRAME_HEAD;
-    buf[1] = len;
-    if (len > 0) memcpy(buf + 2, str, len);
-    buf[2 + len] = FRAME_TAIL;
-    if (HAL_UART_Transmit(&huart2, buf, (uint16_t)(len + 3), 100) != HAL_OK) {
+    buf[1] = (uint8_t)(len >> 8);
+    buf[2] = (uint8_t)(len & 0xFF);
+    if (len > 0) memcpy(buf + 3, str, len);
+    buf[3 + len] = (uint8_t)(crc >> 8);
+    buf[4 + len] = (uint8_t)(crc & 0xFF);
+    buf[5 + len] = FRAME_TAIL;
+    if (HAL_UART_Transmit(&huart2, buf, (uint16_t)(len + 6), 100) != HAL_OK) {
         PrintDebug("[VISION] send_frame FAILED: '%s'\r\n", str);
     } else if (str[0] == 'g' && str[1] == 'o' && str[2] == '\0') {
         PrintDebug("[VISION] send_frame OK: 'go' sent, RX_DMA active=%d\r\n",
@@ -165,6 +205,11 @@ static void send_frame(const char *str) {
 /* 重置所有内部状态 */
 static void reset_all(void) {
     g_fs = FS_WAIT_HEAD;
+    g_frame_len = 0;
+    g_frame_idx = 0;
+    g_frame_crc_rx = 0;
+    g_frame_crc_calc = 0;
+    g_frame_crc_errors = 0;
     g_state        = VISION_IDLE;
     g_active_cmd   = VCMD_P1;
     g_p1_sub       = P1_S0_WAIT_STOP;
@@ -180,9 +225,16 @@ static void reset_all(void) {
     g_p2_iter      = 0;
     g_p2_total_rx  = 0;
     g_p2_stp_ignored = 0;
+    g_p2_align_rx_cnt = 0;
+    g_p2_got_pos_from_isr = 0;
     g_collecting    = false;
     g_collect_cnt   = 0;
     g_collect_auto_end = false;
+    g_p1_count_done  = false;
+    g_p1_batch_count = 0;
+    g_p1_batch_idx   = 0;
+    g_p1_batch_field = 0;
+    g_p1_class_done  = false;
     memset(&g_result, 0, sizeof(g_result));
     memset(g_error_code, 0, sizeof(g_error_code));
 }
@@ -249,6 +301,15 @@ static void process_p1_frame(const char *str) {
         return;
     }
 
+    /* ---- "mv": Phase0 未检测到目标，请主控切换视野 ---- */
+    if (str[0] == 'm' && str[1] == 'v' && str[2] == '\0') {
+        if (g_p1_sub == P1_S0_WAIT_STOP) {
+            g_collecting = false;
+            g_state = VISION_GOT_MOVE;
+        }
+        return;
+    }
+
     /* ---- "stp" ---- */
     if (str[0] == 's' && str[1] == 't' && str[2] == 'p' && str[3] == '\0') {
         g_collecting = false;
@@ -256,10 +317,19 @@ static void process_p1_frame(const char *str) {
         return;
     }
 
-    /* ---- "pos" (4 fields: dx,dy,angle,class_id) ---- */
+    /* ---- "pos" (P1 batch: count + 3 fields per target + class_id) ---- */
     if (str[0] == 'p' && str[1] == 'o' && str[2] == 's' && str[3] == '\0') {
-        if (g_p1_sub == P1_S1_WAIT_POS)
-            collect_begin(4, false);   /* dx, dy, angle, class_id */
+        if (g_p1_sub == P1_S1_WAIT_POS) {
+            g_collecting = true;
+            g_collect_cnt = 0;
+            g_p1_count_done  = false;
+            g_p1_batch_count = 0;
+            g_p1_batch_idx   = 0;
+            g_p1_batch_field = 0;
+            g_p1_class_done  = false;
+            memset(g_result.targets, 0, sizeof(g_result.targets));
+            g_result.target_count = 0;
+        }
         return;
     }
 
@@ -276,27 +346,59 @@ static void process_p1_frame(const char *str) {
         g_collecting = false;
 
         if (g_p1_sub == P1_S1_WAIT_POS) {
-            g_result.dx         = g_tmp_dx;
-            g_result.dy         = g_tmp_dy;
-            g_result.angle_x100 = g_tmp_ao;
-            g_result.angle_valid = true;
-            fill_class_id(g_tmp_cls);
-            g_state = VISION_GOT_POS;
+            if (g_p1_batch_count > 0) {
+                g_result.dx          = g_result.targets[0].dx;
+                g_result.dy          = g_result.targets[0].dy;
+                g_result.angle_x100  = g_result.targets[0].angle_x100;
+                g_result.angle_valid = g_result.targets[0].angle_valid;
+                g_result.p1_batch_mode = true;
+                g_state = VISION_GOT_POS;
+            } else {
+                g_state = VISION_ERROR;
+                save_error("err1_5");
+            }
         }
         return;
     }
 
-    /* ---- 收集模式 (0=dx, 1=dy, 2=angle, 3=class_id) ---- */
+    /* ---- 收集模式: count -> N<idx>:dx/dy/ao ... -> class_id ---- */
     if (g_collecting) {
         int32_t val;
-        if (parse_number_frame(str, &val)) {
-            switch (g_collect_cnt) {
-            case 0: g_tmp_dx  = val; break;
-            case 1: g_tmp_dy  = val; break;
-            case 2: g_tmp_ao  = val; break;
-            case 3: g_tmp_cls = val; break;
-            default: break;
+        if (!parse_number_frame(str, &val)) return;
+
+        if (!g_p1_count_done) {
+            g_p1_batch_count = val;
+            if (g_p1_batch_count < 0) g_p1_batch_count = 0;
+            g_result.target_count = (g_p1_batch_count > P1_MAX_TARGETS)
+                                    ? P1_MAX_TARGETS : g_p1_batch_count;
+            g_p1_count_done = true;
+            g_p1_batch_idx = 0;
+            g_p1_batch_field = 0;
+            if (g_p1_batch_count == 0) g_p1_class_done = true;
+        } else if (g_p1_batch_idx < g_p1_batch_count) {
+            if (g_p1_batch_idx < P1_MAX_TARGETS) {
+                switch (g_p1_batch_field) {
+                case 0: g_result.targets[g_p1_batch_idx].dx = val; break;
+                case 1: g_result.targets[g_p1_batch_idx].dy = val; break;
+                case 2:
+                    g_result.targets[g_p1_batch_idx].angle_x100 = val;
+                    g_result.targets[g_p1_batch_idx].angle_valid = true;
+                    break;
+                default: break;
+                }
             }
+            g_p1_batch_field++;
+            if (g_p1_batch_field >= 3) {
+                g_p1_batch_field = 0;
+                g_p1_batch_idx++;
+                if (g_p1_batch_idx >= g_p1_batch_count) g_p1_class_done = true;
+            }
+        } else if (g_p1_class_done) {
+            fill_class_id(val);
+            for (int32_t i = 0; i < g_result.target_count; i++) {
+                g_result.targets[i].class_id = val;
+            }
+            g_p1_class_done = false;
         }
         g_collect_cnt++;
     }
@@ -553,26 +655,49 @@ static void feed_byte(uint8_t byte) {
     switch (g_fs) {
     case FS_WAIT_HEAD:
         if (byte == FRAME_HEAD) {
-            g_fs = FS_WAIT_LEN;
+            g_fs = FS_WAIT_LEN_H;
             g_frame_idx = 0;
             g_frame_len = 0;
+            g_frame_crc_calc = 0xFFFFU;
         }
         break;
 
-    case FS_WAIT_LEN:
-        g_frame_len = byte;
-        if (g_frame_len == 0)
-            g_fs = FS_WAIT_TAIL;
-        else if (g_frame_len > FRAME_PAYLOAD_MAX)
+    case FS_WAIT_LEN_H:
+        g_frame_len = (uint16_t)((uint16_t)byte << 8);
+        g_fs = FS_WAIT_LEN_L;
+        break;
+
+    case FS_WAIT_LEN_L:
+        g_frame_len |= byte;
+        if (g_frame_len > FRAME_PAYLOAD_MAX) {
             g_fs = FS_WAIT_HEAD;
-        else
+        } else if (g_frame_len == 0) {
+            g_fs = FS_WAIT_CRC_H;
+        } else {
             g_fs = FS_WAIT_DATA;
+        }
         break;
 
     case FS_WAIT_DATA:
         g_frame_buf[g_frame_idx++] = byte;
+        g_frame_crc_calc = crc16_modbus_byte(g_frame_crc_calc, byte);
         if (g_frame_idx >= g_frame_len)
+            g_fs = FS_WAIT_CRC_H;
+        break;
+
+    case FS_WAIT_CRC_H:
+        g_frame_crc_rx = (uint16_t)((uint16_t)byte << 8);
+        g_fs = FS_WAIT_CRC_L;
+        break;
+
+    case FS_WAIT_CRC_L:
+        g_frame_crc_rx |= byte;
+        if (g_frame_crc_rx != g_frame_crc_calc) {
+            g_frame_crc_errors++;
+            g_fs = FS_WAIT_HEAD;
+        } else {
             g_fs = FS_WAIT_TAIL;
+        }
         break;
 
     case FS_WAIT_TAIL:
@@ -673,6 +798,9 @@ void Vision_Start(VisionCmd_t cmd, int class_id) {
 }
 
 void Vision_Go(void) {
+    /* P1 batch single-shot: cam already exited after reporting all targets. */
+    if (g_active_cmd == VCMD_P1 && g_result.p1_batch_mode) return;
+
     /* P2 first go: IDLE -> send "go" to start search */
     if (g_active_cmd == VCMD_P2 && g_state == VISION_IDLE && g_p2_sub == P2_IDLE) {
         send_frame("go");
@@ -741,7 +869,15 @@ void Vision_Go(void) {
     g_state = VISION_BUSY;
 }
 
-
+/* P1 类别确认或 mv 后：发 go 让 cam 开始 Phase0，仍等待 stp */
+void Vision_GoScan(void) {
+    if (g_active_cmd != VCMD_P1) return;
+    if (g_p1_sub != P1_S0_WAIT_STOP) return;
+    if (g_state != VISION_BUSY && g_state != VISION_GOT_MOVE) return;
+    send_frame("go");
+    g_state = VISION_BUSY;
+    PrintDebug("[VISION] -> Cam: go (P1 scan start)\r\n");
+}
 
 /* P1 category reply: send cls + N:{id} + end (MUST be called from task context) */
 void Vision_ClsReply(void) {
@@ -820,6 +956,7 @@ uint32_t Vision_GetAlignRxCount(void) { return g_p2_align_rx_cnt; }
 int Vision_GetGotPosFromISR(void) { return g_p2_got_pos_from_isr; }
 uint32_t Vision_GetP2TotalRxCount(void) { return g_p2_total_rx; }
 uint32_t Vision_GetP2StpIgnoredCount(void) { return g_p2_stp_ignored; }
+uint32_t Vision_GetFrameCrcErrors(void) { return g_frame_crc_errors; }
 
 void Vision_BackToSearch(void) {
     if (g_active_cmd == VCMD_P2) {
