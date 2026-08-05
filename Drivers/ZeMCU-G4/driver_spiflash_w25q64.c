@@ -11,6 +11,18 @@
 extern SPI_HandleTypeDef hspi3;
 static SPI_HandleTypeDef *g_HSPI_Flash = &hspi3;
 
+static void flash_lock(void) {
+    if (w25q64_mutex != NULL) {
+        osMutexAcquire(w25q64_mutex, osWaitForever);
+    }
+}
+
+static void flash_unlock(void) {
+    if (w25q64_mutex != NULL) {
+        osMutexRelease(w25q64_mutex);
+    }
+}
+
 /* CS: PA15
  * SPI3_MISO: PC11
  * SPI3_MOSI: PC12
@@ -169,7 +181,7 @@ void W25Q64_Init(void)
  * 输出参数： buf - 用来保存数据
  * 返 回 值： 非负数 - 读取了多少字节的数据, (-1) - 失败
 **/
-int W25Q64_Read(uint32_t offset, uint8_t *buf, uint32_t len)
+static int W25Q64_ReadInternal(uint32_t offset, uint8_t *buf, uint32_t len)
 {
     unsigned char tmpbuf[4];
     int err;
@@ -212,7 +224,7 @@ int W25Q64_Read(uint32_t offset, uint8_t *buf, uint32_t len)
  * 输出参数： 无
  * 返 回 值： 非负数 - 写了多少字节的数据, (-1) - 失败
 **/
-int W25Q64_Write(uint32_t offset, uint8_t *buf, uint32_t len)
+static int W25Q64_WriteInternal(uint32_t offset, uint8_t *buf, uint32_t len)
 {
     uint8_t tmpbuf[4];
     uint32_t phy_pos = offset;
@@ -286,7 +298,7 @@ int W25Q64_Write(uint32_t offset, uint8_t *buf, uint32_t len)
  * 输出参数： 无
  * 返 回 值： 非负数 - 擦除了多少字节的数据, (-1) - 失败
 **/
-int W25Q64_Erase(uint32_t offset, uint32_t len)
+static int W25Q64_EraseInternal(uint32_t offset, uint32_t len)
 {
     unsigned char tmpbuf[4];
     uint32_t phy_pos = offset;
@@ -523,4 +535,30 @@ static void calib_set_defaults(CalibrationData_t *calib)
     calib->z_pick_angle  = CALIB_DEFAULT_Z_PICK;
     calib->z_place_angle = CALIB_DEFAULT_Z_PLACE;
 		
+}
+int W25Q64_Read(uint32_t offset, uint8_t *buf, uint32_t len)
+{
+    int ret;
+    flash_lock();
+    ret = W25Q64_ReadInternal(offset, buf, len);
+    flash_unlock();
+    return ret;
+}
+
+int W25Q64_Write(uint32_t offset, uint8_t *buf, uint32_t len)
+{
+    int ret;
+    flash_lock();
+    ret = W25Q64_WriteInternal(offset, buf, len);
+    flash_unlock();
+    return ret;
+}
+
+int W25Q64_Erase(uint32_t offset, uint32_t len)
+{
+    int ret;
+    flash_lock();
+    ret = W25Q64_EraseInternal(offset, len);
+    flash_unlock();
+    return ret;
 }

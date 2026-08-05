@@ -659,6 +659,8 @@ ESP_SendCommand(WIFI_ON) → esp_cmd_queue → 0x20 0x01 ──SPI4──►  �
 2. 上位机集成 WiFi 开关指令
 3. TouchGFX GUI 添加 WiFi 状态指示器
 
+> **校正（2026-08-06）：** §15 为 v2 历史记录。当前 ESP32 SPI 协议以 AGENTS.md §4.6 和 HISTORY.md §55 为准：PC13 为 IRQ、无 RST、`ESP_Task` 栈 4096 且默认启用。
+
 
 ## 十六、TMC2209 UART 调试记录（2026-06-05~06）
 
@@ -2606,6 +2608,8 @@ ESP32 是 SPI4 的唯一使用者。
 | Task/app_esp_test.c/h | 曾创建后删除，代码合并到 app_test.c/h 中 |
 ---
 
+> **校正（2026-08-06）：** §34 为历史测试任务记录。当前默认启用 `ESP_Task`，`StartESPTestTask` 默认停用；v3.1 无硬复位线，T1 HardReset 描述不再适用。
+
 
 ## 三十五、2026-06-30~07-01 会话 — R轴停稳、电机电流、Flash默认值、延时同步
 
@@ -3708,6 +3712,8 @@ P1（上摄像头找元件）原有流程：`safe_move_to` 阻塞移动到子位
 - G4→G0B1：`TEMP_HEAT` / `TEMP_PCB` / `SMT_PROGRESS` / `LOG` / `WIFI_STATUS` / `IMPORT_DATA` / `IMPORT_TOTAL`
 - `GUI_PROTO_VERSION 1` 预留
 
+> **校正（2026-08-06）：** 本节为 GUI 独立板迁移初版（SPI v1.5）。当前 v1.6：PD8=DATA_RDY（主控→GUI）、PD9=REQ_TX（GUI→主控）、PD10=CS、PB12=IRQ（恒高不响应）；固定 128 字节帧、以 `\n` 结束并 `0x00` 填充；新增 `HANDSHAKE_REQ → HANDSHAKE_ACK`。当前实现与调试见 HISTORY.md §56、AGENTS.md §4.5。
+
 ### 49.3 代码变更
 
 | 文件 | 改动 |
@@ -3732,6 +3738,8 @@ P1（上摄像头找元件）原有流程：`safe_move_to` 阻塞移动到子位
 ### 49.5 已知限制与遗留
 
 - `WIFI_CONNECT` 的 SSID/密码目前只做校验并触发 ESP WiFi 开关，未透传 ESP32，需扩展 ESP 协议
+
+> **校正（2026-08-06）：** 上述 `WIFI_CONNECT` 未透传的限制已解决，见 §55.6；当前通过 `ESP_SendWifiConnect()` 下发 `0x20/0x03 SSID\0PASSWORD`。
 - IWDG 未启用，喂狗点待定
 - `TouchGFX/`、`st7306/` 目录保留但不再编译，需手动清理
 - 本机无 Keil，使用 ARM GCC 14.3.1 全量编译+链接通过；Keil 需另行实机确认
@@ -3829,6 +3837,9 @@ P1/P3 自 2026-07-11 迁到单次检测后，主控对每个元件只修正一�
 - 对齐阈值（5px 建议）当前由 cam 端判定，主控无独立校验；如需主控侧二次校验需加字段。
 - §38 的历史描述（v2→v3 单次检测迁移）保留为历史事实，不修改。
 - `app_test.c` 的 P2 测试仍是两点法建系（CAM_TEST 用），未同步三点 LS（仅测试诊断用，不影响生产）。
+
+> **校正（2026-08-05）：** §51/§52 记载的 P1 迭代对齐（5/8 轮）已被 cam2test3 的 P1 批量单次上报覆盖为主流程；主控保留旧迭代解析作为兼容回退。当前 P1 协议以 §54 为准。
+
 ## 五十二、2026-08-03 会话 — P1 坐标恢复漏乘符号 → P3/HOME 偏右 6.2cm 修复
 
 ### 52.1 背景
@@ -3876,6 +3887,8 @@ X 轴 `delta_x = (d1+d2)/2` 与 `jog_stop_update_coord()` 一致，无需符号�
 - `app_test.c` CAM_TEST 的 P1/P3 测试循环仍为 5 轮上限，与新协议 8 轮不一致（测试模块按用户要求未动）。
 - `MOTOR_Y_ENC_SIGN` 依赖物理接线约定，若更换电机 / 接线需重新标定符号。
 
+> **校正（2026-08-05）：** 当前 P1 主流程以 §54 的批量单次上报为准；§52 中 P1 迭代上限/错误码描述不再代表主流程，仅保留历史。
+
 ## 五十三、2026-08-04 会话 — P4 基线更新下相机站位 + P4 dx/dy 单位确认
 
 ### 53.1 背景与需求
@@ -3908,3 +3921,223 @@ X 轴 `delta_x = (d1+d2)/2` 与 `jog_stop_update_coord()` 一致，无需符号�
 ### 53.5 遗留问题
 
 - `RESTORE_CALIB` / `SET_BOTTOM_CAM` 无状态守卫，PnP 运行中上位机仍可覆盖站位（既有行为，未处理）。
+
+## 五十四、2026-08-04/05 会话 — MaixCAM2 帧协议升级（2B LEN + CRC-16/MODBUS）+ P1 批量队列 + 补料续跑
+
+### 54.1 背景与协议决定
+
+- cam 端升级帧格式：`0x7E | LEN_H | LEN_L | PAYLOAD | CRC_H | CRC_L | 0x7F`；LEN 为 2 字节大端，CRC-16/MODBUS 只对 PAYLOAD 计算，大端输出。
+- 主控端同步升级；新旧帧格式不兼容，两端必须同步发布。
+- P1 主流程改为批量单次上报，一次返回视野内全部目标；旧迭代对齐解析保留为兼容回退。
+- P2 扫描时序维持旧流程：先移动到扫描起点，`p2` 后直接开始扫描，不等待 `rdy` 门控。
+- P2/P3/P4 遇到未识别或不可恢复视觉错误时：停运动、回机械原点、进入 `HOST_ERROR` 并报错。
+
+### 54.2 帧层改动
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_vision.c` | `FRAME_PAYLOAD_MAX=512`；`send_frame()` 双字节 LEN + CRC；`feed_byte()` 增加 `LEN_H/LEN_L/CRC_H/CRC_L`；CRC 错误计数 |
+| `Task/app_vision.h` | 新增 `Vision_GetFrameCrcErrors()` |
+| `Drivers/ZeMCU-G4/driver_uart.c` | `RX_BUFFER_SIZE` 256 → 600，容纳 P1 批量帧 |
+
+### 54.3 P1 批量队列
+
+- `app_vision.c` 解析 cam 批量格式：`pos -> N:<数量> -> N1/N2... 的 dx/dy/ao -> N:<class_id> -> end`。
+- `VisionResult_t` 增加 `targets[P1_MAX_TARGETS]`、`target_count`、`p1_batch_mode`，`P1_MAX_TARGETS=10`。
+- `app_host.c` 新增 `g_p1_queue[]`：把 cam 返回的全部目标换算为吸嘴取料坐标，批内逐个取料，不再每次重复打开摄像头。
+- 队列耗尽或下个元件类别变化后才重新启动 P1；`g_scan_start_pos` 记忆保留。
+
+### 54.4 P1 类别与 mv 时序
+
+- 类别流程：`p1 -> rdy -> cls -> N:{id} -> end` 后，主控先控制电机停稳，再发 `go`，cam 才开始 Phase0。
+- 保留“移动中检测”能力：P1 在 `FIND_IDLE` 启动运动的同时启动视觉；移动中完成类别回复后，等电机停稳再发 `Vision_GoScan()`。
+- `mv` 改为阻塞式：cam 连续 50 帧未检测到目标时发 `mv` 并等待；主控移动/切换视野，电机到位后发 `go` 继续同一次 P1；中止时发 `end`。
+- 新增 `Vision_GoScan()`：类别确认或 `mv` 后发 `go` 开始 Phase0，但状态仍等待 `stp`。
+
+### 54.5 补料错误态与 CONTINUE
+
+- P1 扫完所有子位仍为空时，进入 `enter_p1_refill_error()`：发 `end`、停运动、回机械原点、发 `ERROR`/`REFILL_NEEDED`、保存当前元件进度。
+- 新增上位机命令 `CONTINUE`（`Task/app_uart_parser.h/c`），收到后默认补料完成，从保存的元件继续识别和贴装，回复 `CONTINUE_OK`。
+- `RESUME` 命令保留，行为不变。
+
+### 54.6 代码变更
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_vision.c/h` | 帧协议、CRC、P1 批量解析、`VISION_GOT_MOVE`、`Vision_GoScan()` |
+| `Task/app_host.c` | P1 批量队列、类别后 `go`、`mv` 续扫、补料错误态、`CONTINUE` 处理、P2/P3/P4 未识别错误回原点 |
+| `Task/app_uart_parser.c/h` | 新增 `HCMD_CONTINUE` / `MATCH("CONTINUE")` |
+| `Task/app_test.c` | P1 批量测试、`Vision_GoScan()`、`mv` 测试处理、P2 测试去掉像素缩放 |
+| `Drivers/ZeMCU-G4/driver_uart.c` | RX 缓冲扩容 |
+
+### 54.7 验证
+
+- [x] CRC 向量：`N:123` → `0x6C44`；`123456789` → `0x4B37`
+- [x] ARM GCC 14.3.1 `-fsyntax-only` 通过
+- [ ] Keil UV4 全量编译：本机无 UV4.exe/ARMCC/ARMCLANG，待用户环境验证
+- [ ] 真机联调：待 cam 端实际合入 2B LEN + CRC 后验证
+
+### 54.8 涉及文档同步
+
+- `AGENTS.md`：帧协议、P1 批量流程、P2 当前时序、补料 `CONTINUE`、`VisionResult_t` 字段同步。
+- `HISTORY.md`：§51/§52 追加“以 §54 为准”的校正说明，历史正文不改写。
+
+## 五十五、2026-08-06 会话 — ESP32 SPI v3.1 协议升级与主控端实现
+
+### 55.1 背景
+
+- 依据《ESP32-C3 与 STM32 主控 SPI 通讯接口文档 v3.1》更新主控端 SPI 通讯模块，不改 ESP32 端、运动控制、视觉识别等其他模块。
+- v3.1 相对旧记录的关键变化：固定 128 字节帧、IRQ 场景 B、CMD 0x40/0x50/0x60、CSV 上传 0x70/0x71、WiFi 凭据 0x20/0x03、PC13 做 IRQ、删除 PC2/C3RESET 硬复位。
+
+### 55.2 硬件与 GPIO
+
+| 项 | 变更 |
+|------|------|
+| SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI)，CS=PE3 |
+| ESP32 IRQ | PC13，EXTI15_10 下降沿，GPIO_PULLUP |
+| ESP32 RST | 删除 PC2/C3RESET；`ESP_HardReset()` 移除 |
+| pnp_1.ioc | PC13 由 `GPIO_Output/C3RESET` 改为 `GPIO_EXTI13/ESP_IRQ` |
+
+### 55.3 帧格式与命令
+
+- 固定 128 字节：`CMD(1B) + SUBCMD(1B) + LEN(1B) + PAYLOAD(123B) + SEQ(1B) + RESERVED(1B)`。
+- `CMD=0x70` 的 DATA 帧前 2 字节为小端帧号，其后为原始 CSV 字节，必须按 LEN 精确提取，禁止按字符串或 0x00 截断。
+- 命令：0x10 数据更新 / 0x20 系统控制 / 0x30 状态查询 / 0x40 贴片流程 / 0x50 日志 / 0x60 加热台 / 0x70 CSV 上传 / 0x71 文件回执。
+
+### 55.4 双向通信与保护
+
+- 场景 A：主动下发前检查 IRQ，IRQ 高才发送；发送后延时 2ms 并再次检查 IRQ。
+- 场景 B：EXTI ISR 只置 `esp32_irq_flag`，`ESP_Task` 发送全 0xFF 哑元从 MISO 读取 ESP 数据，延时 2ms 后清标志。
+- CS 拉低后 100ms 未完成传输则强制拉高；任务层所有 `ESP_SPI_Transfer()` 调用检查返回值并报异常。
+- `0x30` 回复天然晚一轮，通过 SEQ 映射表匹配。
+
+### 55.5 CSV 上传与回执
+
+- `0x70/0x01 START`：解析 `len/frames/crc32`，保存会话参数，回 `RESULT(ok/fail:<code>)`。
+- `0x70/0x02 DATA`：校验帧号连续性，按 LEN 精确写入 W25Q64 `0x100000` 128KB 区，每帧回 `NEXT(期望帧号)`。
+- `0x70/0x03 END`：校验总长度、帧数、CRC32，成功才导入 Host CSV，失败回 `fail:1/2/3/4`。
+- 文件会话期间不主动发送 0x30/0x50 等无关帧；W25Q64 公共接口继续由 `w25q64_mutex` 保护。
+
+### 55.6 日志与 WiFi
+
+- PnP 各步骤通过 `ESP_SendLog()` 入队，`ESP_Task` 发送 `0x50/0x01`。
+- `WIFI_ON`（0x20/0x01）仍用于使用当前凭据连接；`WIFI_CONNECT`（0x20/0x03）透传 `SSID\0PASSWORD` 并立即切换连接。
+
+### 55.7 代码变更
+
+| 文件 | 变更 |
+|------|------|
+| `Task/app_esp_task.c/h` | 场景 A/B、SEQ、CSV 会话、WiFi 凭据队列、日志发送、超时处理 |
+| `Task/app_host.c/h` | PnP 日志、`Host_CsvImportAbort()`、`WIFI_CONNECT` 透传 |
+| `Drivers/ZeMCU-G4/driver_esp32.c/h` | 删除 PC2/RST，PC13 EXTI，100ms CS 超时拉高 |
+| `Core/Src/gpio.c`、`Core/Inc/main.h` | 删除 C3RESET，PC13 配置 EXTI |
+| `Core/Src/stm32g4xx_it.c` | EXTI15_10 保留置标志，EXTI2 不再用于 ESP32 |
+| `Core/Src/app_freertos.c` | `esp_wifi_cfg_queue`、日志队列 32、`ESP_Task` 栈 4096 |
+| `pnp_1.ioc` | PC13 改为 EXTI13/ESP_IRQ |
+
+### 55.8 验证
+
+- [x] ARM GCC 14.3.1 `-fsyntax-only` 通过。
+- [x] Ninja 构建目录完成 36 个目标文件编译，并链接出 `pnp_check.elf`。
+- [ ] Keil UV4 全量编译待用户环境验证。
+- [ ] ESP32 端真机联调待硬件确认。
+
+### 55.9 文档同步
+
+- `AGENTS.md`：硬件表、GPIO 速查、任务表、§4.5 WIFI_CONNECT 状态更新，新增 §4.6 ESP32 SPI v3.1。
+- `HISTORY.md`：追加本节；§15/§34/§49 为历史记录，以本节和 AGENTS.md 当前状态为准。
+
+> **校正（2026-08-06）：** §55 为首次实现记录；后续对照 v3.1 文档的复核与修复见 §57。
+
+## 五十六、2026-08-05/06 会话 — GUI SPI v1.6 协议升级与握手诊断
+
+### 56.1 背景
+
+- 按《01-GUI通信接口清单 v1.6》升级主控端 G4 SPI2 ↔ G0B1 GUI 通信接口层，保留现有运动/贴装业务逻辑。
+- 原 `Task/app_gui_spi.c/h` 为 SPI v1.5 风格：PD8 曾作 INT、使用 `HAL_SPI_Receive`、≤128 字节、首个 0x00 停止解析。
+
+### 56.2 硬件与协议变化
+
+- 引脚：SPI2 PB13(SCK)/PB14(MISO)/PB15(MOSI)，CS=PD10；DATA_RDY=PD8（主控→GUI，低有效）；REQ_TX=PD9（GUI→主控，低有效）；IRQ=PB12（当前恒高，禁止业务响应）。
+- SPI2 Mode0、8-bit MSB、10.625MHz；固定 128 字节/事务；命令以 `\n` 结束，之后 `0x00` 填充。
+- 发送：DATA_RDY 低 → CS 低 → ≥1µs → 128B → CS 高 → DATA_RDY 高 → ≥100µs。
+- 接收：≤10ms 轮询 REQ_TX；低时拉低 CS 并产生 128 字节时钟读 MISO；REQ_TX 仍低则继续读，变高表示队列空。
+- 握手：GUI 发 `HANDSHAKE_REQ\n`（1s 重试，最多 10 次），主控解析后立即回 `HANDSHAKE_ACK\n`，重复回 ACK 无害。
+- 未识别命令静默忽略；LOG 限速 ≤20 条/秒；温度仍约 1s 一次。
+
+### 56.3 代码变更
+
+| 文件 | 变更 |
+|------|------|
+| `Task/app_gui_spi.c/h` | 新增 `GUI_Send()` / `GUI_Poll()`；固定 128 字节帧；`HAL_SPI_TransmitReceive`；REQ_TX 低有效轮询；`HANDSHAKE_REQ` 即时回 ACK；每帧解析、未知命令忽略；LOG 20 条/秒限速；`GUI_SPI_Task` 按 ≤10ms 调用 `GUI_Poll()` |
+| `Task/app_uart_parser.c/h` | `parse_cmd()` 按首个空格或冒号切分；新增 `HCMD_HANDSHAKE_REQ` |
+| `Task/app_host.c` | 未改业务逻辑；现有 `gui_process_cmd` 继续消费 GUI 命令 |
+
+### 56.4 握手诊断日志
+
+- `[GUI] SPI task started, polling REQ_TX`：任务已启动。
+- `[GUI] REQ_TX LOW/HIGH`：请求线状态变化。
+- `[GUI] RX8: ...`：每次读取后的前 8 字节原始数据。
+- `[GUI] RX parse fail...`：未找到 `\n` 或未知命令；前 3 次必打，之后每 100 次打一次。
+- `[GUI] RX cmd=... raw=...`：解析成功。
+- `[GUI] HANDSHAKE_REQ received, ACK send called`：进入握手应答分支。
+- `[GUI] SPI2 TX/RX err=...`：HAL 收发错误。
+- `[GUI] REQ_TX released before SPI read`：REQ_TX 在读事务前已变高。
+
+### 56.5 实机诊断
+
+- 日志表现：REQ_TX 持续低，主控连续读约 33 秒，`RX8` 全 0，`bad=33300`。
+- 结论：主控读时序正常，但 G0B1/MISO 数据链路未返回有效数据；不是解析或 ACK 逻辑问题。
+- 排查方向：PB14 ↔ G0B1 SPI 从机数据输出接线、共地、G0B1 SPI1 从机初始化/Mode0、逻辑分析仪观察 CS/SCK/MISO、PB14 临时上拉区分悬空。
+- 当前状态：待硬件/GUI 固件侧确认。
+
+### 56.6 验证
+
+- [x] ARMCLANG `-fsyntax-only` 通过：`app_uart_parser.c`、`app_gui_spi.c`、`app_host.c`、`app_freertos.c`。
+- 本次发现 `E:\Keil_v5\ARM\ARMCLANG\Bin\armclang.exe` 可用；§54.7 中“本机无 ARMCLANG”的描述已不适用。
+- 完整 Keil 链接未运行。
+
+### 56.7 文档同步
+
+- `AGENTS.md`：硬件表、§4.5、§10.1 GPIO 速查更新为 v1.6。
+- `HISTORY.md`：§49 增加 v1.6 校正；追加本节。
+
+## 五十七、2026-08-06 会话 — ESP32 SPI v3.1 代码复核与修复
+
+### 57.1 背景
+
+- 对照 `E:/聊天记录/通讯接口(ESP与主控) (2).md`（v3.1）复核主控端 ESP32 SPI 实现，发现 CSV 上传主链路、WiFi 凭据透传和状态上报存在缺陷。
+- 本轮只修改主控端，不改 ESP32 端、运动控制、视觉识别等其他模块。
+
+### 57.2 修复项
+
+| 项 | 修复 |
+|------|------|
+| CSV START/END 解析 | `ESP_ParseCsvStart/End` 返回 `1=成功`，原 `!= 0` 误判合法帧为失败；改为 `== 0` 判断失败 |
+| WiFi SSID/密码校验 | 取消 SSID 仅数字限制；SSID 1~32 字节、密码 8~63 字节，仅拒绝控制字符、逗号、CR/LF |
+| WiFi 周期上报 | `WIFI_CONNECT (0x20/0x03)` 发送成功后置 `g_esp_wifi_enabled=1` |
+| 完成状态 | 新增 `Host_IsSmtFinished()`，`0x10/0x02` 在 `HOST_DONE` 时上报 `Finished` |
+| CSV 会话超时 | 文件会话空闲 5 秒自动复位并回 `fail:4` |
+| 场景 A MISO | 新增 `_handle_esp_rx()`，场景 A/B 共用 ESP→STM32 命令分发 |
+| PnP 日志 | 补充 `mark点识别失败`、`达到预定温度`、`结束` |
+| 重复开始日志 | `Host_FinishCsvImport()` 不再提前写 `LOG_PNP_START`，避免与 `download_done()` 重复 |
+
+### 57.3 决策与限制
+
+- **`0x71` 回执时序：** 文档写“同帧 MOSI 回执”，当前主控采用“读帧后下一事务回执”。核对 `SPI_web_test_1.ino` 后确认 ESP32 端事务完成后拉高 IRQ，再接收下一轮 `0x71`，两事务流程与现有 ESP32 实现兼容，因此未强行改为同帧。
+- **UTF-16 CSV：** 帧级接收和 CRC 按原始字节处理，但主控 `parse_csv_line()` 仍按 UTF-8 文本解析，UTF-16/含 `0x00` 文件尚不能可靠导入，待后续按原始字节/UTF-16 改造解析器。
+- **队列：** 日志和 WiFi 凭据队列仍为非阻塞入队，满时可能静默丢弃。
+- **CubeMX 属性：** `pnp_1.ioc` 尚未补 PC13 上拉与 PE3 高速输出属性，重新生成可能丢失手改配置。
+
+### 57.4 验证
+
+- [x] ARM GCC 14.3.1 `-fsyntax-only` 通过。
+- [x] Ninja 重新编译变更目标文件通过。
+- [x] 手动 ARM ELF 链接通过：RAM 66744B / 128KB，FLASH 192472B / 512KB。
+- [ ] Keil UV4 全量编译待用户环境验证。
+- [ ] ESP32 端真机联调待硬件确认。
+
+### 57.5 文档同步
+
+- `AGENTS.md`：§4.5 WIFI_CONNECT 校验描述更新；§4.6 补充 CSV 超时、Finished、WiFi 启用状态、场景 A 分发、已知限制；参考文档改为 `(2).md`。
+- `HISTORY.md`：追加本节；§55 为首次实现记录，复核与修复以 §57 为准。

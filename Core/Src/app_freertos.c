@@ -44,6 +44,11 @@ osMessageQueueId_t motion_cmd_queue;
 extern osMessageQueueId_t gui_cmd_queue;
 osMutexId_t g_debug_mutex = NULL;
 osMessageQueueId_t esp_cmd_queue;
+osMessageQueueId_t esp_log_queue;
+osMessageQueueId_t esp_web_cmd_queue;
+osMessageQueueId_t esp_wifi_cfg_queue;
+osMutexId_t esp_spi_mutex;
+osMutexId_t w25q64_mutex;
 osMessageQueueId_t host_pkt_queue;
 /* USER CODE END PTD */
 
@@ -140,7 +145,7 @@ const osThreadAttr_t pickPlaceTestTask_attributes = {
 
 const osThreadAttr_t espTask_attributes = {
     .name = "ESP32",
-    .stack_size = 512,
+    .stack_size = 4096,
     .priority = osPriorityNormal,
 };
 
@@ -193,6 +198,8 @@ void MX_FREERTOS_Init(void) {
 
   /* USER CODE BEGIN RTOS_MUTEX */
   g_debug_mutex = osMutexNew(NULL);
+  esp_spi_mutex = osMutexNew(NULL);
+  w25q64_mutex = osMutexNew(NULL);
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
 
@@ -213,6 +220,9 @@ void MX_FREERTOS_Init(void) {
 	gui_spi_mutex = osMutexNew(NULL);
 	host_pkt_queue = osMessageQueueNew(64, sizeof(HostMsg_t), NULL);
 	esp_cmd_queue = osMessageQueueNew(8, sizeof(ESP_Cmd_t), NULL);
+	esp_web_cmd_queue = osMessageQueueNew(8, sizeof(ESP_Cmd_t), NULL);
+	esp_log_queue = osMessageQueueNew(32, sizeof(ESP_LogMsg_t), NULL);
+	esp_wifi_cfg_queue = osMessageQueueNew(2, sizeof(ESP_WifiCfgMsg_t), NULL);
 	
 	
   /* USER CODE END RTOS_QUEUES */

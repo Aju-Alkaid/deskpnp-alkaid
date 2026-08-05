@@ -25,7 +25,6 @@
 #include "driver_uart.h"
 #include "stm32g4xx_ll_tim.h"
 #include "driver_esp32.h"
-#include "app_gui_spi.h"
 /* USER CODE END Includes */
 
 /* Private typedef -----------------------------------------------------------*/
@@ -405,40 +404,34 @@ void DMA2_Channel1_IRQHandler(void)
 /* USER CODE BEGIN 1 */
 
 /**
-  * @brief This function handles EXTI line 2 interrupt (ESP32 IRQ).
+  * @brief This function handles EXTI line 2 interrupt (no longer used by ESP32).
   *
-  * ESP32 GPIO13 -> STM32 PC2 (下降沿中断)
-  * 场景 B: ESP32 有网页命令待上报 -> 拉低 IRQ -> 触发此 ISR
-  * ISR 中仅置标志位，实际处理在 ESP_Task 主循环中执行。
+  * ESP32 IRQ is PC13 / EXTI15_10; no hardware reset wire.
   */
 void EXTI2_IRQHandler(void)
 {
-  /* USER CODE BEGIN EXTI2_IRQn 0 */
+  /* No-op: PC2 is not used by ESP32. */
+}
+
+/**
+  * @brief This function handles EXTI lines 10 to 15 (ESP32 IRQ PC13).
+  *
+  * ISR only sets flag; actual processing runs in ESP_Task.
+  */
+void EXTI15_10_IRQHandler(void)
+{
   esp32_irq_flag = 1;
-  /* USER CODE END EXTI2_IRQn 0 */
   HAL_GPIO_EXTI_IRQHandler(ESP_IRQ_Pin);
-  /* USER CODE BEGIN EXTI2_IRQn 1 */
-  /* 不在此处处理业务逻辑，由 ESP_Task 轮询 esp32_irq_flag */
-  /* USER CODE END EXTI2_IRQn 1 */
 }
 
 
 /**
-  * @brief This function handles EXTI lines 5 to 9 (GUI INT, PD8).
+  * @brief This function handles EXTI lines 5 to 9.
+  *        SPI v1.5: PD8 is DATA_RDY output, no GUI EXTI used.
   */
 void EXTI9_5_IRQHandler(void)
 {
-  HAL_GPIO_EXTI_IRQHandler(GUI_SPI_INT_PIN);
-}
-
-/**
-  * @brief GPIO EXTI callback: route GUI INT line to app_gui_spi.
-  */
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
-{
-  if (GPIO_Pin == GUI_SPI_INT_PIN) {
-    GUI_SPI_IntCallback(GPIO_Pin);
-  }
+  /* retained for startup vector; PD8 no longer generates EXTI */
 }
 
 /*******************************************************************************

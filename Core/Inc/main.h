@@ -59,8 +59,6 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define SPI4_CS_Pin GPIO_PIN_3
 #define SPI4_CS_GPIO_Port GPIOE
-#define C3RESET_Pin GPIO_PIN_13
-#define C3RESET_GPIO_Port GPIOC
 #define TEMP_DAT_Pin GPIO_PIN_9
 #define TEMP_DAT_GPIO_Port GPIOF
 #define NRST_Pin GPIO_PIN_10

@@ -45,6 +45,7 @@ typedef enum {
     HCMD_SET_R_ZERO,          // R 轴当前位置 = 0deg
     HCMD_R_CALIB,             // R 轴编码器自动校准
     HCMD_MSCNT_TEST,          /* MSCNT 原始值采样诊断 */
+    HCMD_ESP_CS_HIGH_TEST,    /* 诊断: ESP32 CS 高电平保持测试 */
    HCMD_SET_CAM_OFFSET,     // 上摄像头à吸嘴偏置标定 (两步)
     HCMD_SAVE_CALIB,          // 保存标定值到 Flash
     HCMD_RESTORE_CALIB,       // 恢复标定值（调试用）
@@ -62,8 +63,12 @@ typedef enum {
     HCMD_LIGHT_OFF,           // GUI: 补光灯关
     HCMD_WIFI_CONNECT,        // GUI: WIFI_CONNECT:<ssid>,<password>
     HCMD_WIFI_DISCONNECT,     // GUI: WIFI_DISCONNECT
+    HCMD_WIFI_ON,             // 上位机: WIFI_ON 打开WiFi
+    HCMD_WIFI_OFF,            // 上位机: WIFI_OFF 关闭WiFi
+    HCMD_ESP_CS_LOW_TEST,     // 诊断: ESP_CS_LOW_TEST 保持CS低电平并回读
     HCMD_IMPORT_ENTER,        // GUI: 进入导入模式
     HCMD_IMPORT_EXIT,         // GUI: 退出导入模式
+    HCMD_HANDSHAKE_REQ,       // GUI: 上电握手
     /* 未知命令 */
     HCMD_UNKNOWN
 } HostCmd_t;

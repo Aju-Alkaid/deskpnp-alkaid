@@ -2,6 +2,9 @@
 #define _DRIVER_SPIFLASH_W25Q64_H
 
 #include <stdint.h>
+#include "cmsis_os2.h"
+
+extern osMutexId_t w25q64_mutex;
 
 void W25Q64_Init(void);
 int W25Q64_Read(uint32_t offset, uint8_t *buf, uint32_t len);

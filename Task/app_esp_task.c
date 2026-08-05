@@ -22,6 +22,8 @@
 #include "app_test.h"                            /* PrintDebug */
 #include "app_gui_spi.h"             /* now_SMT, total_SMT */
 #include "driver_heater.h"                       /* Heater_GetCurrentStatus */
+#include "app_host.h"
+#include "driver_spiflash_w25q64.h"
 #include <string.h>
 
 /* ================================================================
@@ -50,6 +52,43 @@ static uint8_t s_no_resp_count;      /* 连续无响应计数 */
 static uint16_t s_last_temp;         /* 上次发送的温度 (0.1°C) */
 static uint32_t s_last_heartbeat_tick;
 
+/* CSV upload */
+#define ESP_CSV_FLASH_BASE        0x100000U
+#define ESP_CSV_FLASH_SIZE        (128U * 1024U)
+#define ESP_CSV_MAX_FILE_SIZE     (100U * 1024U)
+#define ESP_CSV_SECTOR_SIZE       4096U
+#define ESP_CSV_READ_CHUNK        512U
+#define ESP_CSV_LINE_MAX          2048U
+#define ESP_CSV_SESSION_TIMEOUT_MS 5000U
+#define ESP_CSV_STATE_IDLE        0
+#define ESP_CSV_STATE_RECEIVING   1
+#define ESP_SEQ_SLOT_COUNT        8
+
+/* CSV upload session */
+static uint8_t  s_csv_state;
+static uint32_t s_csv_total_len;
+static uint32_t s_csv_received;
+static uint16_t s_csv_expected_frame;
+static uint16_t s_csv_total_frames;
+static uint32_t s_csv_running_crc;
+static uint32_t s_csv_last_sector;
+static uint32_t s_csv_last_frame_tick;
+static uint8_t  s_csv_line[ESP_CSV_LINE_MAX];
+static uint16_t s_csv_line_len;
+
+/* Scene B re-entrancy guard */
+static uint8_t s_in_scene_b;
+
+/* 8-slot SEQ mapping */
+typedef struct {
+    uint8_t seq;
+    uint8_t cmd;
+    uint8_t sub;
+    uint8_t used;
+} ESP_SeqSlot_t;
+static ESP_SeqSlot_t s_seq_slots[ESP_SEQ_SLOT_COUNT];
+static uint8_t s_seq_slot_next;
+
 /* ---- 数据字段轮询表 ---- */
 #define RR_PROGRESS       0
 #define RR_SMT_STATUS     1
@@ -68,9 +107,23 @@ static void _handle_fault_response(const char *payload, uint8_t len);
 static void _handle_wifi_response(const char *payload, uint8_t len);
 static void _handle_compound_response(const char *payload, uint8_t len);
 
+static void _csv_handle_frame(const uint8_t *rx);
+static void _csv_reset_session(void);
+static void _csv_send_result(const char *result);
+static void _csv_send_next(uint16_t next_frame);
+static void _csv_send_cancel_ack(void);
+static int  _csv_import_file(uint32_t total_len);
+static void _seq_register(uint8_t cmd, uint8_t sub);
+static void _seq_remove(uint8_t index);
+static uint8_t _seq_find(uint8_t seq);
+static void _seq_remove_by_seq(uint8_t seq);
+
 /* ★ v2 新增 */
 static void _scene_b_read(void);       /* 场景 B: 读取 ESP→STM32 命令 */
 static void _check_irq_and_read(void); /* IRQ 互斥检查 + 场景 B 执行  */
+static void _process_rx(const uint8_t *rx);
+static void _handle_esp_rx(const uint8_t *rx);
+static uint8_t _spi_send_scene_a(uint8_t *tx, uint8_t allow_csv_frame);
 
 /* ================================================================
  *  ESP_SendCommand — 便捷接口 (不变)
@@ -85,80 +138,111 @@ void ESP_SendCommand(ESP_Cmd_t cmd)
 /* ================================================================
  *  ESP_SendLog — 发送日志到 ESP32 (CMD_LOG_DATA 0x50) ★ v2 新增
  *
- *  Host_Task 在执行 SMT 步骤时调用，每条日志触发一次 SPI 传输。
- *  使用独立的局部缓冲区避免与 ESP_Task 主循环的 s_tx_buf 冲突。
- *  发送前检查 IRQ 互斥（场景 B 优先）。
+ *  Host_Task 在执行 SMT 步骤时调用，非阻塞入队。
+ *  ESP_Task 主循环统一构建 0x50/0x01 帧并执行 SPI 收发。
  * ================================================================ */
 void ESP_SendLog(const char *text)
 {
-    uint8_t tx_buf[128];
-    uint8_t rx_buf[128];
+    ESP_LogMsg_t msg;
+    size_t len;
 
-    if (text == NULL) return;
+    if (text == NULL || esp_log_queue == NULL) return;
 
-    ESP_BuildLogPacket(tx_buf, text);
+    len = strlen(text);
+    if (len > sizeof(msg.text)) len = sizeof(msg.text);
+    msg.len = (uint8_t)len;
+    memcpy(msg.text, text, len);
 
-    /* IRQ 互斥: 先检查是否有 ESP 待发数据 */
-    _check_irq_and_read();
-
-    /* SPI 全双工收发 */
-    ESP_SPI_Transfer(tx_buf, rx_buf);
-
-    /* 简单处理响应 (不重复解析场景 B 命令) */
-    if (rx_buf[0] == 0x00) {
-        uint8_t rt = ESP_GetResponseType(rx_buf);
-        if (rt != ESP_RESP_IDLE) {
-            g_esp_last_rx_tick = osKernelGetTickCount();
-        }
-    }
+    osMessageQueuePut(esp_log_queue, &msg, 0, 0);
 }
 
-/* ================================================================
- *  场景 B: 读取 ESP→STM32 主动上报的命令 ★ v2 新增
- *
- *  文档 §5.2: ESP32 拉低 IRQ → STM32 发送哑元帧 (全 0xFF)
- *  → 从 MISO 读取 ESP 数据 → 延时 2ms → ESP 拉高 IRQ
- * ================================================================ */
-static void _scene_b_read(void)
+void ESP_SendWifiConnect(const char *ssid, uint16_t ssid_len,
+                         const char *password, uint16_t password_len)
 {
-    uint8_t dummy[128];
-    uint8_t rx[128];
-    uint8_t cmd, sub;
+    ESP_WifiCfgMsg_t msg;
 
-    /* 发送全 0xFF 哑元帧 */
-    memset(dummy, 0xFF, 128);
-    ESP_SPI_Transfer(dummy, rx);
+    if (ssid == NULL || password == NULL || esp_wifi_cfg_queue == NULL) return;
+    if (ssid_len == 0U || ssid_len > 32U ||
+        password_len < 8U || password_len > 63U) return;
 
-    /* 延时 2ms 防抖 (文档 §5.2) */
-    osDelay(2);
+    msg.len = (uint8_t)(ssid_len + 1U + password_len);
+    memcpy(msg.payload, ssid, ssid_len);
+    msg.payload[ssid_len] = 0;
+    memcpy(&msg.payload[ssid_len + 1U], password, password_len);
+    osMessageQueuePut(esp_wifi_cfg_queue, &msg, 0, 0);
+}
 
-    /* 解析 ESP→STM32 命令 */
-    cmd = ESP_GetCmd(rx);
-    if (cmd != ESP_CMD_PROCESS_CTRL && cmd != ESP_CMD_HEATER_CTRL) {
-        return; /* 非有效命令，静默忽略 */
+/* 统一分发 ESP→STM32 帧，场景 B 与场景 A MISO 共用。 */
+static void _handle_esp_rx(const uint8_t *rx)
+{
+    uint8_t cmd = ESP_GetCmd(rx);
+    uint8_t sub = ESP_GetSubCmd(rx);
+    uint8_t handled = 1;
+    ESP_Cmd_t web_cmd;
+
+    if (cmd == ESP_CMD_CSV_UPLOAD) {
+        _csv_handle_frame(rx);
     }
-
-    sub = ESP_GetSubCmd(rx);
-
-    if (cmd == ESP_CMD_PROCESS_CTRL) {
+    else if (cmd == ESP_CMD_PROCESS_CTRL) {
         switch (sub) {
             case ESP_SUB_PROC_START:  g_esp_web_cmd = ESP_CMD_PROC_START;  break;
             case ESP_SUB_PROC_PAUSE:  g_esp_web_cmd = ESP_CMD_PROC_PAUSE;  break;
             case ESP_SUB_PROC_RESUME: g_esp_web_cmd = ESP_CMD_PROC_RESUME; break;
             case ESP_SUB_PROC_STOP:   g_esp_web_cmd = ESP_CMD_PROC_STOP;   break;
             case ESP_SUB_PROC_ESTOP:  g_esp_web_cmd = ESP_CMD_PROC_ESTOP;  break;
-            default: return;
+            default: handled = 0; break;
         }
-        g_esp_web_cmd_pending = 1;
-        PrintDebug("[ESP] Scene B: Web PROC cmd 0x%02X\r\n", sub);
+        if (handled) {
+            g_esp_web_cmd_pending = 1;
+            web_cmd = g_esp_web_cmd;
+            if (esp_web_cmd_queue != NULL) {
+                osMessageQueuePut(esp_web_cmd_queue, &web_cmd, 0, 0);
+            }
+            PrintDebug("[ESP] Web PROC cmd 0x%02X\r\n", sub);
+        }
     }
     else if (cmd == ESP_CMD_HEATER_CTRL) {
         if (sub == ESP_SUB_HEAT_START)      g_esp_web_cmd = ESP_CMD_HEAT_START;
         else if (sub == ESP_SUB_HEAT_STOP)  g_esp_web_cmd = ESP_CMD_HEAT_STOP;
-        else return;
-        g_esp_web_cmd_pending = 1;
-        PrintDebug("[ESP] Scene B: Web HEATER cmd 0x%02X\r\n", sub);
+        else handled = 0;
+        if (handled) {
+            g_esp_web_cmd_pending = 1;
+            web_cmd = g_esp_web_cmd;
+            if (esp_web_cmd_queue != NULL) {
+                osMessageQueuePut(esp_web_cmd_queue, &web_cmd, 0, 0);
+            }
+            PrintDebug("[ESP] Web HEATER cmd 0x%02X\r\n", sub);
+        }
     }
+    else if (cmd == ESP_CMD_HEARTBEAT) {
+        _process_rx(rx);
+    }
+    else {
+        PrintDebug("[ESP] Unknown ESP cmd 0x%02X sub 0x%02X\r\n", cmd, sub);
+    }
+}
+
+static void _scene_b_read(void)
+{
+    uint8_t dummy[128];
+    uint8_t rx[128];
+
+    s_in_scene_b = 1;
+
+    memset(dummy, 0xFF, 128);
+    if (ESP_SPI_Transfer(dummy, rx) != HAL_OK) {
+        PrintDebug("[ESP] Scene B SPI error/timeout\r\n");
+        esp32_irq_flag = 0;
+        s_in_scene_b = 0;
+        return;
+    }
+
+    osDelay(2);
+    esp32_irq_flag = 0;
+
+    _handle_esp_rx(rx);
+
+    s_in_scene_b = 0;
 }
 
 /*
@@ -167,10 +251,349 @@ static void _scene_b_read(void)
  */
 static void _check_irq_and_read(void)
 {
+    if (s_in_scene_b) return;
     if (esp32_irq_flag || !ESP_CheckIRQ()) {
-        esp32_irq_flag = 0;
         _scene_b_read();
     }
+}
+
+/*
+ * 场景 A: 主动下发前先让场景 B 优先执行；
+ * IRQ 恢复高电平后才发送，发送后延时 2ms 并检查下一轮响应/IRQ。
+ */
+static uint8_t _spi_send_scene_a(uint8_t *tx, uint8_t allow_csv_frame)
+{
+    uint8_t attempts;
+
+    for (attempts = 0; attempts < 10U; attempts++) {
+        _check_irq_and_read();
+        if (!allow_csv_frame && s_csv_state == ESP_CSV_STATE_RECEIVING) {
+            return 0;
+        }
+        if (ESP_CheckIRQ()) break;
+        osDelay(1);
+    }
+
+    if (!ESP_CheckIRQ()) {
+        PrintDebug("[ESP] IRQ busy, scene A frame dropped\r\n");
+        return 0;
+    }
+    if (!allow_csv_frame && s_csv_state == ESP_CSV_STATE_RECEIVING) {
+        return 0;
+    }
+
+    if (ESP_SPI_Transfer(tx, s_rx_buf) != HAL_OK) {
+        PrintDebug("[ESP] Scene A SPI error/timeout\r\n");
+        return 0;
+    }
+
+    osDelay(2);
+    if (ESP_IsEspToStmCmd(s_rx_buf)) {
+        _handle_esp_rx(s_rx_buf);
+    } else {
+        _process_response();
+    }
+    _check_irq_and_read();
+    return 1;
+}
+
+static uint8_t _seq_find(uint8_t seq)
+{
+    uint8_t i;
+    for (i = 0; i < ESP_SEQ_SLOT_COUNT; i++) {
+        if (s_seq_slots[i].used && s_seq_slots[i].seq == seq) {
+            return i;
+        }
+    }
+    return 0xFFU;
+}
+
+static void _seq_remove(uint8_t index)
+{
+    if (index < ESP_SEQ_SLOT_COUNT) {
+        s_seq_slots[index].used = 0;
+    }
+}
+
+static void _seq_remove_by_seq(uint8_t seq)
+{
+    uint8_t slot = _seq_find(seq);
+    if (slot != 0xFFU) {
+        _seq_remove(slot);
+    }
+}
+
+static void _seq_register(uint8_t cmd, uint8_t sub)
+{
+    uint8_t i;
+    uint8_t seq = ESP_GetLastBuiltSeq();
+
+    for (i = 0; i < ESP_SEQ_SLOT_COUNT; i++) {
+        if (!s_seq_slots[i].used) {
+            s_seq_slots[i].seq = seq;
+            s_seq_slots[i].cmd = cmd;
+            s_seq_slots[i].sub = sub;
+            s_seq_slots[i].used = 1;
+            return;
+        }
+    }
+
+    i = s_seq_slot_next++;
+    s_seq_slot_next %= ESP_SEQ_SLOT_COUNT;
+    s_seq_slots[i].seq = seq;
+    s_seq_slots[i].cmd = cmd;
+    s_seq_slots[i].sub = sub;
+    s_seq_slots[i].used = 1;
+}
+
+static void _csv_reset_session(void)
+{
+    s_csv_state = ESP_CSV_STATE_IDLE;
+    s_csv_total_len = 0;
+    s_csv_total_frames = 0;
+    s_csv_received = 0;
+    s_csv_expected_frame = 0;
+    s_csv_running_crc = 0xFFFFFFFFU;
+    s_csv_last_sector = 0xFFFFFFFFU;
+}
+
+static void _csv_spi_send(uint8_t *tx)
+{
+    _spi_send_scene_a(tx, 1);
+}
+
+static void _csv_send_result(const char *result)
+{
+    uint8_t tx[128];
+    ESP_BuildFileResultPacket(tx, result);
+    _csv_spi_send(tx);
+}
+
+static void _csv_send_next(uint16_t next_frame)
+{
+    uint8_t tx[128];
+    ESP_BuildFileNextPacket(tx, next_frame);
+    _csv_spi_send(tx);
+}
+
+static void _csv_send_cancel_ack(void)
+{
+    uint8_t tx[128];
+    ESP_BuildFileCancelAckPacket(tx);
+    _csv_spi_send(tx);
+}
+
+static void _csv_line_push(uint8_t c)
+{
+    if (c == '\n') {
+        uint16_t out_len = s_csv_line_len;
+        if (out_len > 0 && s_csv_line[out_len - 1] == '\r') {
+            out_len--;
+        }
+        if (out_len > 0) {
+            if (out_len >= (uint16_t)sizeof(s_csv_line)) {
+                out_len = (uint16_t)sizeof(s_csv_line) - 1U;
+            }
+            s_csv_line[out_len] = '\0';
+            Host_ImportCsvLine((const char *)s_csv_line, out_len);
+        }
+        s_csv_line_len = 0;
+        return;
+    }
+
+    if (s_csv_line_len < ESP_CSV_LINE_MAX) {
+        s_csv_line[s_csv_line_len++] = c;
+    }
+}
+
+static int _csv_import_file(uint32_t total_len)
+{
+    uint8_t buf[ESP_CSV_READ_CHUNK];
+    uint32_t pos = 0;
+
+    s_csv_line_len = 0;
+
+    while (pos < total_len) {
+        uint32_t want = total_len - pos;
+        uint32_t i;
+        if (want > sizeof(buf)) want = sizeof(buf);
+        if (W25Q64_Read(ESP_CSV_FLASH_BASE + pos, buf, want) < 0) {
+            PrintDebug("[ESP] CSV flash read fail at %lu\r\n",
+                       (unsigned long)pos);
+            return -1;
+        }
+        for (i = 0; i < want; i++) {
+            _csv_line_push(buf[i]);
+        }
+        pos += want;
+    }
+
+    _csv_line_push('\n');
+    Host_FinishCsvImport();
+    return 0;
+}
+
+static void _csv_handle_frame(const uint8_t *rx)
+{
+    uint8_t sub = ESP_GetSubCmd(rx);
+    uint8_t len;
+    const uint8_t *payload = ESP_GetPayloadRaw(rx, &len);
+
+    if (len > ESP_PAYLOAD_MAX) {
+        _csv_reset_session();
+        _csv_send_result("fail:4");
+        return;
+    }
+    s_csv_last_frame_tick = osKernelGetTickCount();
+
+    if (sub == ESP_SUB_CSV_CANCEL) {
+        _csv_reset_session();
+        _csv_send_cancel_ack();
+        return;
+    }
+
+    if (sub == ESP_SUB_CSV_START) {
+        uint32_t total_len = 0;
+        uint16_t frames = 0;
+        uint32_t crc32 = 0;
+        uint32_t expect_frames;
+
+        _csv_reset_session();
+
+        if (ESP_ParseCsvStart(payload, len, &total_len, &frames, &crc32) == 0 ||
+            total_len > ESP_CSV_MAX_FILE_SIZE ||
+            total_len > ESP_CSV_FLASH_SIZE) {
+            _csv_send_result("fail:4");
+            return;
+        }
+
+        expect_frames = (total_len + 120U) / 121U;
+        if (frames != expect_frames) {
+            _csv_send_result("fail:4");
+            return;
+        }
+
+        s_csv_state = ESP_CSV_STATE_RECEIVING;
+        s_csv_total_len = total_len;
+        s_csv_total_frames = frames;
+        _csv_send_result("ok");
+        return;
+    }
+
+    if (s_csv_state != ESP_CSV_STATE_RECEIVING) {
+        _csv_reset_session();
+        _csv_send_result("fail:3");
+        return;
+    }
+
+    if (sub == ESP_SUB_CSV_DATA) {
+        uint16_t frame;
+        uint8_t data_len;
+        const uint8_t *data;
+        uint32_t new_received;
+        uint32_t write_addr;
+        uint32_t remain;
+
+        if (len < 2U) {
+            _csv_reset_session();
+            _csv_send_result("fail:3");
+            return;
+        }
+
+        frame = (uint16_t)(payload[0] | ((uint16_t)payload[1] << 8));
+        data_len = (uint8_t)(len - 2U);
+        if (data_len > 121U) {
+            _csv_reset_session();
+            _csv_send_result("fail:3");
+            return;
+        }
+        data = payload + 2U;
+        new_received = s_csv_received + data_len;
+
+        if (frame != s_csv_expected_frame) {
+            _csv_reset_session();
+            _csv_send_result("fail:3");
+            return;
+        }
+
+        if (new_received > s_csv_total_len ||
+            new_received > ESP_CSV_MAX_FILE_SIZE ||
+            new_received > ESP_CSV_FLASH_SIZE) {
+            _csv_reset_session();
+            _csv_send_result("fail:4");
+            return;
+        }
+
+        write_addr = ESP_CSV_FLASH_BASE + s_csv_received;
+        remain = data_len;
+        while (remain > 0U) {
+            uint32_t sector = write_addr / ESP_CSV_SECTOR_SIZE;
+            uint32_t chunk;
+            if (sector != s_csv_last_sector) {
+                if (W25Q64_Erase(sector * ESP_CSV_SECTOR_SIZE,
+                                 ESP_CSV_SECTOR_SIZE) < 0) {
+                    _csv_reset_session();
+                    _csv_send_result("fail:4");
+                    return;
+                }
+                s_csv_last_sector = sector;
+            }
+            chunk = ESP_CSV_SECTOR_SIZE -
+                    (write_addr % ESP_CSV_SECTOR_SIZE);
+            if (chunk > remain) chunk = remain;
+            if (W25Q64_Write(write_addr, (uint8_t *)data, chunk) < 0) {
+                _csv_reset_session();
+                _csv_send_result("fail:4");
+                return;
+            }
+            write_addr += chunk;
+            data += chunk;
+            remain -= chunk;
+        }
+
+        s_csv_running_crc = ESP_CRC32_Update(s_csv_running_crc,
+                                             payload + 2U, data_len);
+        s_csv_received = new_received;
+        s_csv_expected_frame++;
+        _csv_send_next(s_csv_expected_frame);
+        return;
+    }
+
+    if (sub == ESP_SUB_CSV_END) {
+        uint32_t crc32 = 0;
+        uint32_t total_len;
+
+        if (ESP_ParseCsvEnd(payload, len, &crc32) == 0) {
+            _csv_reset_session();
+            _csv_send_result("fail:2");
+            return;
+        }
+
+        if (s_csv_received != s_csv_total_len ||
+            s_csv_expected_frame != s_csv_total_frames) {
+            _csv_reset_session();
+            _csv_send_result("fail:2");
+            return;
+        }
+
+        if (ESP_CRC32_Finish(s_csv_running_crc) != crc32) {
+            _csv_reset_session();
+            _csv_send_result("fail:1");
+            return;
+        }
+
+        total_len = s_csv_total_len;
+        _csv_reset_session();
+        if (_csv_import_file(total_len) == 0) {
+            _csv_send_result("ok");
+        } else {
+            Host_CsvImportAbort();
+            _csv_send_result("fail:4");
+        }
+        return;
+    }
+
+    PrintDebug("[ESP] Unknown CSV sub=0x%02X\r\n", sub);
 }
 
 /* ================================================================
@@ -179,13 +602,13 @@ static void _check_irq_and_read(void)
 void ESP_Task(void *argument)
 {
     ESP_Cmd_t cmd;
+    ESP_LogMsg_t log_msg;
 
     /* ---- 初始化 ---- */
-    ESP_GPIO_Init();                  /* CS=HIGH, RST=HIGH, IRQ EXTI */
-    ESP_HardReset();                  /* 硬件复位 ESP32 */
-    osDelay(1000);                    /* 等待 ESP32 启动完成 */
+    ESP_GPIO_Init();                  /* CS=HIGH, IRQ EXTI (v3.1 无 RST) */
+    osDelay(200);                     /* 等待 ESP32 SPI 从机就绪 */
 
-    PrintDebug("[ESP] Task started v2 (IRQ enabled, waiting for WiFi open)\r\n");
+    PrintDebug("[ESP] Task started v3.1 (IRQ enabled, waiting for WiFi open)\r\n");
 
     /* ---- 主循环 ---- */
     for (;;) {
@@ -195,18 +618,64 @@ void ESP_Task(void *argument)
          */
         _check_irq_and_read();
 
+        if (s_csv_state == ESP_CSV_STATE_RECEIVING) {
+            while (s_csv_state == ESP_CSV_STATE_RECEIVING) {
+                _check_irq_and_read();
+                if (s_csv_state != ESP_CSV_STATE_RECEIVING) break;
+                if ((osKernelGetTickCount() - s_csv_last_frame_tick) >=
+                    ESP_CSV_SESSION_TIMEOUT_MS) {
+                    PrintDebug("[ESP] CSV session timeout, reset\r\n");
+                    _csv_reset_session();
+                    _csv_send_result("fail:4");
+                    break;
+                }
+                osDelay(1);
+            }
+            continue;
+        }
+
         /*
          * 步骤2: 阻塞等待 500ms 轮询超时 或 esp_cmd_queue 有新命令
          */
-        uint32_t flags = osThreadFlagsWait(0x01, osFlagsWaitAny,
-                                           pdMS_TO_TICKS(500));
+        osThreadFlagsWait(0x01, osFlagsWaitAny, pdMS_TO_TICKS(500));
 
         /*
          * 步骤3: 优先处理控制命令队列 (不阻塞，一次处理所有积压)
          */
         while (osMessageQueueGet(esp_cmd_queue, &cmd, NULL, 0) == osOK) {
             _process_control_cmd(cmd);
-            _process_response();
+        }
+
+        /* v3.1 0x20/0x03: 下发 SSID\0PASSWORD 凭据 */
+        {
+            ESP_WifiCfgMsg_t wifi_cfg;
+            while (esp_wifi_cfg_queue != NULL &&
+                   osMessageQueueGet(esp_wifi_cfg_queue, &wifi_cfg, NULL, 0) == osOK) {
+                ESP_BuildControlPacketEx(s_tx_buf, ESP_SUB_WIFI_CONNECT,
+                                         wifi_cfg.payload, wifi_cfg.len);
+                _seq_register(ESP_CMD_SYS_CONTROL, ESP_SUB_WIFI_CONNECT);
+                if (_spi_send_scene_a(s_tx_buf, 0)) {
+                    g_esp_wifi_enabled = 1;
+                } else {
+                    _seq_remove_by_seq(ESP_GetLastBuiltSeq());
+                }
+            }
+        }
+
+        for (;;) {
+            uint8_t text[124];
+            uint8_t copy_len;
+
+            _check_irq_and_read();
+            if (s_csv_state == ESP_CSV_STATE_RECEIVING) break;
+            if (osMessageQueueGet(esp_log_queue, &log_msg, NULL, 0) != osOK) break;
+
+            copy_len = log_msg.len;
+            if (copy_len > 123) copy_len = 123;
+            memcpy(text, log_msg.text, copy_len);
+            text[copy_len] = 0;
+            ESP_BuildLogPacket(s_tx_buf, (const char *)text);
+            _spi_send_scene_a(s_tx_buf, 0);
         }
 
         /*
@@ -218,9 +687,7 @@ void ESP_Task(void *argument)
             if ((now - s_last_heartbeat_tick) >= pdMS_TO_TICKS(30000)) {
                 s_last_heartbeat_tick = now;
                 ESP_BuildHeartbeatPacket(s_tx_buf);
-                _check_irq_and_read();
-                ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-                _process_response();
+                _spi_send_scene_a(s_tx_buf, 0);
             }
         } else {
             /* WiFi 已开启: 轮询分时发送数据字段 */
@@ -230,16 +697,7 @@ void ESP_Task(void *argument)
                 s_round_robin_index = 0;
             }
 
-            /*
-             * ★ 场景 A 传输前 IRQ 互斥检查
-             * IRQ 低 → 优先场景 B → 发哑元帧读 ESP 命令
-             * IRQ 高 → 正常发送数据字段
-             */
-            _check_irq_and_read();
-
-            ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-
-            _process_response();
+            _spi_send_scene_a(s_tx_buf, 0);
         }
     }
 }
@@ -266,7 +724,8 @@ static void _send_data_field(uint8_t field_id)
             HeaterStatus_t hs = Heater_GetCurrentStatus();
             uint8_t is_heating = (hs.state > 0 && hs.state < 5) ? 1 : 0;
             const char *state_str = ESP_StateToString(
-                if_now_SMT, if_DOWNLOAD_READY, is_heating, 0);
+                if_now_SMT, if_DOWNLOAD_READY, is_heating,
+                Host_IsSmtFinished());
             len = (int)strlen(state_str);
             if (len > 15) len = 15;
             memcpy(payload, state_str, len);
@@ -320,36 +779,56 @@ static void _process_control_cmd(ESP_Cmd_t cmd)
     case ESP_CMD_WIFI_ON:
         PrintDebug("[ESP] WiFi ON command\r\n");
         ESP_BuildControlPacket(s_tx_buf, ESP_SUB_WIFI_ON);
-        _check_irq_and_read();
-        ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-        g_esp_wifi_enabled = 1;
+        _seq_register(ESP_CMD_SYS_CONTROL, ESP_SUB_WIFI_ON);
+        if (_spi_send_scene_a(s_tx_buf, 0)) {
+            g_esp_wifi_enabled = 1;
+        } else {
+            _seq_remove_by_seq(ESP_GetLastBuiltSeq());
+        }
         break;
 
     case ESP_CMD_WIFI_OFF:
         PrintDebug("[ESP] WiFi OFF command\r\n");
         ESP_BuildControlPacket(s_tx_buf, ESP_SUB_WIFI_OFF);
-        _check_irq_and_read();
-        ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
-        g_esp_wifi_enabled  = 0;
-        g_esp_wifi_connected = 0;
+        _seq_register(ESP_CMD_SYS_CONTROL, ESP_SUB_WIFI_OFF);
+        if (_spi_send_scene_a(s_tx_buf, 0)) {
+            g_esp_wifi_enabled  = 0;
+            g_esp_wifi_connected = 0;
+        } else {
+            _seq_remove_by_seq(ESP_GetLastBuiltSeq());
+        }
+        break;
+
+    case ESP_CMD_CS_HIGH_TEST:
+        HAL_GPIO_WritePin(SPI4_CS_GPIO_Port, SPI4_CS_Pin, GPIO_PIN_SET);
+        PrintDebug("[ESP] CS high test: hold PE3 HIGH 30s, no SPI\r\n");
+        osDelay(pdMS_TO_TICKS(30000U));
+        s_rx_buf[0] = 0xFF; /* prevent stale response processing */
+        PrintDebug("[ESP] CS high test done\r\n");
         break;
 
     case ESP_CMD_QUERY_FAULT:
         ESP_BuildQueryPacket(s_tx_buf, ESP_SUB_QUERY_FAULT);
-        _check_irq_and_read();
-        ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+        _seq_register(ESP_CMD_STATUS_QUERY, ESP_SUB_QUERY_FAULT);
+        if (!_spi_send_scene_a(s_tx_buf, 0)) {
+            _seq_remove_by_seq(ESP_GetLastBuiltSeq());
+        }
         break;
 
     case ESP_CMD_QUERY_WIFI:
         ESP_BuildQueryPacket(s_tx_buf, ESP_SUB_QUERY_WIFI);
-        _check_irq_and_read();
-        ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+        _seq_register(ESP_CMD_STATUS_QUERY, ESP_SUB_QUERY_WIFI);
+        if (!_spi_send_scene_a(s_tx_buf, 0)) {
+            _seq_remove_by_seq(ESP_GetLastBuiltSeq());
+        }
         break;
 
     case ESP_CMD_QUERY_ALL:     /* ★ v2 新增 */
         ESP_BuildQueryPacket(s_tx_buf, ESP_SUB_QUERY_ALL);
-        _check_irq_and_read();
-        ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+        _seq_register(ESP_CMD_STATUS_QUERY, ESP_SUB_QUERY_ALL);
+        if (!_spi_send_scene_a(s_tx_buf, 0)) {
+            _seq_remove_by_seq(ESP_GetLastBuiltSeq());
+        }
         break;
 
     default:
@@ -360,17 +839,30 @@ static void _process_control_cmd(ESP_Cmd_t cmd)
 /* ================================================================
  *  ESP 响应处理
  * ================================================================ */
-static void _process_response(void)
+static void _process_rx(const uint8_t *rx)
 {
+    uint8_t resp_type;
+    uint8_t resp_seq;
+    uint8_t slot;
+    uint8_t payload_len;
+    const char *payload;
+
     /* 防御 MISO 浮空: 有效响应的 Byte 0 固定为 0x00 */
-    if (s_rx_buf[0] != 0x00) {
+    if (rx[0] != 0x00) {
         return;
     }
 
-    uint8_t resp_type = ESP_GetResponseType(s_rx_buf);
+    resp_type = ESP_GetResponseType(rx);
 
     if (resp_type == ESP_RESP_IDLE) {
         s_no_resp_count = 0;
+        return;
+    }
+
+    resp_seq = ESP_GetResponseSeq(rx);
+    slot = _seq_find(resp_seq);
+    if (slot == 0xFFU) {
+        PrintDebug("[ESP] Ignore unmatched seq 0x%02X\r\n", resp_seq);
         return;
     }
 
@@ -379,11 +871,13 @@ static void _process_response(void)
         resp_type != ESP_RESP_WIFI_STATUS &&
         resp_type != ESP_RESP_COMPOSITE &&
         resp_type != ESP_RESP_VERSION) {
+        PrintDebug("[ESP] Ignore response type 0x%02X seq 0x%02X\r\n",
+                   resp_type, resp_seq);
         return;
     }
 
     /* payload 长度合法性检查 */
-    if (s_rx_buf[2] > 123) {
+    if (rx[2] > 123) {
         return;
     }
 
@@ -391,8 +885,8 @@ static void _process_response(void)
     g_esp_last_rx_tick = osKernelGetTickCount();
     s_no_resp_count = 0;
 
-    uint8_t payload_len;
-    const char *payload = ESP_GetResponsePayload(s_rx_buf, &payload_len);
+    payload = ESP_GetResponsePayload(rx, &payload_len);
+    _seq_remove(slot);
 
     switch (resp_type) {
 
@@ -415,6 +909,11 @@ static void _process_response(void)
     default:
         break;
     }
+}
+
+static void _process_response(void)
+{
+    _process_rx(s_rx_buf);
 }
 
 /* ---- 响应处理子函数 ---- */

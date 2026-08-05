@@ -1636,7 +1636,7 @@ const osThreadAttr_t espTestTask_attributes = {
 
 /**
  * @brief  ESP32 通信测试任务
- * @note   上电后依次执行 8 项测试: 硬件复位、SPI 链路、协议自检、WiFi 开关、故障查询、数据推送
+ * @note   上电后依次执行 8 项测试: GPIO 初始化、SPI 链路、协议自检、WiFi 开关、故障查询、数据推送
  *         每项输出 PASS/FAIL，全部通过后挂起任务
  */
 void StartESPTestTask(void *argument)
@@ -1656,16 +1656,15 @@ void StartESPTestTask(void *argument)
     PrintDebug("\r\n");
     PrintDebug("========================================\r\n");
     PrintDebug("  ESP32 Communication Test Suite v1.0\r\n");
-    PrintDebug("  SPI4 (PE2/PE5/PE6) CS=PE3 RST=PC13\r\n");
+    PrintDebug("  SPI4 (PE2/PE5/PE6) CS=PE3 IRQ=PC13 RST=none\r\n");
     PrintDebug("========================================\r\n\r\n");
 
-    /* ---- T1: 硬件复位 ---- */
-    PrintDebug("--- T1: Hardware Reset + GPIO Init ---\r\n");
+    /* ---- T1: GPIO 初始化（当前无 ESP 复位线） ---- */
+    PrintDebug("--- T1: GPIO Init (no RST wire) ---\r\n");
     ESP_GPIO_Init();
-    ESP_HardReset();
     osDelay(1000);
     s_pass_count++;
-    PrintDebug("[ESP_TEST] T1-HardReset ... PASS\r\n");
+    PrintDebug("[ESP_TEST] T1-GPIOInit ... PASS\r\n");
 
     /* ---- T2: SPI 链路检测 ---- */
     PrintDebug("\r\n--- T2: SPI Loopback Check ---\r\n");
@@ -1772,7 +1771,10 @@ void StartESPTestTask(void *argument)
             ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
             /* 空等 800ms, 不传任何 SPI 数据, 让 ESP32 主循环有充足时间读取 rx_buffer */
             osDelay(800);
-            /* 发心跳查 ESP 响应 */
+            /* 发 QUERY_WIFI 查真实状态，再用心跳把响应读回来 */
+            ESP_BuildQueryPacket(s_tx_buf, ESP_SUB_QUERY_WIFI);
+            ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
+            osDelay(200);
             ESP_BuildHeartbeatPacket(s_tx_buf);
             ESP_SPI_Transfer(s_tx_buf, s_rx_buf);
             uint8_t rt = ESP_GetResponseType(s_rx_buf);

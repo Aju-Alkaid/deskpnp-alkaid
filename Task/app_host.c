@@ -18,6 +18,9 @@
 #include "app_esp_task.h"
 #include "timestamp.h"
 
+/* app_freertos.c creates the ESP32 web command queue */
+extern osMessageQueueId_t esp_web_cmd_queue;
+
 extern TIM_HandleTypeDef htim2;  /* Z轴舵机 */
 #include <string.h>
 #include <stdio.h>
@@ -398,6 +401,7 @@ static void download_done(void) {
     GUI_SPI_NotifySMTStatus(1);
     GUI_SPI_NotifySMTProgress(0, (uint16_t)g_comp_count);
     if_DOWNLOAD_READY = 1;
+    ESP_SendLog("启动");
     PrintDebug("[HOST] Download done. %u marks, %u components.\r\n",
                g_mark_count, g_comp_count);
     {
@@ -421,6 +425,7 @@ static void download_done(void) {
         memset(g_marks_actual, 0, sizeof(g_marks_actual));
         g_mark_just_jumped = false;
         g_state = HOST_P4_BASELINE;
+        ESP_SendLog("开始第一次对准吸嘴");
 
         int ret_p4 = safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
         if (ret_p4 != 0) {
@@ -438,6 +443,58 @@ static void download_done(void) {
         host_send("DOWNLOAD_READY");
         g_state = HOST_DEBUG;
     }
+}
+
+void Host_ImportCsvLine(const char *line, uint16_t len) {
+    if (g_state != HOST_DOWNLOADING) {
+        g_comp_count = 0;
+        g_mark_count = 0;
+        g_header_parsed = false;
+        if_DOWNLOAD_READY = 0;
+        g_state = HOST_DOWNLOADING;
+    }
+
+    /* ESP import does not rely on the UART timeout; refresh it so Host_Task does not finalize early. */
+    g_last_line_tick = osKernelGetTickCount();
+
+    parse_csv_line(line, len);
+    GUI_SPI_NotifyImportData(line);
+}
+
+void Host_FinishCsvImport(void) {
+    if (g_state != HOST_DOWNLOADING) {
+        return;
+    }
+
+    s_gui_done_notified = 0;
+    s_pnp_phase_logged = false;
+    GUI_SPI_NotifyImportTotal((uint16_t)g_comp_count);
+    GUI_SPI_NotifySMTStatus(1);
+    GUI_SPI_NotifySMTProgress(0, (uint16_t)g_comp_count);
+    if_DOWNLOAD_READY = 1;
+    g_header_parsed = false;
+    memset(&g_pcb_frame, 0, sizeof(g_pcb_frame));
+    g_consecutive_failures = 0;
+    g_p2_retry_cnt = 0;
+    g_mark_avg_dx = 0;
+    g_mark_avg_dy = 0;
+    g_state = HOST_DEBUG;
+}
+
+void Host_CsvImportAbort(void) {
+    g_comp_count = 0;
+    g_mark_count = 0;
+    g_comp_index = 0;
+    g_header_parsed = false;
+    if_DOWNLOAD_READY = 0;
+    if (g_state == HOST_DOWNLOADING) {
+        g_state = HOST_DEBUG;
+    }
+    GUI_SPI_NotifyLog("IMPORT_FAIL");
+}
+
+uint8_t Host_IsSmtFinished(void) {
+    return (g_state == HOST_DONE) ? 1U : 0U;
 }
 
 /* ================================================================
@@ -477,6 +534,7 @@ static void start_p2_mark_align(void)
     motorSyncEnable(1);
     osDelay(50);
 
+    ESP_SendLog("开始扫描mark点");
     Vision_Start(VCMD_P2, 0);
     gui_notify_log_code(5, (uint8_t)g_mark_count);
     PrintDebug("[HOST] Starting Mark alignment (P2, %u marks)...\r\n", g_mark_count);
@@ -504,6 +562,7 @@ static void start_p1_find_first(void)
     g_find_sub = FIND_IDLE;
     g_state = HOST_FIND_COMP;
     PrintDebug("[HOST] Starting find component (P1)...\r\n");
+    ESP_SendLog("开始识别元件");
 }
 
 /* ================================================================
@@ -584,8 +643,8 @@ static bool handle_calib_cmd(HostParsed_t *cmd) {
         g_calib.heat_platform_y_max = -130713;
         g_calib.bottom_cam_x_steps = -203;
         g_calib.bottom_cam_y_steps = -25753;
-        g_calib.cam_to_nozzle_dx_steps = -5735;
-        g_calib.cam_to_nozzle_dy_steps = -25035;
+        g_calib.cam_to_nozzle_dx_steps = -7118;
+        g_calib.cam_to_nozzle_dy_steps = -24935;
         g_calib.z_safe_angle = 89.9f;
         g_calib.z_pick_angle = 132.9f;
         g_calib.z_place_angle = 132.9f;
@@ -781,6 +840,12 @@ static void handle_debug_cmd(HostParsed_t *cmd) {
         PrintDebug("[HOST] MSCNT test done\r\n");
         break;
 
+    case HCMD_ESP_CS_HIGH_TEST:
+        ESP_SendCommand(ESP_CMD_CS_HIGH_TEST);
+        PrintDebug("[HOST] ESP_CS_HIGH_TEST -> hold PE3 HIGH 30s, no SPI\r\n");
+        host_send("ESP_CS_HIGH_TEST");
+        break;
+
     case HCMD_PUMP_ON:
         Pump_On();
         PrintDebug("[HOST] PUMP_ON\r\n");
@@ -935,6 +1000,37 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
         LowerCam_Light_Off();
         host_send("LIGHT_OFF");
         PrintDebug("[HOST] LIGHT: OFF\r\n");
+        break;
+
+    case HCMD_WIFI_ON:
+        ESP_SendCommand(ESP_CMD_WIFI_ON);
+        GUI_SPI_NotifyWifiStatus("CONNECTING");
+        PrintDebug("[HOST] WIFI_ON -> ESP WiFi ON\r\n");
+        host_send("WIFI_ON");
+        break;
+
+    case HCMD_WIFI_OFF:
+        ESP_SendCommand(ESP_CMD_WIFI_OFF);
+        GUI_SPI_NotifyWifiStatus("DISCONNECTED");
+        PrintDebug("[HOST] WIFI_OFF -> ESP WiFi OFF\r\n");
+        host_send("WIFI_OFF");
+        break;
+
+    case HCMD_ESP_CS_LOW_TEST:
+        if (esp_spi_mutex != NULL) {
+            osMutexAcquire(esp_spi_mutex, osWaitForever);
+        }
+        HAL_GPIO_WritePin(SPI4_CS_GPIO_Port, SPI4_CS_Pin, GPIO_PIN_RESET);
+        PrintDebug("[HOST] ESP_CS_LOW_TEST: PE3 LOW for 3s, read=%s\r\n",
+                   HAL_GPIO_ReadPin(SPI4_CS_GPIO_Port, SPI4_CS_Pin) == GPIO_PIN_RESET ? "LOW" : "HIGH");
+        osDelay(3000);
+        HAL_GPIO_WritePin(SPI4_CS_GPIO_Port, SPI4_CS_Pin, GPIO_PIN_SET);
+        PrintDebug("[HOST] ESP_CS_LOW_TEST: PE3 restored HIGH, read=%s\r\n",
+                   HAL_GPIO_ReadPin(SPI4_CS_GPIO_Port, SPI4_CS_Pin) == GPIO_PIN_SET ? "HIGH" : "LOW");
+        if (esp_spi_mutex != NULL) {
+            osMutexRelease(esp_spi_mutex);
+        }
+        host_send("ESP_CS_LOW_TEST");
         break;
 
     case HCMD_CALIB_ENC: {
@@ -1217,6 +1313,9 @@ static void mark_align_step(void) {
             g_mark_offsets[phys_idx][0] = r->dx;
             g_mark_offsets[phys_idx][1] = r->dy;
             g_mark_count_done = scan_idx + 1;
+            { char _log[32];
+              snprintf(_log, sizeof(_log), "mark点%d扫描完成", (int)(scan_idx + 1));
+              ESP_SendLog(_log); }
         }
         Vision_Go();
         vTaskDelay(pdMS_TO_TICKS(80));
@@ -1378,7 +1477,9 @@ static void mark_align_step(void) {
         g_comp_index = 0;
         Vision_SendEnd();
         PrintDebug("[HOST] P2 done, starting P4 verify...\r\n");
+        ESP_SendLog("完成mark点识别");
         g_state = HOST_P4_VERIFY;
+        ESP_SendLog("开始第二次对准吸嘴");
         int ret_p4v = safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
         if (ret_p4v != 0) {
             PrintDebug("[HOST] P4 verify move FAILED (ret=%d), abort to ERROR\r\n", ret_p4v);
@@ -1402,6 +1503,7 @@ static void mark_align_step(void) {
             break;
         }
         PrintDebug("[HOST] Mark alignment ERROR: %s\r\n", err);
+        ESP_SendLog("mark点识别失败");
         if (g_p2_scanning) {
             p2_scan_stop();
             g_p2_col++;
@@ -1508,10 +1610,12 @@ static void p4_baseline_step(void)
         LowerCam_Light_Off();
         Vision_SendEnd();
         PrintDebug("[HOST] P4 baseline recorded: (%ld,%ld)\r\n", (long)g_p4_base_x, (long)g_p4_base_y);
+        ESP_SendLog("吸嘴第一次对准完成");
         start_p2_mark_align();
         break;
 
     case VISION_ERROR:
+        ESP_SendLog("吸嘴对准失败");
         enter_vision_fatal_error(Vision_GetError());
         break;
 
@@ -1557,6 +1661,7 @@ static void p4_verify_step(void)
         int32_t e_y = c.y - g_p4_base_y;
         LowerCam_Light_Off();
         Vision_SendEnd();
+        ESP_SendLog("第二次吸嘴对准完成");
         PrintDebug("[HOST] P4 verify done: coord=(%ld,%ld) drift=(%ld,%ld)\r\n",
                    (long)c.x, (long)c.y, (long)e_x, (long)e_y);
 
@@ -1574,6 +1679,7 @@ static void p4_verify_step(void)
     }
 
     case VISION_ERROR:
+        ESP_SendLog("吸嘴对准失败");
         enter_vision_fatal_error(Vision_GetError());
         break;
 
@@ -1737,6 +1843,7 @@ static void enter_p1_refill_error(void) {
 
     GUI_SPI_NotifySMTStatus(0);
     GUI_SPI_NotifyLog("REFILL_NEEDED");
+    ESP_SendLog("元件无法识别");
     host_send("ERROR");
     host_send("REFILL_NEEDED");
     PrintDebug("[HOST] P1 all subpos empty, comp %u -> home, waiting CONTINUE\r\n",
@@ -1754,6 +1861,7 @@ static void p1_align_finish(Component_t *c) {
     g_consecutive_failures = 0; g_p1_align_iter = 0;
     g_p1_cls_sent = false;
     Vision_SendEnd();   /* P1 会话收尾：覆盖 ok 完成与迭代超限强制结束两条路径 */
+    ESP_SendLog("元件识别完成");
     if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
         safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps, Coord_Get().y - g_calib.cam_to_nozzle_dy_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
     }
@@ -1972,6 +2080,7 @@ static void offset_check_step(void) {
             Vision_SendEnd();
             GUI_SPI_NotifySMTProgress((uint16_t)(g_comp_index + 1), (uint16_t)g_comp_count);
             PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
+            ESP_SendLog("元件偏差修正完成");
             phase = 0;
             g_state = HOST_MOVE_TO_PCB;
             return;
@@ -2021,6 +2130,7 @@ static void offset_check_step(void) {
             Vision_SendEnd();
             GUI_SPI_NotifySMTProgress((uint16_t)(g_comp_index + 1), (uint16_t)g_comp_count);
             PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
+            ESP_SendLog("元件偏差修正完成");
             g_state = HOST_MOVE_TO_PCB;
         } else {
             Vision_ResetTimeout();
@@ -2046,6 +2156,7 @@ static void offset_check_step(void) {
         Vision_SendEnd();
         GUI_SPI_NotifySMTProgress((uint16_t)(g_comp_index + 1), (uint16_t)g_comp_count);
         PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
+        ESP_SendLog("元件偏差修正完成");
         g_state = HOST_MOVE_TO_PCB;
         break;
     }
@@ -2056,6 +2167,7 @@ static void offset_check_step(void) {
         int cl;
         /* err3_8: 吸嘴空取 — 回退重新吸取，不降级贴装 */
         if (strcmp(err, "err3_8") == 0) {
+            ESP_SendLog("元件吸取失败");
             g_p3_nozzle_retry++;
             if (g_p3_nozzle_retry >= 3) {
                 LowerCam_Light_Off();
@@ -2080,6 +2192,7 @@ static void offset_check_step(void) {
             LowerCam_Light_Off();
             Vision_SendEnd();
             PrintDebug("[HOST] P3 %s (align fail/timeout), tolerant place\r\n", err);
+            ESP_SendLog("偏差修正失败");
             Coord_Invalidate();
             g_state = HOST_MOVE_TO_PCB;
         } else {
@@ -2171,6 +2284,7 @@ static void move_to_bottom_step(void) {
     g_p3_offset_x = 0; g_p3_offset_y = 0;
     safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
     LowerCam_Light_On();
+    ESP_SendLog("开始修正元件偏差");
     Vision_Start(VCMD_P3, 0);
     g_state = HOST_OFFSET_CHECK;
 }
@@ -2230,7 +2344,9 @@ static void move_to_pcb_step(void) {
 
 static void place_step(void) {
     Component_t *c = &g_components[g_comp_index];
+    ESP_SendLog("开始贴装");
     place_component(); c->placed = true; g_comp_index++;
+    ESP_SendLog("贴装完成");
     if (g_comp_index >= g_comp_count) { g_state = HOST_DONE; }
     else {
         int cl = component_cell(&g_components[g_comp_index]);
@@ -2259,10 +2375,14 @@ static void done_step(void) {
     osDelay(200);
     if (g_auto_heat) {
         Heater_SendStart(); { uint8_t d[8]={0}; Log_Write(LOG_HEATER_START,d); }
+        ESP_SendLog("加热台开始加热");
         gui_notify_log_code(7, 0);  /* code=7: Reflow started */
         PrintDebug("[HOST] Auto reflow started\r\n"); host_send("REFLOW_STARTED");
         g_state = HOST_REFLOW;
-    } else { g_state = HOST_DEBUG; }
+    } else {
+        ESP_SendLog("结束");
+        g_state = HOST_DEBUG;
+    }
 }
 
 static void reflow_step(void) {
@@ -2272,6 +2392,9 @@ static void reflow_step(void) {
     /* 从机实际只发送 IDLE/HEATING/COOLING/ERROR，HOLDING/COMPLETE 为遗留字段 */
     if (hs.state == HEATER_STATE_IDLE || hs.state == HEATER_STATE_COMPLETE) {
         { uint8_t d[8]={0}; d[0]=hs.state; Log_Write(LOG_HEATER_DONE,d); }
+        ESP_SendLog("达到预定温度");
+        ESP_SendLog("加热台加热完毕");
+        ESP_SendLog("结束");
         PrintDebug("[HOST] Reflow complete (state=%d)\r\n", hs.state); host_send("REFLOW_DONE");
         g_state = HOST_DEBUG;
     } else if (hs.state == HEATER_STATE_ERROR) {
@@ -2357,21 +2480,22 @@ static void gui_handle_wifi_connect(const char *raw, uint16_t raw_len)
         return;
     }
     for (i = 0; i < ssid_len; i++) {
-        if (body[i] < '0' || body[i] > '9') {
+        unsigned char c = (unsigned char)body[i];
+        if (c < 0x20U || c == ',' || c == '\r' || c == '\n') {
             GUI_SPI_NotifyLog("WIFI_CFG_ERR");
             return;
         }
     }
     for (i = 0; i < pwd_len; i++) {
-        char ch = comma[1 + i];
-        if (ch < 0x20 || ch > 0x7E) {
+        unsigned char ch = (unsigned char)comma[1 + i];
+        if (ch < 0x20U || ch == ',' || ch == '\r' || ch == '\n') {
             GUI_SPI_NotifyLog("WIFI_CFG_ERR");
             return;
         }
     }
 
-    /* ESP 协议暂无 SSID/密码透传字段，先按开关处理；透传需扩展 ESP 协议 */
-    ESP_SendCommand(ESP_CMD_WIFI_ON);
+    /* v3.1: CMD 0x20 / SUB 0x03 透传 SSID\0PASSWORD */
+    ESP_SendWifiConnect(body, ssid_len, comma + 1, pwd_len);
     GUI_SPI_NotifyWifiStatus("CONNECTING");
     PrintDebug("[GUI] WIFI_CONNECT ssid=%.*s\r\n", (int)ssid_len, body);
 }
@@ -2403,6 +2527,46 @@ static void gui_process_cmd(const HostParsed_t *p)
         break;
     default:
         handle_debug_cmd((HostParsed_t *)p);
+        break;
+    }
+}
+
+static void host_handle_esp_web_cmd(ESP_Cmd_t cmd) {
+    switch (cmd) {
+    case ESP_CMD_HEAT_START:
+        ESP_SendLog("加热台开始加热");
+        Heater_SendStart();
+        break;
+    case ESP_CMD_HEAT_STOP:
+        ESP_SendLog("加热台停止加热");
+        Heater_SendStop();
+        break;
+    case ESP_CMD_PROC_START:
+        if (if_DOWNLOAD_READY && (g_state == HOST_DEBUG || g_state == HOST_HOME)) {
+            download_done();
+        } else {
+            g_gui_smt_start_req = 1;
+        }
+        break;
+    case ESP_CMD_PROC_PAUSE:
+        g_gui_smt_pause_req = 1;
+        break;
+    case ESP_CMD_PROC_RESUME:
+    {
+        HostParsed_t p = {0};
+        p.cmd = HCMD_RESUME;
+        handle_debug_cmd(&p);
+        break;
+    }
+    case ESP_CMD_PROC_STOP:
+    case ESP_CMD_PROC_ESTOP:
+    {
+        HostParsed_t p = {0};
+        p.cmd = HCMD_ABORT;
+        handle_debug_cmd(&p);
+        break;
+    }
+    default:
         break;
     }
 }
@@ -2556,6 +2720,15 @@ void Host_Task(void *argument) {
             while (gui_cmd_queue != NULL &&
                    osMessageQueueGet(gui_cmd_queue, &gcmd, NULL, 0) == osOK) {
                 gui_process_cmd(&gcmd);
+            }
+        }
+
+        /* ---- 2.6 ESP web command processing ---- */
+        {
+            ESP_Cmd_t esp_cmd;
+            while (esp_web_cmd_queue != NULL &&
+                   osMessageQueueGet(esp_web_cmd_queue, &esp_cmd, NULL, 0) == osOK) {
+                host_handle_esp_web_cmd(esp_cmd);
             }
         }
 

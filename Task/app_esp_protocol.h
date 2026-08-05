@@ -4,11 +4,23 @@
 /**
  * @file    app_esp_protocol.h
  * @brief   ESP32 SPI 通信协议层 — 组包 / 解包 / 命令码定义
- * @note    遵循 ESP32-C3 与 STM32 主控 SPI 通讯接口文档 v2.0
+ * @note    遵循 ESP32-C3 与 STM32 主控 SPI 通讯接口文档 v3.1
  *          128 字节固定帧: CMD(1)+SUBCMD(1)+LEN(1)+PAYLOAD(123)+SEQ(1)+RESERVED(1)
  */
 
 #include <stdint.h>
+
+/* ================================================================
+ *  固定帧字段
+ * ================================================================ */
+#define ESP_FRAME_LEN        128
+#define ESP_OFF_CMD          0
+#define ESP_OFF_SUBCMD       1
+#define ESP_OFF_LEN          2
+#define ESP_OFF_PAYLOAD      3
+#define ESP_PAYLOAD_MAX      123
+#define ESP_OFF_SEQ          126
+#define ESP_OFF_RESERVED     127
 
 /* ================================================================
  *  主命令码
@@ -20,6 +32,8 @@
 #define ESP_CMD_PROCESS_CTRL   0x40   /* 贴片流程控制 (ESP→STM32)  ★ v2 新增  */
 #define ESP_CMD_LOG_DATA       0x50   /* 日志文本 (STM32→ESP)    ★ v2 新增   */
 #define ESP_CMD_HEATER_CTRL    0x60   /* 加热台控制 (ESP→STM32)  ★ v2 新增   */
+#define ESP_CMD_CSV_UPLOAD    0x70
+#define ESP_CMD_FILE_CTRL     0x71
 
 /* ================================================================
  *  数据更新子命令 (主命令 0x10)
@@ -34,6 +48,7 @@
  * ================================================================ */
 #define ESP_SUB_WIFI_ON        0x01   /* 打开 WiFi 功能                      */
 #define ESP_SUB_WIFI_OFF       0x02   /* 关闭 WiFi 功能                      */
+#define ESP_SUB_WIFI_CONNECT  0x03
 
 /* ================================================================
  *  状态查询子命令 (主命令 0x30)
@@ -65,6 +80,13 @@
 /* ================================================================
  *  ESP 响应类型 (ESP -> 主控, 在 rx_buf[1])
  * ================================================================ */
+#define ESP_SUB_CSV_START     0x01
+#define ESP_SUB_CSV_DATA      0x02
+#define ESP_SUB_CSV_END       0x03
+#define ESP_SUB_CSV_CANCEL    0x04
+#define ESP_SUB_FILE_NEXT      0x01
+#define ESP_SUB_FILE_RESULT    0x02
+#define ESP_SUB_FILE_CANCEL_ACK 0x03
 #define ESP_RESP_IDLE          0x00   /* 空闲 / 无响应                       */
 #define ESP_RESP_FAULT         0xF1   /* 故障报告                            */
 #define ESP_RESP_WIFI_STATUS   0xF2   /* WiFi 状态                           */
@@ -100,6 +122,38 @@ void ESP_BuildDataPacket(uint8_t *packet, uint8_t sub_cmd,
  * @brief  构建系统控制包 (主命令 0x20)
  */
 void ESP_BuildControlPacket(uint8_t *packet, uint8_t sub_cmd);
+void ESP_BuildControlPacketEx(uint8_t *packet, uint8_t sub_cmd,
+                              const uint8_t *payload, uint8_t payload_len);
+void ESP_BuildFileNextPacket(uint8_t *packet, uint16_t next_frame);
+void ESP_BuildFileResultPacket(uint8_t *packet, const char *result);
+void ESP_BuildFileCancelAckPacket(uint8_t *packet);
+uint8_t ESP_GetSeq(const uint8_t *packet);
+const uint8_t* ESP_GetPayloadRaw(const uint8_t *rx_buf, uint8_t *out_len);
+uint8_t ESP_GetLastBuiltSeq(void);
+
+/**
+ * @brief  标准 CRC32（与 Python zlib.crc32 一致）
+ */
+uint32_t ESP_CRC32_Update(uint32_t crc, const uint8_t *data, uint32_t len);
+uint32_t ESP_CRC32_Finish(uint32_t crc);
+uint32_t ESP_CRC32(const uint8_t *data, uint32_t len);
+
+/**
+ * @brief  解析 0x70 上传帧负载
+ * @retval 1 成功，0 失败
+ */
+uint8_t ESP_ParseCsvStart(const uint8_t *payload, uint8_t len,
+                          uint32_t *out_total_len, uint16_t *out_frames,
+                          uint32_t *out_crc32);
+uint8_t ESP_ParseCsvEnd(const uint8_t *payload, uint8_t len,
+                        uint32_t *out_crc32);
+
+/**
+ * @brief  提取 DATA 帧号与原始字节
+ * @retval 帧号；payload 长度 <2 时返回 0xFFFF
+ */
+uint16_t ESP_ParseCsvData(const uint8_t *payload, uint8_t len,
+                          const uint8_t **out_data, uint8_t *out_data_len);
 
 /**
  * @brief  构建状态查询包 (主命令 0x30)
@@ -154,7 +208,8 @@ static inline uint8_t ESP_GetSubCmd(const uint8_t *rx_buf) {
  */
 static inline uint8_t ESP_IsEspToStmCmd(const uint8_t *rx_buf) {
     uint8_t cmd = rx_buf[0];
-    return (cmd == ESP_CMD_PROCESS_CTRL || cmd == ESP_CMD_HEATER_CTRL) ? 1 : 0;
+    return (cmd == ESP_CMD_PROCESS_CTRL || cmd == ESP_CMD_HEATER_CTRL ||
+                    cmd == ESP_CMD_CSV_UPLOAD) ? 1 : 0;
 }
 
 /* ================================================================

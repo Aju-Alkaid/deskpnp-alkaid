@@ -165,9 +165,9 @@
 | 串口3 (USART3) | PB9(TX) / PB11(RX), 115200, DMA, 连接 TMC2209(R轴) |
 | LPUART1 | PC1(TX) / PC0(RX), 115200, 半双工, 预留 |
 | CAN (FDCAN1) | PA12(TX) / PA11(RX), 500kbps, 连接 3 台 MKS SERVO42D 总线伺服电机 (ID=0x01 X1, ID=0x02 X2, ID=0x03 Y) |
-| SPI2 | PB13(SCK) / PB14(MISO) / PB15(MOSI), CS=PD10, INT=PD8, 10.625 Mbps, 连接 G0B1 GUI 独立板（G0B1 使用其 SPI1） |
+| SPI2 | PB13(SCK) / PB14(MISO) / PB15(MOSI), CS=PD10, DATA_RDY=PD8, REQ_TX=PD9, IRQ=PB12, 10.625 Mbps, 连接 G0B1 GUI 独立板（G0B1 使用其 SPI1） |
 | SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, 连接 W25Q64 Flash |
-| SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, RST=PC13, 连接 ESP32 通信模块 |
+| SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, IRQ=PC13（ESP32 GPIO13，无 RST）, 连接 ESP32 通信模块 |
 | TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) Z轴舵机 PWM (50Hz) / 32位时间戳基准 |
 | TIM5 | CH1(PB2) KTH7823 编码器输入捕获 (170MHz, 已弃用) / CH3(PE8) 12VO3 PWM 输出 (50Hz，舵机已迁移至 TIM2_CH3/PB10) |
 | TIM6 | HAL 系统时基 |
@@ -184,7 +184,9 @@
 | 下相机补光灯 | PE12 (12VO2, DRV8803 U12 OUT2 开关) |
 | 电磁阀 | PA6 (24VO1, DRV8803 U13 OUT5, PA6=HIGH时导通 — 标准DRV8803: IN=HIGH→OUT=LOW) |
 | BOOT0 | PB8, 启动选择 |
-| GUI_INT | PD8, 下降沿 EXTI, G0B1 有命令待收时拉低 |
+| DATA_RDY | PD8, 主控→GUI 输出，低有效，覆盖主控下发 SPI 事务 |
+| REQ_TX | PD9, GUI→主控 输入，低有效，GUI 有命令待发时拉低 |
+| IRQ | PB12, GUI→主控 输入，当前恒高，禁止业务响应 |
 ## 三、目录结构
 
 ```
@@ -217,7 +219,7 @@ pnp_1/
 ├── Task/                        # ★ FreeRTOS 应用层任务 ★
 │   ├── app_host.c/h             # 上位机通信任务 + CSV解析 + 视觉协调 + 调试模式
 │   ├── app_uart_parser.c/h      # 上位机行协议解析器（COMMAND arg\n 格式）
-│   ├── app_vision.c/h           # MaixCAM v2 帧协议 (0x7E LEN PAYLOAD 0x7F) + P1/P2/P3 状态机
+│   ├── app_vision.c/h           # MaixCAM2 帧协议 (0x7E LEN_H/LEN_L PAYLOAD CRC_H/L 0x7F) + P1/P2/P3/P4 状态机
 │   ├── app_motion.c/h           # 运动控制函数 + CAN_Process_Task + MotionTask_Func
 │   ├── app_motor.c/h            # 电机应用层（占位）
 │   ├── app_test.c/h             # 测试任务 (vMotorTestTask) + PrintDebug 函数
@@ -258,7 +260,9 @@ pnp_1/
   - VALVE_OFF — 关电磁阀
   - CALIB_ENC — P2 编码器比例标定（位置模式移动10000步，测量 encoder delta，输出精确 P2_ENC_RATIO）
   - RESUME — 从 WAIT_REFILL / ERROR 恢复
+  - CONTINUE — 补料完成后继续当前进度（从 WAIT_REFILL 恢复，默认上料完成）
   - ABORT — 中止当前 PnP 流程，回 HOST_DEBUG
+  - WIFI_ON / WIFI_OFF — 打开/关闭 ESP32 WiFi（仅发开关命令，不携带 SSID/密码）
   - **标定命令：** SET_SCATTER_AREA / SET_SCATTER_SIZE <mm> / SET_PCB_AREA_MIN / SET_PCB_AREA_MAX / SET_BOTTOM_CAM / SET_Z_SAFE / SET_Z_PICK / SET_Z_PLACE / SET_R_ZERO / SAVE_CALIB / RESTORE_CALIB
 - **文件下载流程：**
   1. G4 发送 `DOWNLOAD_READY\n` 给上位机
@@ -275,17 +279,19 @@ pnp_1/
 ### 4.2 G4 ↔ MaixCAM2 摄像头 (USART2, PD5/PD6)
 
 - **物理层：** 115200, 8N1, DMA+空闲中断
-- **帧协议（v2，2026-06-17 更新）：**
+- **帧协议（2026-08-04/05 更新）：**
   ```
-  ┌────────┬────────┬──────────────────┬────────┐
-  │  0x7E  │ length │  UTF-8 Payload   │  0x7F  │
-  │ 1 Byte │ 1 Byte │   0~255 Bytes    │ 1 Byte │
-  └────────┴────────┴──────────────────┴────────┘
+  ┌────────┬────────┬────────┬──────────────────┬────────┬────────┬────────┐
+  │  0x7E  │ LEN_H  │ LEN_L  │ PAYLOAD          │ CRC_H  │ CRC_L  │ 0x7F   │
+  └────────┴────────┴────────┴──────────────────┴────────┴────────┴────────┘
   ```
   - 帧头 `0x7E`、帧尾 `0x7F` 各 1 字节
-  - `length`：payload 字节数（0~255）
-  - `payload`：UTF-8 字符串
-  - 接收状态机：`WAIT_HEAD(0x7E) → WAIT_LEN → WAIT_DATA(len字节) → WAIT_TAIL(0x7F)`
+  - `LEN`：2 字节大端，表示 PAYLOAD 字节数；主控端当前限制 `FRAME_PAYLOAD_MAX=512`
+  - `PAYLOAD`：UTF-8 字符串
+  - `CRC`：CRC-16/MODBUS，初值 `0xFFFF`，多项式反向 `0xA001`，只对 PAYLOAD 计算，大端输出
+  - 示例：`N:123` → `7E 00 05 4E 3A 31 32 33 6C 44 7F`
+  - 接收状态机：`WAIT_HEAD(0x7E) → WAIT_LEN_H → WAIT_LEN_L → WAIT_DATA(len字节) → WAIT_CRC_H → WAIT_CRC_L → WAIT_TAIL(0x7F)`
+  - UART2 DMA 接收缓冲当前为 `RX_BUFFER_SIZE=600`，可容纳主控端 512 字节负载上限
 
 - **通信模型：** 主控 → MaixCAM2，请求-响应，单任务串行
 
@@ -295,35 +301,44 @@ pnp_1/
   Cam  → Host: rdy         // 握手成功（120s 超时发 err0，主控须重发 p0）
   ```
 
-- **P1 — 元件识别（上摄像头 320×320，YOLO11-OBB 迭代对齐（上限 8 轮），3 类：ccap/cled/cres，2026-08-03 更新）：**
+- **P1 — 元件识别（上摄像头 320×320，YOLO11-OBB，3 类：ccap/cled/cres，2026-08-04/05 更新）：**
+
+  **主流程为批量单次上报：**
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
   | 1 | Host→Cam | `p1` | 启动 P1 |
-  | 2 | Cam→Host | `rdy` | **询问类别** |
+  | 2 | Cam→Host | `rdy` | 询问类别 |
   | 3 | Host→Cam | `cls` | 类别指令 |
   | 4 | Host→Cam | `N:{class_id}` | 0=ccap, 1=cled, 2=cres |
-  | — | — | — | 映射规则：`LED*`→cled(1), `C0*`/`R0*`→ccap(0), 其他→ccap(fallback) |
   | 5 | Host→Cam | `end` | 结束类别询问 |
-  | 6 | Cam 开始 Phase0 搜索 | | |
+  | 6 | Host→Cam | `go` | 电机停稳后发送，cam 才开始 Phase0 |
+  | 7 | Cam→Host | `stp` | 锁定目标，请求停机 |
+  | 8 | Host→Cam | `go` | 确认进入 Phase1 |
+  | 9 | Cam→Host | `pos` + 数据 + `end` | 一次上报视野内全部目标 |
 
-  - **Phase0（搜索）：** Cam→Host: `stp`（一帧识别到即锁定）→ Host→Cam: `go`（停机确认）
-  - **Phase1（迭代对齐，上限 8 轮）：** Cam 每轮采集 3 帧（`init_frames`）位置+角度取平均（角度环形平均；CLED 额外 CV 切角修正 + 帧间平滑系数 0.6），未对准时发送：
+  - 类别映射：`LED*`→cled(1), `C0*`/`R0*`→ccap(0), 其他→ccap(fallback)
+  - **批量上报格式：**
     ```
-    Cam→Host: "pos"
-    Cam→Host: "N:{dx}"              // X 偏差，**已是电机步数**（cam 端已换算）
-    Cam→Host: "N:{dy}"              // Y 偏差，**已是电机步数**（cam 端已换算）
-    Cam→Host: "N:{final_ao}"        // final_ao = -angle * 100（百分之一度）
-    Cam→Host: "N:{class_id}"        // 0=ccap 1=cled 2=cres
-    Cam→Host: "end"
+    pos
+    N:<数量>
+    N1:<dx> N1:<dy> N1:<ao>
+    N2:<dx> N2:<dy> N2:<ao>
+    ...
+    N:<class_id>
+    end
     ```
-    共 **4 字段**（dx, dy, angle, class_id；class_id 仅首轮有效）。角度×100 每轮返回，主控取最后一轮。
-    - 主控收到 `pos...end` 后按 §4.2.1 轴映射修正移动 → 发 `go` 复测；对准（|dx|、|dy| 均 < 阈值，建议 5px）→ Cam 发 `ok`，主控置 VISION_DONE。
-    - cam 端 7 次复测（`align_max_iter`）仍未对准 → Cam 发 `err1_6`；主控侧另有 8 包 pos 兜底计数（`P1_ALIGN_MAX_ITER=8`，1 init + cam 7 轮），防死循环。
-  - **关键参数：** 像素→步数换算由 **cam 端**完成（理论当量 0.0734mm/px，见硬件文档 §十三）；Phase1 平均帧 `INIT_FRAMES = 3`（2026-08-02 新固件）
-  - **错误：** `err1_1`（搜索 50 帧失败）、`err1_3`（等 go 超时 30s）、`err1_4`（相机累计读取失败）、`err1_5`（未检测到目标）、`err1_6`（7 次复测仍未对准）。`err1_5/err1_6/err1_1/err1_3/err1_4` 每元件最多重试 3 次
+  - dx/dy 已是电机步数；主控保存 `P1_MAX_TARGETS=10` 个目标，按离视野中心由近到远排序
+  - 主控把全部目标换算成吸嘴取料坐标存入队列，批内逐个取料；队列耗尽或类别变化后才重新识别
+  - 移动中可回复类别，但必须等电机停稳后发 `go`，cam 才开始 Phase0
+  - `mv`：cam 连续 50 帧未检测到目标时发 `mv` 并阻塞等待；主控移动/切换视野，电机到位后发 `go` 继续；中止 P1 时发 `end`
+  - 靠近图像边缘 10 像素内的目标由 cam 端过滤，不参与锁定/上报
+  - 旧迭代对齐兼容回退保留：`pos` 4 字段 + `ok`/`err1_6` 仍可解析，`P1_ALIGN_MAX_ITER=8`
+  - 错误：`err1_1`（搜索 50 帧失败）、`err1_3`（等 go 超时 30s）、`err1_4`（相机累计读取失败）、`err1_5`（未检测到目标）、`err1_6`（旧迭代未收敛）
 
 - **P2 — Mark 多点寻标对位（上摄像头 320×320，2026-08-02 MaixCAM2 更新）：**
+
+  - **主控实际时序（2026-08-05 确认）：** `start_p2_mark_align()` 先移动到扫描起点，再 `Vision_Start(p2)`；cam `rdy` 仍正常接收并发送 `go`，但连续列扫描保持旧时序，不等待 `rdy` 门控。
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|
@@ -375,15 +390,16 @@ pnp_1/
 
   | 进程 | 帧序列 | 字段数 | 单位 | 增益 | 对齐模式 |
   |------|--------|--------|------|------|----------|
-  | P1 | `pos` N:dx N:dy N:ao N:cls `end` / `ok` | 4 | **电机步数** | cam 端换算（理论 0.0734mm/px） | 迭代 ≤8 轮 |
+  | P1 | `pos` N:<数量> N1:dx/dy/ao ... N:<class_id> `end` | 3N+2 | **电机步数** | cam 端换算（理论 0.0734mm/px） | 批量单次（旧迭代 fallback） |
   | P2 | `pos` N:dx N:dy `end` / `ok` | 2 | **电机步数** | cam 端换算（理论 0.0697mm/px） | 迭代 ≤7 轮 |
   | P3 | `pos` N:dx N:dy N:ao `end` / `ok` | 3 | **电机步数** | cam 端换算（理论 0.0230mm/px） | 迭代 ≤8 轮 |
   | P4 | `pos` N:dx N:dy `end` / `ok` | 2 | **电机步数** | 下相机标定，无固定增益 | 迭代 ≤5 轮 |
 
-  > **重要变更（2026-07-11 / 2026-08-02 MaixCAM2）：** CAM 端完成像素→步数换算，输出的 N: 值**直接是电机步数**。
+  > **重要变更（2026-07-11 / 2026-08-02 / 2026-08-04 MaixCAM2）：** CAM 端完成像素→步数换算，输出的 N: 值**直接是电机步数**。
   > G4 固件端**不再做任何缩放**，仅进行轴映射（cam X→Y电机取反，cam Y→X1+X2）。
-  > P1/P3 为**迭代对齐（上限 8 轮）**：每轮 pos 包字段不变（含角度），未对准 → 主控修正后发 `go` 复测，对准 → Cam 发 `ok`；cam 端 7 次复测未对准 → `err1_6`/`err3_7`（主控侧另有 8 包 pos 兜底计数，`P1/P3_ALIGN_MAX_ITER=8`）。
-  > 角度符号：P1 `-angle*100`（取反），P3 `angle*100`（不取反）。
+  > P1 主流程为**批量单次上报**，一次返回视野内全部目标；旧 4 字段迭代对齐仅作兼容回退。
+  > P3 仍为**迭代对齐（上限 8 轮）**：每轮 pos 包字段不变（含角度），未对准 → 主控修正后发 `go` 复测，对准 → Cam 发 `ok`；cam 端 7 次复测未对准 → `err3_7`（主控侧另有 8 包 pos 兜底计数，`P3_ALIGN_MAX_ITER=8`）。
+  > 角度符号：P1/P3 按 cam 当前实现直接使用 `angle_x100`，主控不再额外取反。
   > P4 为**迭代对准**，用于建系前后的吸嘴中心基线/漂移校验。
   > 详细协议参见上位机文档 `E:/聊天记录/通讯接口(cam与主控).md`（2026-08-03）。
 - **固件侧实现：** 见 `Task/app_vision.c/h`。帧解析 + 状态机在 `feed_byte`（ISR 安全）中运行；UART 帧发送（`send_frame`）仅在任务上下文调用，不在 ISR 中阻塞。
@@ -476,20 +492,30 @@ FIND_IDLE       → FIND_MOVING      → FIND_WAITING
 （启动扫描）      （运动中+检测中）    （等视觉结果）
 
 **FIND\_IDLE — 启动运动+视觉：**
-1. 若 `g_p1_found_pos >= 0`（上一次 VISION_DONE 保留的找到位置），从 `g_scan_start_pos[cl]` 恢复记忆位置并清除标志
-2. 计算目标子位置坐标 = `scatter_subpos[cl][g_p1_scan_pos] + cam_to_nozzle` 偏移
-3. `z_safe()` → `osDelay(100)` → 保存起始坐标和编码器值
-4. 调用 `move_start_async(dx, dy, P1_SCAN_SPEED, PNP_ACC)` 启动非阻塞运动
-5. 调用 `Vision_Start(VCMD_P1, class_id)` 启动 P1 视觉检测
-6. 转 `FIND_MOVING`
+1. 若 P1 队列有同类未消费目标，直接移动至队列取料坐标并转 `HOST_PICK`，不重新打开摄像头
+2. 否则若 `g_p1_found_pos >= 0`，从 `g_scan_start_pos[cl]` 恢复记忆位置并清除标志
+3. 计算目标子位置坐标 = `scatter_subpos[cl][g_p1_scan_pos] + cam_to_nozzle` 偏移
+4. `z_safe()` → `osDelay(100)` → 保存起始坐标和编码器值
+5. 调用 `move_start_async(dx, dy, P1_SCAN_SPEED, PNP_ACC)` 启动非阻塞运动
+6. 调用 `Vision_Start(VCMD_P1, class_id)` 启动 P1 视觉检测
+7. 转 `FIND_MOVING`
 
 **FIND\_MOVING — 运动中轮询：**
-- `VISION_GOT_CATEGORY_QUERY` → `Vision_ClsReply()`（运动中回复类别）
+- `VISION_GOT_CATEGORY_QUERY` → `Vision_ClsReply()` 并置 `g_p1_cls_sent=true`（运动中回复类别）
+- 运动完成 → `Coord_UpdateXY(g_move_target)` → 若 `g_p1_cls_sent`，调用 `Vision_GoScan()` 让 cam 开始 Phase0 → 转 `FIND_WAITING`
 - `VISION_GOT_STOP` → `axis_stop` 全轴停车 → `p1_restore_coord()` 恢复坐标 → `Vision_Go` → 转 `FIND_WAITING`
+- `VISION_GOT_MOVE` → 停车 → `p1_restore_coord()` → 推进下一子位 → 电机到位后 `Vision_GoScan()` 继续同一次 P1
 - `VISION_ERROR` → 停车 → `p1_restore_coord()` → 转 `FIND_WAITING`（`return` 防竞态）
-- `g_axes_done_bits` 满足 → `Coord_UpdateXY(g_move_target)` → 转 `FIND_WAITING`
 
 **FIND\_WAITING — 电机已停，等待视觉：** 复用原有视觉结果处理逻辑。
+- `VISION_GOT_CATEGORY_QUERY` → `Vision_ClsReply()` → 立即 `Vision_GoScan()`
+- `VISION_GOT_MOVE` → 推进下一子位 → 电机到位后 `Vision_GoScan()` 继续同一次 P1
+- `VISION_GOT_STOP` → `Vision_Go()` 进入 Phase1
+- `VISION_GOT_POS`（批量）→ `p1_queue_fill()` 将全部目标换算为吸嘴取料坐标 → 消费队列首项 → `HOST_PICK`
+
+**批量队列：** 一次 P1 最多保存 `P1_MAX_TARGETS=10` 个目标，批内取料不再重新识别；队列耗尽或类别变化后才重新启动 P1。
+
+**补料错误态：** 若所有子位都已扫过且为空，进入 `enter_p1_refill_error()`：发 `end`、停运动、回机械原点、发 `ERROR`/`REFILL_NEEDED`、保存当前元件进度，等待上位机 `CONTINUE` 后从当前元件继续。
 
 **辅助函数：**
 
@@ -498,6 +524,9 @@ FIND_IDLE       → FIND_MOVING      → FIND_WAITING
 | `move_start_async(dx, dy, speed, acc)` | `app_motion.c:662` | 非阻塞启动运动：排空帧+清零+发位置指令+同步触发 |
 | `p1_restore_coord()` | `app_host.c:1505` | 运动中停机后读编码器算实际位移增量；Y 轴增量须乘 `MOTOR_Y_ENC_SIGN`（2026-08-03 修复，见 HISTORY §52） |
 | `p1_try_next_subpos(c)` | `app_host.c:1528` | 推进子位置 + wraparound；`false`=全部耗光 |
+| `Vision_GoScan()` | `app_vision.c/h` | P1 类别确认或 `mv` 后发 `go` 开始 Phase0，状态仍等待 `stp` |
+| `p1_queue_fill(r)` / `p1_start_pick_from_queue(c)` | `app_host.c` | 批量目标换算为取料坐标并入队 / 消费队列首项 |
+| `enter_p1_refill_error()` | `app_host.c` | 全部子位为空：回原点 + 报错 + 保存进度 + 等 `CONTINUE` |
 
 **成功位置记忆：**
 
@@ -506,7 +535,7 @@ FIND_IDLE       → FIND_MOVING      → FIND_WAITING
 | `g_scan_start_pos[SCATTER_CELLS]` | 每个 cell 的上次成功子位置，初始 0 |
 | `g_p1_wrapped` | 本轮是否已 wraparound |
 
-VISION_DONE 时 `g_scan_start_pos[cl] = g_p1_found_pos`。下一同 cell 元件从记忆位置开始，wraparound 兜底。重置时机：`start_p1_find_first()`（新 PnP）+ RESUME（补料后）。
+VISION_DONE 时 `g_scan_start_pos[cl] = g_p1_found_pos`。下一同 cell 元件从记忆位置开始，wraparound 兜底。重置时机：`start_p1_find_first()`（新 PnP）+ CONTINUE（补料后；RESUME 兼容保留）。
 
 **关键常量：**
 
@@ -637,13 +666,46 @@ ping，保证 0x02 在 ~360ms 内被接收。
 - **初始化顺序约束：** `Heater_Init()` 必须在 `CAN_Init()` 之前调用。`CAN_Init()` 中 `HAL_FDCAN_Start()` 使总线激活后 CAN ISR 即可触发，若 `heater_rx_queue` 尚未创建（NULL），加热台状态帧将被静默丢弃。
 - **CAN 滤波器隐患：** `FilterID2 = 0x1FFC0000` 超出 HAL 11-bit 范围（max 0x7FF），当前因 CubeMX 设 `StdFiltersNbr = 0` 恰好全通。重新生成 CubeMX 时若 `StdFiltersNbr` ≥ 1，滤波器将仅通过 ID 低 8 位为 0 的帧，所有 CAN 通信中断。详见 HISTORY.md §33.2。
 
-### 4.5 G4 ↔ G0B1 GUI（SPI2 文本协议，2026-08-01 迁移）
+### 4.5 G4 ↔ G0B1 GUI（SPI2 文本协议 v1.6，2026-08-06 更新）
 
-- **物理层：** G0B1 SPI1 ↔ G4 SPI2，G4 为主机；PB13(SCK)/PB14(MISO)/PB15(MOSI)，CS=PD10，INT=PD8（下降沿，G0B1 有命令待收时拉低）。SPI2 速率 10.625 Mbps（分频 16，G0B1 最高 32 Mbps，留余量）。阻塞收发，`gui_spi_mutex` 保护 Host_Task/ESP_Task/GUI_SPI_Task 三方访问。
-- **格式：** ASCII 字符串命令，`CMD:param1,param2` 或 `CMD arg`，以 `\n` 结尾；单条 ≤128 字节；从机未使用的接收字节必须填充 0x00，主控在首个 0x00 停止解析。协议版本预留 `GUI_PROTO_VERSION 1`。
-- **G0B1 → G4（用户操作触发）：** `MOVE_UP/DOWN/LEFT/RIGHT <step>`、`MOVE_*_START <speed>`、`MOVE_STOP`、`SET_ORIGIN`、`HOME`、`SET_BOTTOM_CAM`、`SET_CAM_OFFSET`、`SET_HEATER_PLATFORM_MIN/MAX`、`SAVE_CALIB`、`RESTORE_CALIB`、`HEAT_ON/OFF`、`PUMP_ON/OFF`、`LIGHT_ON/OFF`、`VALVE_ON/OFF`、`WIFI_CONNECT:<ssid>,<password>`、`WIFI_DISCONNECT`、`IMPORT_ENTER`、`IMPORT_EXIT`。
-- **G4 → G0B1（主控主动推送）：** `TEMP_HEAT:<float>`、`TEMP_PCB:<float>`（约每秒一次）、`SMT_PROGRESS:<current>,<total>`、`LOG:<message>`（≤63 字符）、`WIFI_STATUS:<state>`、`IMPORT_DATA:<content>`（≤63 字符）、`IMPORT_TOTAL:<number>`。
-- **实现要点：** `GUI_SPI_Task`（栈 4096）轮询 INT → `HAL_SPI_Receive` 读 128 字节 → `LineParser_Feed` 解析 → `gui_cmd_queue`（16×HostParsed_t，满时 10ms 超时并计数）→ Host_Task 消费；`WIFI_CONNECT` 先校验 SSID 1-32 位数字、密码 8-63 位 ASCII，当前仅触发 ESP WiFi 开关，SSID/密码透传待扩展 ESP 协议。
+- **物理层：** G0B1 SPI1 ↔ G4 SPI2，G4 为主机；PB13(SCK)/PB14(MISO)/PB15(MOSI)，CS=PD10，DATA_RDY=PD8（主控→GUI，低有效），REQ_TX=PD9（GUI→主控，低有效），IRQ=PB12（当前恒高，禁止业务响应）。SPI2 Mode0、8-bit MSB、10.625 Mbps（分频 16，G0B1 最高 32 Mbps，留余量）。阻塞收发，`gui_spi_mutex` 保护 Host_Task/ESP_Task/GUI_SPI_Task 三方访问。
+- **帧格式：** 固定 128 字节/事务；有效内容为以 `\n` 结尾的 ASCII 字符串，`\n` 之后用 `0x00` 填充；接收方以 `\n` 为结束，忽略其后内容。单条命令独立一次 CS 事务；CS 拉低后 ≥1µs 再打时钟，相邻事务间隔 ≥100µs。文档协议版本 v1.6；代码宏 `GUI_PROTO_VERSION 1` 暂保留。
+- **G0B1 → G4（用户操作触发）：** `MOVE_UP/DOWN/LEFT/RIGHT <step>`、`MOVE_*_START <speed>`、`MOVE_STOP`、`SET_ORIGIN`、`HOME`、`SET_BOTTOM_CAM`、`SET_CAM_OFFSET`、`SET_HEATER_PLATFORM_MIN/MAX`、`SAVE_CALIB`、`RESTORE_CALIB`、`HEAT_ON/OFF`、`PUMP_ON/OFF`、`LIGHT_ON/OFF`、`VALVE_ON/OFF`、`WIFI_CONNECT:<ssid>,<password>`、`WIFI_DISCONNECT`、`IMPORT_ENTER`、`IMPORT_EXIT`、`HANDSHAKE_REQ`。
+- **G4 → G0B1（主控主动推送）：** `TEMP_HEAT:<float>`、`TEMP_PCB:<float>`（约每秒一次）、`SMT_PROGRESS:<current>,<total>`、`LOG:<message>`（≤63 字符）、`WIFI_STATUS:<state>`、`IMPORT_DATA:<content>`（≤63 字符）、`IMPORT_TOTAL:<number>`、`HANDSHAKE_ACK`。
+- **时序与握手：** 主控上电延时 ≥2s 后以 ≤10ms 周期轮询 REQ_TX；发现低电平后拉低 CS 并产生 128 字节时钟读 MISO；REQ_TX 仍为低则继续读，变高表示队列已空。GUI 发 `HANDSHAKE_REQ\n`（1s 重试，最多 10 次），主控解析后立即回 `HANDSHAKE_ACK\n`，重复回 ACK 无害。发送时 DATA_RDY 拉低必须覆盖整个 SPI 事务。
+- **命令解析：** 按首个空格或冒号切分命令名；未识别命令静默忽略。`WIFI_CONNECT` 校验 SSID 1~32 字节、密码 8~63 字节，仅拒绝控制字符、逗号、CR/LF，然后通过 `ESP_SendWifiConnect()` 下发 `0x20/0x03 SSID\0PASSWORD`。
+- **实现要点：** 公共接口 `GUI_Send()` / `GUI_Poll()`；`GUI_SPI_Task`（栈 4096）调用 `GUI_Poll()`，`HAL_SPI_TransmitReceive` 读固定 128 字节，解析后入 `gui_cmd_queue`（16×HostParsed_t，满时计数）→ Host_Task 消费；LOG 限速 ≤20 条/秒；温度仍约 1s 一次。
+
+### 4.6 G4 ↔ ESP32-C3（SPI4，v3.1，2026-08-06 更新）
+
+- **物理层：** SPI4（PE2/PE5/PE6），CS=PE3，IRQ=PC13（ESP32 GPIO13），无硬件复位线；Mode 0，8bit，固定 128 字节帧，速率 ≤5MHz。
+- **帧格式：** `CMD(1B) + SUBCMD(1B) + LEN(1B) + PAYLOAD(123B) + SEQ(1B) + RESERVED(1B)`，不足补 0x00。
+
+| CMD | 方向 | 说明 |
+|------|------|------|
+| 0x00 | STM32→ESP | 心跳/空闲 |
+| 0x10 | STM32→ESP | 数据更新（进度/状态/加热台） |
+| 0x20 | STM32→ESP | 系统控制：0x01 WIFI_ON / 0x02 WIFI_OFF / 0x03 WIFI_CONNECT |
+| 0x30 | STM32→ESP | 状态查询：0x01 故障 / 0x02 WiFi / 0x03 全部状态 |
+| 0x40 | ESP→STM32 | 贴片流程控制：START/PAUSE/RESUME/STOP/ESTOP |
+| 0x50 | STM32→ESP | 日志文本：0x01 UTF-8 |
+| 0x60 | ESP→STM32 | 加热台控制：0x10 HEAT_START / 0x11 HEAT_STOP |
+| 0x70 | ESP→STM32 | CSV 文件上传：START/DATA/END/CANCEL |
+| 0x71 | STM32→ESP | 文件回执：NEXT/RESULT/CANCEL_ACK |
+
+- **双向通信：**
+  - 场景 A：STM32 主动下发前必须检查 IRQ；IRQ 为高才发送，IRQ 为低先执行场景 B。
+  - 场景 B：ESP32 拉低 IRQ → EXTI15_10 置 `esp32_irq_flag=1` → ESP_Task 发送全 0xFF 哑元从 MISO 读取数据 → 延时 2ms 后清标志。
+  - CS 拉低后 100ms 内未完成传输则强制拉高并报异常。
+- **命令分发：** `0x40/0x60` 经 `esp_web_cmd_queue` 交给 Host_Task；`0x70` 由 `_csv_handle_frame()` 按 LEN 精确提取原始字节并写入 W25Q64 128KB 区（0x100000）。场景 A 的 MISO 与场景 B 统一由 `_handle_esp_rx()` 分发，避免竞态丢帧。
+- **CSV 回执：** START 回 `RESULT(ok/fail:<code>)`，每帧 DATA 回 `NEXT(期望帧号)`，END 校验总长度+帧数+CRC32 后回 `RESULT`；帧号不连续 `fail:3`，CRC 失败 `fail:1`，长度不符 `fail:2`，存储/缓冲不足 `fail:4`。文件会话空闲超过 5 秒自动复位并回 `fail:4`。
+- **日志：** PnP 各步骤调用 `ESP_SendLog()` 入 `esp_log_queue`，由 `ESP_Task` 发送 `0x50/0x01`。
+- **状态：** `0x10/0x02` 通过 `Host_IsSmtFinished()` 在 `HOST_DONE` 时上报 `Finished`。
+- **WiFi：** `WIFI_ON`（0x20/0x01）使用当前凭据连接；`WIFI_CONNECT`（0x20/0x03）透传 `SSID\0PASSWORD` 并立即切换连接，发送成功后主控置 `g_esp_wifi_enabled=1`。
+- **互斥：** SPI4 由 `esp_spi_mutex` 保护；W25Q64 公共 `Read/Write/Erase` 已由 `w25q64_mutex` 保护。
+- **关键实现：** `ESP_Task`、`_spi_send_scene_a()`、`_scene_b_read()`、`_handle_esp_rx()`、`_csv_handle_frame()`、`_process_rx()`、`ESP_SendLog()`、`ESP_SendWifiConnect()`、`Host_IsSmtFinished()`。
+- **已知限制：** CSV UTF-16/含 `0x00` 的完整导入仍需主控 CSV 解析器按原始字节/UTF-16 改造；`0x71` 回执当前为读帧后下一事务发送，与现有 ESP32 `SPI_web_test_1.ino` 实现兼容；日志/凭据队列非阻塞，满时可能丢弃；`pnp_1.ioc` 尚未补 PC13 上拉与 PE3 高速输出属性。
+- **参考文档：** `E:/聊天记录/通讯接口(ESP与主控) (2).md`（v3.1，与 `(1).md` 内容一致）。
 
 ## 五、任务架构
 
@@ -653,8 +715,8 @@ ping，保证 0x02 在 ~360ms 内被接收。
 | `CAN_Process_Task` | 512 | Normal | 从 motor_event_queue 取 CAN 报文，更新 g_axes_done_bits / g_axes_error 全局标志 |
 | `vMotorTestTask` | 1024 | Normal | MKS 电机测试任务（已注释） |
 | `guiSpi` | 4096 | Normal | G4 SPI2 ↔ G0B1 GUI：命令接收解析入队 + SPI 收发 |
-| `ESP_Task` | 512 | Normal | ESP32 通信 + WiFi 状态管理 |
-| `StartESPTestTask` | 1024 | Normal | ESP32 通信链路 8 项测试（SPI4），启用时需禁用 `ESP_Task` |
+| `ESP_Task` | 4096 | Normal | ESP32 通信 + WiFi 状态管理（当前默认启用） |
+| `StartESPTestTask` | 1024 | Normal | ESP32 通信链路测试（SPI4），默认停用；启用前需禁用 `ESP_Task` |
 | `PnP_Motion_Task` | 1024 | Normal | 备用运动任务（已注释，未激活） |
 | `StartHostMotionTestTask` | 4096 | Normal | 调试用运动任务（已注释，功能合并到 Host_Task） |
 | `StartPickPlaceTestTask` | 2048 | Normal | Pick&Place 测试（已注释，功能合并到 Host_Task） |
@@ -713,7 +775,7 @@ ping，保证 0x02 在 ~360ms 内被接收。
                                                         → HOST_PLACE             → 贴装元件(Z轴舵机+电磁阀吹气)
                                                         → 下一元件或 HOST_DONE
                                                         ┌ AUTO_HEAT 开启时 → HOST_REFLOW (回流焊) → HOST_DEBUG
-                                                        ├ 连续3次P1失败  → HOST_WAIT_REFILL (等RESUME)
+                                                         ├ P1 全部子位为空 → HOST_WAIT_REFILL (回原点+ERROR/REFILL_NEEDED，等 CONTINUE；RESUME 兼容保留)
                                                         └ 电机异常/P2失败 → HOST_ERROR (30s超时自动回DEBUG)
 
               Heater_ProcessStatus()   → 每轮处理加热台CAN状态帧```
@@ -724,7 +786,7 @@ ping，保证 0x02 在 ~360ms 内被接收。
 |--------|----------|------|----------|
 | `Component_t` | app_host.h | 贴装元件/Mark点信息 | id, target_x/y/angle, footprint[32], layer, is_mark, feeder_id, placed |
 | `HostParsed_t` | app_uart_parser.h | 上位机行解析结果 | cmd, param(float), raw[512] |
-| `VisionResult_t` | app_vision.h | 视觉结果数据（v2 协议） | dx, dy, angle_x100, angle_valid, class_id, class_name[8], mark_index, mark_count |
+| `VisionResult_t` | app_vision.h | 视觉结果数据（2026-08-04/05 协议） | targets[P1_MAX_TARGETS], target_count, p1_batch_mode, dx, dy, angle_x100, angle_valid, class_id, class_name[8], mark_index, mark_count |
 | `MotionCmd_t` | app_motion.h | 运动指令 | cmd_type, target_x/y/r, speed, acc |
 | `MachineCoord_t` | app_motion.h | 机器座标系（线程安全单例） | x, y, r, z, homed, valid |
 | `CAN_Rx_Packet_t` | driver_can.h | CAN 数据包 | ID, FuncCode, Status, Data[8], Timestamp |
@@ -1367,12 +1429,15 @@ _axis_rotate 返回值未在调用方检查（与原开环行为一致，PnP 状
 | KTH7823 编码器 | PB2 | TIM5_CH1 (输入捕获) |
 | 24V_C2 PWM | PB1 | |
 | SPI2_SCK/MISO/MOSI | PB13/PB14/PB15 | G0B1 GUI |
-| SPI2_CS/INT | PD10/PD8 | G0B1 GUI 片选/中断 |
+| SPI2_CS | PD10 | G0B1 GUI 片选（低有效） |
+| DATA_RDY | PD8 | 主控→GUI 下发通知（低有效） |
+| REQ_TX | PD9 | GUI→主控 命令请求（低有效） |
+| IRQ | PB12 | GUI 状态线（当前恒高，不响应） |
 | SPI3_SCK/MISO/MOSI | PC10/PC11/PC12 | Flash |
 | SPI3_CS | PA15 | Flash 片选 |
 | SPI4_SCK/MISO/MOSI | PE2/PE5/PE6 | ESP32 |
 | SPI4_CS | PE3 | ESP32 片选 |
-| ESP32_RESET | PC13 | ESP32 硬复位 |
+| ESP32_IRQ | PC13 | ESP32 有数据待读时拉低，下降沿 EXTI |
 | TMC1_EN (ENN) | PD15 | R轴使能（低有效：LOW=开启，HIGH=关闭） |
 | TMC2_EN | PD14 | 预留 |
 | KEY1/KEY2 | PC6/PC7 | 低有效 |

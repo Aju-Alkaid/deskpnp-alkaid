@@ -11,9 +11,17 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     *param2 = 0.0f;
     if (len == 0) return HCMD_NONE;
 
-    /* 找到第一个空格(分隔命令和参数) */
+    /* 找到第一个空格或冒号(分隔命令和参数) */
     const char *space = memchr(line, ' ', len);
-    uint16_t cmd_len = space ? (uint16_t)(space - line) : len;
+    const char *colon = memchr(line, ':', len);
+    const char *sep   = NULL;
+
+    if (space != NULL && (colon == NULL || space < colon)) {
+        sep = space;
+    } else {
+        sep = colon;
+    }
+    uint16_t cmd_len = sep ? (uint16_t)(sep - line) : len;
 
     /* 命令匹配表 */
     #define MATCH(s) (cmd_len == sizeof(s)-1 && memcmp(line, s, cmd_len) == 0)
@@ -130,6 +138,9 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("MSCNT_TEST")) {
         return HCMD_MSCNT_TEST;
     }
+    if (MATCH("ESP_CS_HIGH_TEST")) {
+        return HCMD_ESP_CS_HIGH_TEST;
+    }
     if (MATCH("SET_CAM_OFFSET")) {
         return HCMD_SET_CAM_OFFSET;
     }
@@ -172,6 +183,15 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("LIGHT_OFF")) {
         return HCMD_LIGHT_OFF;
     }
+    if (MATCH("WIFI_ON")) {
+        return HCMD_WIFI_ON;
+    }
+    if (MATCH("WIFI_OFF")) {
+        return HCMD_WIFI_OFF;
+    }
+    if (MATCH("ESP_CS_LOW_TEST")) {
+        return HCMD_ESP_CS_LOW_TEST;
+    }
     if (len >= 14 && memcmp(line, "WIFI_CONNECT:", 13) == 0) {
         return HCMD_WIFI_CONNECT;
     }
@@ -183,6 +203,9 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     }
     if (MATCH("IMPORT_EXIT")) {
         return HCMD_IMPORT_EXIT;
+    }
+    if (MATCH("HANDSHAKE_REQ")) {
+        return HCMD_HANDSHAKE_REQ;
     }
     #undef MATCH
     return HCMD_UNKNOWN;
@@ -220,6 +243,7 @@ bool LineParser_Feed(LineParser_t *p, uint8_t byte, HostParsed_t *out) {
         }
 
         p->idx = 0;
+        p->complete = true;
         return true;
     }
 

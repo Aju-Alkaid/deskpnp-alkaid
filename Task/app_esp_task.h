@@ -4,12 +4,23 @@
 /**
  * @file    app_esp_task.h
  * @brief   ESP32 通信任务 — 周期数据推送 + 控制命令路由 + 响应处理 + 场景B IRQ
- * @note    版本: v2 (新增 IRQ 场景B, CMD 0x40/0x50/0x60)
+ * @note    版本: v3.1 (IRQ 场景B, CMD 0x40/0x50/0x60/0x70/0x71)
  *          依赖: driver_esp32.h, app_esp_protocol.h
  */
 
 #include <stdint.h>
 #include "cmsis_os2.h"
+
+/* ESP log message enqueued to ESP_Task */
+typedef struct { uint8_t len; uint8_t text[123]; } ESP_LogMsg_t;
+
+/* WiFi credential message for CMD 0x20 / SUB 0x03 (SSID\0PASSWORD) */
+typedef struct { uint8_t len; uint8_t payload[96]; } ESP_WifiCfgMsg_t;
+
+extern osMessageQueueId_t esp_log_queue;
+extern osMessageQueueId_t esp_web_cmd_queue;
+extern osMessageQueueId_t esp_wifi_cfg_queue;
+extern osMutexId_t esp_spi_mutex;
 
 /* ================================================================
  *  ESP 控制命令类型 (放入 esp_cmd_queue 的消息)
@@ -17,6 +28,7 @@
 typedef enum {
     ESP_CMD_WIFI_ON,          /* 打开 WiFi                               */
     ESP_CMD_WIFI_OFF,         /* 关闭 WiFi                               */
+    ESP_CMD_CS_HIGH_TEST,     /* 诊断: 保持 CS 高 30s 不发 SPI             */
     ESP_CMD_QUERY_FAULT,      /* 查询故障码                              */
     ESP_CMD_QUERY_WIFI,       /* 查询 WiFi 状态                          */
     ESP_CMD_QUERY_ALL,        /* 查询全部状态 (v2 新增)                  */
@@ -54,7 +66,7 @@ extern osMessageQueueId_t esp_cmd_queue;  /* 其他任务 -> ESP_Task 控制命�
 
 /**
  * @brief  ESP 通信任务入口
- * @note   栈大小: 512 字节, 优先级: Normal
+ * @note   栈大小: 4096 字节, 优先级: Normal
  */
 void ESP_Task(void *argument);
 
@@ -68,9 +80,20 @@ void ESP_SendCommand(ESP_Cmd_t cmd);
 /**
  * @brief  发送日志到 ESP32 (CMD_LOG_DATA 0x50) ★ v2 新增
  * @param  text  UTF-8 日志文本 (自动截断至 123 字节)
- * @note   内部构建 128 字节帧 + SPI 全双工收发 + 处理 ESP 响应
- *         线程安全: 仅通过 ESP_Task 的队列机制调用
+ * @note   入队后由 ESP_Task 主循环构建 128 字节帧发送
+ *         线程安全: 非阻塞入队，ESP_Task 负责 SPI 收发
  */
 void ESP_SendLog(const char *text);
+
+/**
+ * @brief  下发指定 WiFi 凭据 (CMD 0x20, SUBCMD 0x03)
+ * @param  ssid         SSID 字节
+ * @param  ssid_len     SSID 长度 (1~32)
+ * @param  password     密码字节
+ * @param  password_len 密码长度 (8~63)
+ * @note   非阻塞入队；payload 格式为 SSID\0PASSWORD
+ */
+void ESP_SendWifiConnect(const char *ssid, uint16_t ssid_len,
+                         const char *password, uint16_t password_len);
 
 #endif

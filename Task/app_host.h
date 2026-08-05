@@ -103,6 +103,11 @@ extern int32_t g_scatter_subpos[4][5][2];
 void scatter_init_cells(void);
 bool host_start_r_correction(const VisionResult_t *r, const char *stage);
 
+void Host_ImportCsvLine(const char *line, uint16_t len);
+void Host_FinishCsvImport(void);
+void Host_CsvImportAbort(void);
+uint8_t Host_IsSmtFinished(void);
+
 void Host_UartRecvCallback(uint8_t *data, int len);
 void Host_Task(void *argument);
 

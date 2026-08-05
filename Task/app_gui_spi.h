@@ -15,9 +15,10 @@
  *   G4 → G0B1：主控主动推送的数据/状态（通过 SPI 发送）
  *
  * G0B1→G4 接收机制：
- *   从机拉低 GUI_INT 引脚触发 EXTI 中断 → ISR 设置标志
- *   → GUI_SPI_Task 轮询标志 → SPI 读事务获取命令行
- *   → 喂入 LineParser → 完整行放入 gui_cmd_queue 供 Host_Task 处理
+ *   从机拉低 REQ_TX(PD9) → GUI_SPI_Task 以 ≤10ms 轮询
+ *   → REQ_TX 为低时发起 128 字节 SPI 读事务
+ *   → 仍为低则继续读取，直到 REQ_TX 变高
+ *   → 完整行放入 gui_cmd_queue 供 Host_Task 处理
  *
  * 约束：
  *   单条命令总长 ≤ 128 字节（SPI 接收缓冲区限制）
@@ -28,10 +29,13 @@
 
 /* ======================== 初始化 ======================== */
 
-/* 初始化 SPI2、CS/INT GPIO、消息队列，在 FreeRTOS 启动前调用 */
+/* 初始化 SPI2、CS/DATA_RDY/REQ_TX/IRQ GPIO，在 FreeRTOS 启动前调用 */
 void GUI_SPI_Init(void);
 
 /* ======================== G4 → G0B1 数据推送 API ======================== */
+
+/* v1.6 标准发送接口：单条命令，自动 \n 结尾 + 0x00 填充到 128 字节 */
+void GUI_Send(const char *cmd);
 
 /* 发送格式化命令字符串（自动追加 \n） */
 void GUI_SPI_Send(const char *fmt, ...);
@@ -59,14 +63,14 @@ void GUI_SPI_NotifyImportTotal(uint16_t total);
 
 /* ======================== G0B1 → G4 命令接收 API ======================== */
 
+/* v1.6 标准轮询接口：读取并解析一帧 GUI 命令；GUI_SPI_Task 按 ≤10ms 调用 */
+void GUI_Poll(void);
+
 /* 轮询接收：非阻塞，返回 1 表示收到完整行（存入 buf），否则 0 */
 int GUI_SPI_RecvPoll(char *buf, uint16_t bufsize);
 
 /* SPI 接收任务入口（FreeRTOS 任务） */
 void GUI_SPI_Task(void *argument);
-
-/* EXTI 中断回调：G0B1 INT 引脚触发时由 HAL_GPIO_EXTI_Callback 调用 */
-void GUI_SPI_IntCallback(uint16_t GPIO_Pin);
 
 /* ======================== 配置宏（适配 CubeMX 引脚分配） ======================== */
 
@@ -76,16 +80,22 @@ void GUI_SPI_IntCallback(uint16_t GPIO_Pin);
  * 若改用其他引脚组，CubeMX 会自动生成正确的 hspi2 初始化。
  */
 
-/* CS 引脚：PD10（原 LCD_CS，LCD 移除后释放） */
+/* SPI v1.6: CS=PD10, REQ_TX=PD9, DATA_RDY=PD8, IRQ=PB12 */
 #define GUI_SPI_CS_PORT      GPIOD
 #define GUI_SPI_CS_PIN       GPIO_PIN_10
 
-/* INT 引脚：PD8（原 LCD_RST，LCD 移除后释放），G0B1 拉低表示有命令待发 */
-#define GUI_SPI_INT_PORT     GPIOD
-#define GUI_SPI_INT_PIN      GPIO_PIN_8
+#define GUI_REQ_TX_PORT      GPIOD
+#define GUI_REQ_TX_PIN       GPIO_PIN_9
 
-/* SPI 接收缓冲区大小（必须 ≥ 最大命令长度 128） */
-#define GUI_SPI_RX_BUF_SIZE  128
+#define GUI_DATA_RDY_PORT    GPIOD
+#define GUI_DATA_RDY_PIN     GPIO_PIN_8
+
+#define GUI_IRQ_PORT         GPIOB
+#define GUI_IRQ_PIN          GPIO_PIN_12
+
+/* SPI 固定帧长 128 字节/事务 */
+#define GUI_SPI_FRAME_SIZE   128
+#define GUI_SPI_RX_BUF_SIZE  GUI_SPI_FRAME_SIZE
 
 /* 预留协议版本号：后续用于 G4/G0B1 握手与功能开关 */
 #define GUI_PROTO_VERSION  1

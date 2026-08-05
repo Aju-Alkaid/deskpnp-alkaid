@@ -117,10 +117,10 @@ int main(void)
   MX_CRC_Init();
   MX_FDCAN1_Init();
   MX_TIM5_Init();
-  GUI_SPI_Init();
   /* USER CODE BEGIN 2 */
 	
 
+  GUI_SPI_Init();
   init_finished = true;
 	Servo_Init(&htim5); 
 	// Motor_Init �������������е��ã�CAN ������
