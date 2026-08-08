@@ -11,6 +11,9 @@
 #include <stdint.h>
 #include "cmsis_os2.h"
 
+/* CSV upload temporary storage in W25Q64. */
+#define ESP_CSV_FLASH_BASE        0x100000U
+
 /* ESP log message enqueued to ESP_Task */
 typedef struct { uint8_t len; uint8_t text[123]; } ESP_LogMsg_t;
 
@@ -20,6 +23,7 @@ typedef struct { uint8_t len; uint8_t payload[96]; } ESP_WifiCfgMsg_t;
 extern osMessageQueueId_t esp_log_queue;
 extern osMessageQueueId_t esp_web_cmd_queue;
 extern osMessageQueueId_t esp_wifi_cfg_queue;
+extern osMessageQueueId_t esp_csv_import_queue;
 extern osMutexId_t esp_spi_mutex;
 
 /* ================================================================

@@ -493,6 +493,60 @@ void Host_CsvImportAbort(void) {
     GUI_SPI_NotifyLog("IMPORT_FAIL");
 }
 
+#define HOST_CSV_READ_CHUNK 512U
+#define HOST_CSV_LINE_MAX   2048U
+static uint8_t  s_flash_csv_line[HOST_CSV_LINE_MAX];
+static uint16_t s_flash_csv_line_len;
+
+static void flash_csv_line_push(uint8_t c)
+{
+    if (c == '\n') {
+        uint16_t out_len = s_flash_csv_line_len;
+        if (out_len > 0 && s_flash_csv_line[out_len - 1] == '\r') {
+            out_len--;
+        }
+        if (out_len > 0) {
+            if (out_len >= (uint16_t)sizeof(s_flash_csv_line)) {
+                out_len = (uint16_t)sizeof(s_flash_csv_line) - 1U;
+            }
+            s_flash_csv_line[out_len] = '\0';
+            Host_ImportCsvLine((const char *)s_flash_csv_line, out_len);
+        }
+        s_flash_csv_line_len = 0;
+        return;
+    }
+
+    if (s_flash_csv_line_len < (uint16_t)sizeof(s_flash_csv_line)) {
+        s_flash_csv_line[s_flash_csv_line_len++] = c;
+    }
+}
+
+static void host_import_flash_csv(uint32_t total_len)
+{
+    uint8_t buf[HOST_CSV_READ_CHUNK];
+    uint32_t pos = 0;
+
+    s_flash_csv_line_len = 0;
+    while (pos < total_len) {
+        uint32_t want = total_len - pos;
+        uint32_t i;
+        if (want > sizeof(buf)) want = sizeof(buf);
+        if (W25Q64_Read(ESP_CSV_FLASH_BASE + pos, buf, want) < 0) {
+            PrintDebug("[HOST] CSV flash read fail at %lu\r\n",
+                       (unsigned long)pos);
+            Host_CsvImportAbort();
+            return;
+        }
+        for (i = 0; i < want; i++) {
+            flash_csv_line_push(buf[i]);
+        }
+        pos += want;
+    }
+
+    flash_csv_line_push('\n');
+    Host_FinishCsvImport();
+}
+
 uint8_t Host_IsSmtFinished(void) {
     return (g_state == HOST_DONE) ? 1U : 0U;
 }
@@ -2534,10 +2588,12 @@ static void gui_process_cmd(const HostParsed_t *p)
 static void host_handle_esp_web_cmd(ESP_Cmd_t cmd) {
     switch (cmd) {
     case ESP_CMD_HEAT_START:
+        PrintDebug("[HOST] ESP HEAT_START\r\n");
         ESP_SendLog("加热台开始加热");
         Heater_SendStart();
         break;
     case ESP_CMD_HEAT_STOP:
+        PrintDebug("[HOST] ESP HEAT_STOP\r\n");
         ESP_SendLog("加热台停止加热");
         Heater_SendStop();
         break;
@@ -2720,6 +2776,15 @@ void Host_Task(void *argument) {
             while (gui_cmd_queue != NULL &&
                    osMessageQueueGet(gui_cmd_queue, &gcmd, NULL, 0) == osOK) {
                 gui_process_cmd(&gcmd);
+            }
+        }
+
+        /* ESP CSV import is parsed only in Host_Task context. */
+        {
+            uint32_t csv_len;
+            while (esp_csv_import_queue != NULL &&
+                   osMessageQueueGet(esp_csv_import_queue, &csv_len, NULL, 0) == osOK) {
+                host_import_flash_csv(csv_len);
             }
         }
 

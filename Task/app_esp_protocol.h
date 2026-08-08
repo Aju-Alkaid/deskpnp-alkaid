@@ -216,7 +216,7 @@ static inline uint8_t ESP_IsEspToStmCmd(const uint8_t *rx_buf) {
  *  辅助格式化函数
  * ================================================================ */
 
-int ESP_FormatTemp(char *buf, int buf_size, uint16_t temp_0_1c);
+int ESP_FormatTemp(char *buf, int buf_size, int16_t temp_0_1c);
 int ESP_FormatProgress(char *buf, int buf_size, uint8_t current, uint8_t total);
 const char* ESP_StateToString(uint8_t is_smt_active,
                               uint8_t is_downloading,

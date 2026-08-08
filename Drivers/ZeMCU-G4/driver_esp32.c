@@ -6,6 +6,7 @@
  */
 
 #include "driver_esp32.h"
+#include "app_test.h"
 #include <string.h>
 
 extern SPI_HandleTypeDef hspi4;
@@ -56,6 +57,14 @@ int ESP_SPI_Transfer(uint8_t *tx_buf, uint8_t *rx_buf)
     if ((HAL_GetTick() - start_tick) >= 100U) {
         if (esp_spi_mutex != NULL) osMutexRelease(esp_spi_mutex);
         return HAL_TIMEOUT;
+    }
+
+    {
+        uint32_t elapsed = HAL_GetTick() - start_tick;
+        if (elapsed >= 5U) {
+            PrintDebug("[ESP] SPI4 CS low took %u ms\r\n",
+                       (unsigned)elapsed);
+        }
     }
 
     /* Keep CS high long enough for the ESP32 slave to close the frame. */

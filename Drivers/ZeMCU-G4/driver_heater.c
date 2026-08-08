@@ -61,6 +61,7 @@ bool Heater_SendStart(void)
     HAL_StatusTypeDef ret = Heater_Transmit(&cmd, 1, false);
     if (ret == HAL_OK) {
         PrintDebug("[HEATER] START sent OK\r\n");
+        Heater_SendQuery();
         return true;
     } else {
         PrintDebug("[HEATER] START TX FAILED (err=%d)\r\n", (int)ret);
@@ -74,6 +75,7 @@ void Heater_SendStop(void)
     HAL_StatusTypeDef ret = Heater_Transmit(&cmd, 1, false);
     if (ret == HAL_OK) {
         PrintDebug("[HEATER] STOP sent OK\r\n");
+        Heater_SendQuery();
     } else {
         PrintDebug("[HEATER] STOP TX FAILED (err=%d)\r\n", (int)ret);
     }

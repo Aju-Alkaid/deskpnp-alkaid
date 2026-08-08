@@ -334,16 +334,20 @@ uint8_t ESP_GetResponseSeq(const uint8_t *rx_buf)
  *  辅助格式化函数
  * ================================================================ */
 
-int ESP_FormatTemp(char *buf, int buf_size, uint16_t temp_0_1c)
+int ESP_FormatTemp(char *buf, int buf_size, int16_t temp_0_1c)
 {
-    if (buf_size < 6) return 0;
+    int32_t value = temp_0_1c;
+    int pos = 0;
 
-    unsigned int int_part = temp_0_1c / 10;
-    unsigned int frac_part = temp_0_1c % 10;
+    if (buf_size < 8) return 0;
 
-    int pos = _utoa(buf, int_part);
+    if (value < 0) {
+        buf[pos++] = '-';
+        value = -value;
+    }
+    pos += _utoa(buf + pos, (unsigned int)(value / 10));
     buf[pos++] = '.';
-    buf[pos++] = (char)('0' + frac_part);
+    buf[pos++] = (char)('0' + (int)(value % 10));
     return pos;
 }
 

@@ -47,6 +47,7 @@ osMessageQueueId_t esp_cmd_queue;
 osMessageQueueId_t esp_log_queue;
 osMessageQueueId_t esp_web_cmd_queue;
 osMessageQueueId_t esp_wifi_cfg_queue;
+osMessageQueueId_t esp_csv_import_queue;
 osMutexId_t esp_spi_mutex;
 osMutexId_t w25q64_mutex;
 osMessageQueueId_t host_pkt_queue;
@@ -223,6 +224,7 @@ void MX_FREERTOS_Init(void) {
 	esp_web_cmd_queue = osMessageQueueNew(8, sizeof(ESP_Cmd_t), NULL);
 	esp_log_queue = osMessageQueueNew(32, sizeof(ESP_LogMsg_t), NULL);
 	esp_wifi_cfg_queue = osMessageQueueNew(2, sizeof(ESP_WifiCfgMsg_t), NULL);
+	esp_csv_import_queue = osMessageQueueNew(2, sizeof(uint32_t), NULL);
 	
 	
   /* USER CODE END RTOS_QUEUES */
