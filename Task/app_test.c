@@ -1744,6 +1744,7 @@ void StartESPTestTask(void *argument)
         /* StateToString */
         if (strcmp(ESP_StateToString(0,0,0,0), "Waiting") != 0) all_ok = 0;
         if (strcmp(ESP_StateToString(1,0,0,0), "SMTing") != 0) all_ok = 0;
+        if (strcmp(ESP_StateToString(1,1,0,0), "SMTing") != 0) all_ok = 0;
     }
     if (all_ok) {
         s_pass_count++;

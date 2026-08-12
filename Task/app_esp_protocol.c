@@ -368,8 +368,8 @@ const char* ESP_StateToString(uint8_t is_smt_active,
                               uint8_t is_finished)
 {
     if (is_finished)  return "Finished";
+    if (is_smt_active)  return "SMTing";
     if (is_heating)   return "Heating";
     if (is_downloading) return "Importing";
-    if (is_smt_active)  return "SMTing";
     return "Waiting";
 }

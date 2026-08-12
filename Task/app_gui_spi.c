@@ -18,6 +18,8 @@ extern SPI_HandleTypeDef hspi2;
 /* GUI 命令接收队列，由 app_freertos.c 创建 */
 osMessageQueueId_t gui_cmd_queue;
 osMutexId_t gui_spi_mutex = NULL;
+osMessageQueueId_t gui_log_queue = NULL;
+volatile uint8_t g_gui_handshake_done = 0;
 
 /* ======================== 内部状态 ======================== */
 
@@ -32,6 +34,7 @@ volatile uint8_t g_gui_smt_pause_req = 0;
 static uint32_t s_gui_queue_drop_cnt = 0;
 static uint32_t s_gui_spi_tx_err = 0;
 static uint32_t s_gui_spi_rx_err = 0;
+static uint32_t s_gui_log_drop_cnt = 0;
 
 /* LOG rate limit: max 20 frames per second */
 static uint32_t s_gui_log_window_tick = 0;
@@ -72,11 +75,11 @@ static void gui_spi_tx_raw(const uint8_t *data, uint16_t len)
     if (gui_spi_mutex != NULL) osMutexAcquire(gui_spi_mutex, osWaitForever);
     GUI_DATA_RDY_LOW();
     GUI_CS_LOW();
-    gui_spi_delay_us(1);  /* SPI v1.6: CS low to first clock >= 1us */
+    gui_spi_delay_us(1);  /* SPI v1.7: CS low to first clock >= 1us */
     HAL_StatusTypeDef st = HAL_SPI_Transmit(&hspi2, (uint8_t *)data, len, 100);
     GUI_CS_HIGH();
-    GUI_DATA_RDY_HIGH();  /* SPI v1.6: release DATA_RDY after CS high */
-    gui_spi_delay_us(100); /* SPI v1.6: >=100us between transactions */
+    GUI_DATA_RDY_HIGH();  /* SPI v1.7: release DATA_RDY after CS high */
+    gui_spi_delay_us(100); /* SPI v1.7: >=100us between transactions */
     if (st != HAL_OK) {
         s_gui_spi_tx_err++;
         PrintDebug("[GUI] SPI2 TX err=%lu\r\n", (unsigned long)s_gui_spi_tx_err);
@@ -97,7 +100,7 @@ void GUI_Send(const char *cmd)
     len = strlen(cmd);
     if (len >= GUI_SPI_FRAME_SIZE) len = GUI_SPI_FRAME_SIZE - 1;
     memcpy(buf, cmd, len);
-    buf[len] = '\n';  /* SPI v1.6: newline terminator, remaining bytes stay 0x00 */
+    buf[len] = '\n';  /* SPI v1.7: newline terminator, remaining bytes stay 0x00 */
     gui_spi_tx_raw(buf, GUI_SPI_FRAME_SIZE);
 }
 
@@ -173,8 +176,43 @@ static int gui_spi_log_ok(void)
 
 void GUI_SPI_NotifyLog(const char *msg)
 {
-    if (!gui_spi_log_ok()) return;
-    gui_spi_notify_text("LOG", msg);
+    GUI_LogMsg_t item;
+    uint16_t n = 0;
+
+    if (msg == NULL || !gui_spi_log_ok()) return;
+    if (gui_log_queue == NULL) {
+        s_gui_log_drop_cnt++;
+        return;
+    }
+
+    memset(&item, 0, sizeof(item));
+    while (msg[n] != '\0' && n < (uint16_t)(sizeof(item.text) - 1U)) {
+        char c = msg[n];
+        if (c == '\r' || c == '\n') break;
+        if ((unsigned char)c < 0x20U) c = ' ';
+        item.text[n++] = (uint8_t)c;
+    }
+    item.len = (uint8_t)n;
+
+    if (osMessageQueuePut(gui_log_queue, &item, 0, 0) != osOK) {
+        s_gui_log_drop_cnt++;
+        if (s_gui_log_drop_cnt <= 3U || (s_gui_log_drop_cnt % 100U) == 0U) {
+            PrintDebug("[GUI] LOG queue full, drop=%lu\r\n",
+                       (unsigned long)s_gui_log_drop_cnt);
+        }
+    }
+}
+
+void GUI_SPI_LogProcess(void)
+{
+    GUI_LogMsg_t item;
+
+    if (gui_log_queue == NULL) return;
+
+    while (osMessageQueueGet(gui_log_queue, &item, NULL, 0) == osOK) {
+        item.text[item.len] = '\0';
+        gui_spi_notify_text("LOG", (const char *)item.text);
+    }
 }
 
 void GUI_SPI_NotifyWifiStatus(const char *state)
@@ -210,10 +248,10 @@ static int gui_read_frame(uint8_t rx[GUI_SPI_RX_BUF_SIZE])
         return 0;
     }
     GUI_CS_LOW();
-    gui_spi_delay_us(1);  /* SPI v1.6: CS low to first clock >= 1us */
+    gui_spi_delay_us(1);  /* SPI v1.7: CS low to first clock >= 1us */
     HAL_StatusTypeDef st = HAL_SPI_TransmitReceive(&hspi2, tx, rx, GUI_SPI_RX_BUF_SIZE, 100);
     GUI_CS_HIGH();
-    gui_spi_delay_us(100); /* SPI v1.6: >=100us between transactions */
+    gui_spi_delay_us(100); /* SPI v1.7: >=100us between transactions */
     if (gui_spi_mutex != NULL) osMutexRelease(gui_spi_mutex);
 
     if (st != HAL_OK) {
@@ -302,7 +340,8 @@ void GUI_Poll(void)
                (int)parsed.raw_len, parsed.raw);
 
     if (parsed.cmd == HCMD_HANDSHAKE_REQ) {
-        PrintDebug("[GUI] HANDSHAKE_REQ received, ACK send called\r\n");
+        g_gui_handshake_done = 1U;
+        PrintDebug("[GUI] HANDSHAKE_REQ received, ACK send called (linked=1)\r\n");
         GUI_Send("HANDSHAKE_ACK");
         return;
     }
@@ -379,5 +418,5 @@ void GUI_SPI_Init(void)
     HAL_GPIO_Init(GUI_IRQ_PORT, &GPIO_InitStruct);
 
     /* Parser state is now per-frame, no persistent cross-frame state needed */
-    HAL_Delay(2000);  /* SPI v1.6: wait >=2s before first transaction */
+    HAL_Delay(2000);  /* SPI v1.7: wait >=2s before first transaction */
 }

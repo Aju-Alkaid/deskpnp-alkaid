@@ -102,6 +102,7 @@ typedef enum {
 } MotorError_t;
 
 extern volatile bool g_motor_error;
+extern volatile bool g_system_halted;
 extern volatile MotorError_t g_motor_error_detail;
 extern volatile int32_t g_enc_pos[4];    /* 31H encoder stash (ID 1-3) */
 extern volatile bool    g_enc_ready[4];
@@ -112,6 +113,9 @@ extern volatile bool     g_axes_error;      /* CAN ISR 鈫?堵转/限位标志 *
 void axis_stop(int32_t addr);
 void disable_sync_stop(void);
 int  move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc);
+int  coord_sync_from_encoders(MachineCoord_t *out);
+int  motor_move_absolute(int32_t x, int32_t y, uint16_t speed, uint8_t acc);
+void motion_flush_after_halt(void);
 int  motion_read_encoder(uint8_t id, int32_t *out, uint32_t timeout_ms);
 int  jog_stop_update_coord(const char *dir_name, int32_t enc_x1_start, int32_t enc_x2_start, int32_t enc_y_start);
 

@@ -340,6 +340,17 @@ UART_Status_t UART_Write_DMA(Uart_Id_t id, const uint8_t *data, uint16_t size)
     return UART_OK;
 }
 
+void UART_TX_Reset(Uart_Id_t id)
+{
+    if ((int)id >= UART_DRIVER_COUNT) return;
+    UART_Channel_t *ch = &uart_channels[id];
+    if (ch->tx_pending) {
+        HAL_UART_AbortTransmit(ch->huart);
+        ch->tx_pending = false;
+    }
+    uart_tx_service(ch);
+}
+
 void TMC_UART_Transmit(uint8_t *data, uint16_t size) {
     // 发送数据 (阻塞模式)
     HAL_UART_Transmit(&huart3, data, size, 100);
@@ -561,6 +572,13 @@ bool UART_PeekData(Uart_Id_t id, const uint8_t **data, uint16_t *len)
     *data = ch->rx_app_buf;
     *len = ch->rx_app_len;
     return true;
+}
+
+void UART_ClearAppData(Uart_Id_t id)
+{
+    if ((int)id >= UART_DRIVER_COUNT) return;
+    UART_Channel_t *ch = &uart_channels[id];
+    ch->rx_app_len = 0;
 }
 
 void UART_ClearData(Uart_Id_t id)

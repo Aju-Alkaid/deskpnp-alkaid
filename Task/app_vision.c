@@ -394,11 +394,14 @@ static void process_p1_frame(const char *str) {
                 if (g_p1_batch_idx >= g_p1_batch_count) g_p1_class_done = true;
             }
         } else if (g_p1_class_done) {
-            fill_class_id(val);
-            for (int32_t i = 0; i < g_result.target_count; i++) {
-                g_result.targets[i].class_id = val;
+            /* 类别号固定是 N:<class_id>，不带目标序号；N7:dx 这类目标帧不能当作类别号 */
+            if (str[0] == 'N' && str[1] == ':') {
+                fill_class_id(val);
+                for (int32_t i = 0; i < g_result.target_count; i++) {
+                    g_result.targets[i].class_id = val;
+                }
+                g_p1_class_done = false;
             }
-            g_p1_class_done = false;
         }
         g_collect_cnt++;
     }

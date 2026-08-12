@@ -13,16 +13,16 @@
 #define X2_ADDR          0x02
 #define Y_ADDR           0x03
 /* R 轴旋转速度 (RPM) — 矫正和贴装共用 */
-#define R_SPEED_RPM                 60.0f
+#define R_SPEED_RPM                 75.0f
 #define R_CORRECTION_THRESHOLD_DEG  0.1f       /* R 轴视觉矫正死区 (deg) */
 
 /* ---- R 轴 MSCNT 闭环 (TMC2209 VACTUAL 速度模式) ---- */
 #define R_STEPS_PER_REV          51200       /* 200全步 × 256微步 = 51200 usteps/rev */
 #define R_DEG_TO_USTEPS(d)       ((int32_t)((d) * R_STEPS_PER_REV / 360.0f))
 #define R_POLL_INTERVAL_MS       8           /* PID 控制周期 (ms): 8ms保证MSCNT采样<512步 */
-#define R_PID_KP                 4.0f        /* 比例系数 (usteps→Hz) */
+#define R_PID_KP                 5.0f        /* 比例系数 (usteps→Hz) */
 #define R_MIN_SPEED              1000        /* 最小 VACTUAL 频率 (~1.2 RPM) */
-#define R_MAX_SPEED              50000       /* 最大 VACTUAL 频率 ≈ 58 RPM */
+#define R_MAX_SPEED              65000       /* 最大 VACTUAL 频率 ≈ 76 RPM */
 #define R_POS_TOLERANCE          150         /* 到位容差 (usteps), ~1.0° */
 #define R_STABLE_COUNT           2           /* 连续稳定次数 */
 #define R_SG_THRESHOLD           0           /* SG_RESULT 堵转检测关闭: 仅 stst+MSCNT */

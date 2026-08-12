@@ -33,6 +33,12 @@ static void gui_notify_log_code(uint8_t code, uint8_t param);
 static void gui_process_heater_status(void);
 static void gui_handle_wifi_connect(const char *raw, uint16_t raw_len);
 static void gui_process_cmd(const HostParsed_t *p);
+static void pnp_halt(void);
+static void pnp_continue(void);
+static void repick_step(void);
+static ResumeStepId_t state_to_resume_step(HostState_t s);
+static void prepare_p1_scan_restart(void);
+static void begin_new_download(void);
 
 /* ================================================================
  *  常量
@@ -50,7 +56,7 @@ static void gui_process_cmd(const HostParsed_t *p);
 #define MARK_VERIFY_ERR_MM  0.3f   /* Mark3 验证允许误差 (mm) */
 #define P2_RETRY_MAX        1     /* P2 建系失败最大重试次数 */
 #define P2_SCAN_STEP_MM      5.0f   /* P2 横向步进宽度 (mm) */
-#define P2_SCAN_SPEED        20     /* P2 连续扫描速度 (RPM), Cam 需要低速识别 */
+#define P2_SCAN_SPEED        30     /* P2 连续扫描速度 (RPM), Cam 需要低速识别 */
 #define P2_SCAN_ACC          20     /* P2 连续扫描加速度 */
 #define P2_SCAN_TIMEOUT       300   /* P2 非扫描模式超时 (~3s, 对齐/跳转等待) */
 #define P2_SCAN_COL_PAD_MS   500    /* 每列额外延时 (ms), 补偿加减速段 */
@@ -58,6 +64,7 @@ static void gui_process_cmd(const HostParsed_t *p);
 #define P2_MAX_ALIGN_ITER       7   /* P2 对齐迭代上限，防死循环 */
 #define P1_ALIGN_MAX_ITER       8   /* P1 对齐迭代上限 */
 #define P3_ALIGN_MAX_ITER       8   /* P3 对齐迭代上限 */
+#define P3_NOZZLE_RETRY_MAX     3   /* P3 空吸嘴最大重试次数 */
 
 /* speedModeRun 方向位: 0=CCW→电机x增大(上), 1=CW→电机x减小(下). 方向反了就交换 */
 #define P2_SCAN_DIR_UP        1
@@ -121,6 +128,25 @@ static int32_t g_mark_avg_dy = 0;
 static int     g_p3_nozzle_retry = 0; /* P3 吸嘴空取重试计数 */
 static int     g_p1_retry_count = 0;  /* P1重试计数 */
 static int     g_consecutive_failures = 0;  /* 连续元件失败计数 */
+
+/* PNPSTOP/PCONTINUE 断点恢复 */
+static uint16_t g_task_id = 1;
+ResumeContext_t g_resume_ctx = {0};
+static bool     g_pick_completed = false;
+
+/* P3 空吸嘴重吸取 */
+static int32_t  g_last_pick_x_steps = 0;
+static int32_t  g_last_pick_y_steps = 0;
+static bool     g_last_pick_valid = false;
+static int32_t  g_last_pick_angle_x100 = 0;
+static bool     g_last_pick_angle_valid = false;
+
+/* 各 PnP 子步骤 phase 改为文件级，便于断点恢复时安全复位 */
+static int      g_pick_step_phase = 0;
+static int      g_offset_check_phase = 0;
+static int      g_move_to_pcb_phase = 0;
+static int32_t  g_move_to_pcb_saved_mx = 0;
+static int32_t  g_move_to_pcb_saved_my = 0;
 
 /* PCB 坐标系 (P2 建系结果) */
 PCBFrame_t g_pcb_frame = {0};
@@ -254,17 +280,21 @@ void scatter_init_cells(void) {
 
 /* 封装名->P1类别ID映射 (0=ccap 1=cled 2=cres, 2026-08-02 新3类模型) */
 static int footprint_to_class_id(const char *fp) {
-    if (!fp) return 0;
-    if (strncmp(fp, "LED", 3) == 0) return 1;   /* LED-SMD -> cled (2026-08-02 新3类模型, 旧cledo=2已废弃) */
-    if (strncmp(fp, "C0", 2) == 0 || strncmp(fp, "R0", 2) == 0) return 0;
-    return 0;
+    if (!fp) return P1_CLASS_CCAP;
+    if (strncmp(fp, "LED", 3) == 0) return P1_CLASS_CLED;   /* LED-SMD -> cled */
+    if (strncmp(fp, "R0", 2) == 0) return P1_CLASS_CRES;    /* R0805 -> cres */
+    if (strncmp(fp, "C0", 2) == 0) return P1_CLASS_CCAP;    /* C0805 -> ccap */
+    return P1_CLASS_CCAP;
 }
 
-/* 元件→单元格编号 (P1 class_id 即 cell 编号) */
+/* 元件→散料格编号（独立于 P1 视觉类别）: C0=0, R0=1, LED=3 */
 static int component_cell(const Component_t *c) {
-    int id = footprint_to_class_id(c->footprint);
-    if (id < 0 || id >= SCATTER_CELLS) id = 0;
-    return id;
+    const char *fp = c ? c->footprint : NULL;
+    if (!fp) return 0;
+    if (strncmp(fp, "C0", 2) == 0) return 0;
+    if (strncmp(fp, "R0", 2) == 0) return 1;
+    if (strncmp(fp, "LED", 3) == 0) return 3;
+    return 0;
 }
 
 /*
@@ -402,6 +432,7 @@ static void download_done(void) {
     GUI_SPI_NotifySMTProgress(0, (uint16_t)g_comp_count);
     if_DOWNLOAD_READY = 1;
     ESP_SendLog("启动");
+    GUI_SPI_NotifyLog("PNP_START");
     PrintDebug("[HOST] Download done. %u marks, %u components.\r\n",
                g_mark_count, g_comp_count);
     {
@@ -447,6 +478,7 @@ static void download_done(void) {
 
 void Host_ImportCsvLine(const char *line, uint16_t len) {
     if (g_state != HOST_DOWNLOADING) {
+        begin_new_download();
         g_comp_count = 0;
         g_mark_count = 0;
         g_header_parsed = false;
@@ -466,19 +498,7 @@ void Host_FinishCsvImport(void) {
         return;
     }
 
-    s_gui_done_notified = 0;
-    s_pnp_phase_logged = false;
-    GUI_SPI_NotifyImportTotal((uint16_t)g_comp_count);
-    GUI_SPI_NotifySMTStatus(1);
-    GUI_SPI_NotifySMTProgress(0, (uint16_t)g_comp_count);
-    if_DOWNLOAD_READY = 1;
-    g_header_parsed = false;
-    memset(&g_pcb_frame, 0, sizeof(g_pcb_frame));
-    g_consecutive_failures = 0;
-    g_p2_retry_cnt = 0;
-    g_mark_avg_dx = 0;
-    g_mark_avg_dy = 0;
-    g_state = HOST_DEBUG;
+    download_done();
 }
 
 void Host_CsvImportAbort(void) {
@@ -589,6 +609,7 @@ static void start_p2_mark_align(void)
     osDelay(50);
 
     ESP_SendLog("开始扫描mark点");
+    GUI_SPI_NotifyLog("MARK_SCAN");
     Vision_Start(VCMD_P2, 0);
     gui_notify_log_code(5, (uint8_t)g_mark_count);
     PrintDebug("[HOST] Starting Mark alignment (P2, %u marks)...\r\n", g_mark_count);
@@ -617,6 +638,286 @@ static void start_p1_find_first(void)
     g_state = HOST_FIND_COMP;
     PrintDebug("[HOST] Starting find component (P1)...\r\n");
     ESP_SendLog("开始识别元件");
+    GUI_SPI_NotifyLog("COMP_SCAN");
+}
+
+/* ================================================================
+ *  PNPSTOP / PCONTINUE 断点冻结与恢复
+ * ================================================================ */
+static ResumeStepId_t state_to_resume_step(HostState_t s) {
+    switch (s) {
+    case HOST_MARK_ALIGN:     return RESUME_STEP_MARK_ALIGN;
+    case HOST_P4_BASELINE:    return RESUME_STEP_P4_BASELINE;
+    case HOST_P4_VERIFY:      return RESUME_STEP_P4_VERIFY;
+    case HOST_FIND_COMP:      return RESUME_STEP_FIND_COMP;
+    case HOST_PICK:
+    case HOST_REPICK:         return RESUME_STEP_PICK;
+    case HOST_MOVE_TO_BOTTOM_CAM: return RESUME_STEP_MOVE_BOTTOM_CAM;
+    case HOST_OFFSET_CHECK:   return RESUME_STEP_OFFSET_CHECK;
+    case HOST_MOVE_TO_PCB:    return RESUME_STEP_MOVE_TO_PCB;
+    case HOST_PLACE:          return RESUME_STEP_PLACE;
+    default:                  return RESUME_STEP_NONE;
+    }
+}
+
+static void prepare_p1_scan_restart(void) {
+    p1_queue_clear();
+    g_consecutive_failures = 0;
+    g_p1_retry_count = 0;
+    g_p1_wrapped = false;
+    g_p1_found_pos = -1;
+    g_p1_cls_sent = false;
+    g_find_sub = FIND_IDLE;
+    g_p1_subpos_start_tick = osKernelGetTickCount();
+}
+
+static void pnp_halt(void) {
+    MachineCoord_t c;
+    bool already_halted = g_system_halted;
+
+    if (already_halted && g_resume_ctx.step_id != RESUME_STEP_NONE) {
+        return;
+    }
+
+    g_system_halted = true;
+    s_cmd_interrupted = true;
+    if (!already_halted) {
+        motorEmergencyHold();
+    }
+    disable_sync_stop();
+    TMC_SetSpeedDirect(0);
+    TMC_SetEnable(false);
+    osDelay(50);
+
+    bool coord_synced = (coord_sync_from_encoders(&c) == 0);
+    if (!coord_synced) {
+        PrintDebug("[HOST] PNPSTOP encoder sync failed, saving logical coord; PCONTINUE will retry\r\n");
+        c = Coord_Get();
+    }
+
+    g_resume_ctx.task_id = g_task_id;
+    g_resume_ctx.coord_synced = coord_synced;
+    g_resume_ctx.step_id = RESUME_STEP_NONE;
+    g_resume_ctx.coord_x_steps = c.x;
+    g_resume_ctx.coord_y_steps = c.y;
+    g_resume_ctx.coord_r_deg = c.r;
+    g_resume_ctx.coord_z_deg = c.z;
+    g_resume_ctx.comp_index = g_comp_index;
+    g_resume_ctx.comp_count = g_comp_count;
+    g_resume_ctx.placed_flag = false;
+    g_resume_ctx.saved_tick = osKernelGetTickCount();
+
+    if (g_state >= HOST_MARK_ALIGN && g_state <= HOST_PLACE &&
+        g_comp_count > 0 && g_comp_index < g_comp_count) {
+        g_resume_ctx.step_id = state_to_resume_step(g_state);
+        if (g_state == HOST_PICK && g_pick_completed) {
+            g_resume_ctx.step_id = RESUME_STEP_MOVE_BOTTOM_CAM;
+        }
+        g_resume_ctx.placed_flag = g_components[g_comp_index].placed;
+    }
+
+    nozzle_off();
+    Pump_Off();
+    Valve_Off();
+    LowerCam_Light_Off();
+    Heater_SendStop();
+    DRV8803_EnableChip(1, false);
+    DRV8803_EnableChip(2, false);
+    g_light_on = false;
+    Vision_SendEnd();
+    Vision_ForceIdle();
+
+    host_send("PNPSTOP_OK");
+    ESP_SendLog("紧急暂停");
+    PrintDebug("[HOST] PNPSTOP saved ctx: task=%u step=%d comp=%u/%u pos=(%ld,%ld) placed=%d\r\n",
+               (unsigned)g_resume_ctx.task_id, (int)g_resume_ctx.step_id,
+               (unsigned)g_resume_ctx.comp_index, (unsigned)g_resume_ctx.comp_count,
+               (long)g_resume_ctx.coord_x_steps, (long)g_resume_ctx.coord_y_steps,
+               g_resume_ctx.placed_flag ? 1 : 0);
+}
+
+static void pnp_continue(void) {
+    MachineCoord_t c;
+
+    PrintDebug("[HOST] PCONTINUE received: halted=%d ctx_step=%d task=%u/%u comp=%u/%u\r\n",
+               g_system_halted ? 1 : 0, (int)g_resume_ctx.step_id,
+               (unsigned)g_resume_ctx.task_id, (unsigned)g_task_id,
+               (unsigned)g_resume_ctx.comp_index, (unsigned)g_comp_count);
+
+    if (!g_system_halted) {
+        PrintDebug("[HOST] PCONTINUE ignored: not halted\r\n");
+        return;
+    }
+    if (g_resume_ctx.task_id != g_task_id ||
+        g_resume_ctx.comp_count != g_comp_count ||
+        g_resume_ctx.step_id == RESUME_STEP_NONE ||
+        g_resume_ctx.comp_index >= g_comp_count) {
+        PrintDebug("[HOST] PCONTINUE ignored: task/ctx mismatch\r\n");
+        host_send("PCONTINUE_IGNORED");
+        return;
+    }
+
+    bool sync_ok = g_resume_ctx.coord_synced;
+    MachineCoord_t synced;
+    if (coord_sync_from_encoders(&synced) == 0) {
+        c = synced;
+        sync_ok = true;
+    } else {
+        c = Coord_Get();
+        if (!sync_ok) {
+            PrintDebug("[HOST] PCONTINUE encoder sync retry failed, using logical coord\r\n");
+        }
+    }
+    if (!c.valid ||
+        abs(c.x - g_resume_ctx.coord_x_steps) > RESUME_COORD_TOL_STEPS ||
+        abs(c.y - g_resume_ctx.coord_y_steps) > RESUME_COORD_TOL_STEPS) {
+        PrintDebug("[HOST] PCONTINUE coord mismatch: cur=(%ld,%ld) saved=(%ld,%ld)\r\n",
+                   (long)c.x, (long)c.y,
+                   (long)g_resume_ctx.coord_x_steps, (long)g_resume_ctx.coord_y_steps);
+        g_system_halted = false;
+        s_cmd_interrupted = false;
+        g_state = HOST_ERROR;
+        host_send("PCONTINUE_FAIL");
+        return;
+    }
+
+    g_system_halted = false;
+    s_cmd_interrupted = false;
+    motion_flush_after_halt();
+    z_safe();
+    int mret = motor_move_absolute(g_resume_ctx.coord_x_steps,
+                                   g_resume_ctx.coord_y_steps,
+                                   PNP_SPEED_FINE, PNP_ACC_FINE);
+    if (mret != 0) {
+        if (mret == -3 || g_system_halted) {
+            PrintDebug("[HOST] PCONTINUE halted again ret=%d\r\n", mret);
+            g_state = HOST_ERROR;
+            host_send("PCONTINUE_FAIL");
+            return;
+        }
+        PrintDebug("[HOST] PCONTINUE restore move FAILED ret=%d, continue within tolerance\r\n", mret);
+    }
+
+    g_comp_index = g_resume_ctx.comp_index;
+    /* R axis is open-loop; restore logical angle and keep enabled, no blind re-rotate. */
+    Coord_UpdateR(g_resume_ctx.coord_r_deg);
+    TMC_SetEnable(true);
+    Servo_SetAngle(Z_SERVO_CH, g_resume_ctx.coord_z_deg);
+    Coord_UpdateZ(g_resume_ctx.coord_z_deg);
+    Vision_SendEnd();
+    Vision_ForceIdle();
+    LowerCam_Light_Off();
+    g_p3_nozzle_retry = 0;
+
+    if (g_resume_ctx.placed_flag && g_comp_index < g_comp_count) {
+        g_components[g_comp_index].placed = true;
+        g_comp_index++;
+        GUI_SPI_NotifySMTProgress((uint16_t)g_comp_index, (uint16_t)g_comp_count);
+        if (g_comp_index >= g_comp_count) {
+            g_state = HOST_DONE;
+        } else {
+            int cl = component_cell(&g_components[g_comp_index]);
+            g_p1_scan_pos = g_scan_start_pos[cl];
+            prepare_p1_scan_restart();
+            g_state = HOST_FIND_COMP;
+        }
+        host_send("PCONTINUE_OK");
+        PrintDebug("[HOST] PCONTINUE skipped placed comp %u\r\n",
+                   (unsigned)(g_comp_index > 0 ? g_comp_index - 1 : 0));
+        return;
+    }
+
+    switch (g_resume_ctx.step_id) {
+    case RESUME_STEP_MARK_ALIGN:
+        start_p2_mark_align();
+        break;
+    case RESUME_STEP_P4_BASELINE: {
+        int pret = safe_move_to(g_calib.bottom_cam_x_steps,
+                                g_calib.bottom_cam_y_steps,
+                                PNP_SPEED, PNP_ACC);
+        if (pret == -3) {
+            g_state = HOST_ERROR;
+            host_send("PCONTINUE_FAIL");
+            return;
+        }
+        if (pret != 0) {
+            g_state = HOST_ERROR;
+            host_send("PCONTINUE_FAIL");
+            return;
+        }
+        LowerCam_Light_On();
+        Vision_Start(VCMD_P4, 0);
+        g_state = HOST_P4_BASELINE;
+        break;
+    }
+    case RESUME_STEP_P4_VERIFY: {
+        int pret = safe_move_to(g_calib.bottom_cam_x_steps,
+                                g_calib.bottom_cam_y_steps,
+                                PNP_SPEED, PNP_ACC);
+        if (pret == -3) {
+            g_state = HOST_ERROR;
+            host_send("PCONTINUE_FAIL");
+            return;
+        }
+        if (pret != 0) {
+            g_state = HOST_ERROR;
+            host_send("PCONTINUE_FAIL");
+            return;
+        }
+        LowerCam_Light_On();
+        Vision_Start(VCMD_P4, 0);
+        g_state = HOST_P4_VERIFY;
+        break;
+    }
+    case RESUME_STEP_FIND_COMP:
+        g_p1_scan_pos = 0;
+        prepare_p1_scan_restart();
+        g_state = HOST_FIND_COMP;
+        break;
+    case RESUME_STEP_PICK:
+        g_pick_step_phase = 0;
+        g_pick_completed = false;
+        g_state = g_last_pick_valid ? HOST_REPICK : HOST_PICK;
+        break;
+    case RESUME_STEP_MOVE_BOTTOM_CAM:
+        g_state = HOST_MOVE_TO_BOTTOM_CAM;
+        break;
+    case RESUME_STEP_OFFSET_CHECK:
+        g_p3_align_iter = 0;
+        g_p3_offset_x = 0;
+        g_p3_offset_y = 0;
+        g_offset_check_phase = 0;
+        g_state = HOST_MOVE_TO_BOTTOM_CAM;
+        break;
+    case RESUME_STEP_MOVE_TO_PCB:
+        g_move_to_pcb_phase = 0;
+        g_state = HOST_MOVE_TO_PCB;
+        break;
+    case RESUME_STEP_PLACE:
+        g_state = HOST_PLACE;
+        break;
+    default:
+        g_state = HOST_ERROR;
+        host_send("PCONTINUE_FAIL");
+        return;
+    }
+
+    host_send("PCONTINUE_OK");
+    PrintDebug("[HOST] PCONTINUE resume step=%d comp=%u pos=(%ld,%ld)\r\n",
+               (int)g_resume_ctx.step_id, (unsigned)g_comp_index,
+               (long)g_resume_ctx.coord_x_steps, (long)g_resume_ctx.coord_y_steps);
+}
+
+static void begin_new_download(void) {
+    g_task_id++;
+    if (g_task_id == 0) g_task_id = 1;
+    memset(&g_resume_ctx, 0, sizeof(g_resume_ctx));
+    g_system_halted = false;
+    s_cmd_interrupted = false;
+    g_p3_nozzle_retry = 0;
+    g_pick_completed = false;
+    g_last_pick_valid = false;
+    g_last_pick_angle_valid = false;
 }
 
 /* ================================================================
@@ -713,6 +1014,12 @@ static bool handle_calib_cmd(HostParsed_t *cmd) {
 }
 
 static void handle_debug_cmd(HostParsed_t *cmd) {
+    if (g_system_halted && cmd->cmd != HCMD_PNPSTOP &&
+        cmd->cmd != HCMD_PCONTINUE && cmd->cmd != HCMD_ABORT) {
+        PrintDebug("[HOST] System halted, command ignored\r\n");
+        return;
+    }
+
     /* JOG dedup only: block repeated START with same speed.
      * STOP or direction change resets.
      * Discrete moves always execute -- no dedup. */
@@ -993,6 +1300,14 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
         }
         break;
 
+    case HCMD_PNPSTOP:
+        pnp_halt();
+        break;
+
+    case HCMD_PCONTINUE:
+        pnp_continue();
+        break;
+
     case HCMD_AUTO_HEAT:
     if (strstr(cmd->raw, "ON"))  { g_auto_heat = true;  PrintDebug("[HOST] AUTO_HEAT ON\r\n");  host_send("AUTO_HEAT ON"); }
     if (strstr(cmd->raw, "OFF")) { g_auto_heat = false; PrintDebug("[HOST] AUTO_HEAT OFF\r\n"); host_send("AUTO_HEAT OFF"); }
@@ -1002,6 +1317,9 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
         /* 停止所有运动 */
         if (g_jog_active) { disable_sync_stop(); g_jog_active = false; }
         disable_sync_stop();
+        g_system_halted = false;
+        s_cmd_interrupted = false;
+        memset(&g_resume_ctx, 0, sizeof(g_resume_ctx));
         Coord_Invalidate();
         nozzle_off();
         Valve_On(); osDelay(200); Valve_Off();
@@ -1014,6 +1332,8 @@ g_consecutive_failures = 0; for (int i = 0; i < SCATTER_CELLS; i++) g_scan_start
         g_mark_count = 0;
         g_comp_index = 0;
         g_p3_nozzle_retry = 0;
+        g_last_pick_valid = false;
+        g_last_pick_angle_valid = false;
         PrintDebug("[HOST] ABORT: motion stopped, back to DEBUG\r\n");
         Heater_SendStop();  /* 若回流焊进行中也停止 */
         { uint8_t d[8] = {0}; Log_Write(LOG_ABORT, d); }
@@ -1532,8 +1852,10 @@ static void mark_align_step(void) {
         Vision_SendEnd();
         PrintDebug("[HOST] P2 done, starting P4 verify...\r\n");
         ESP_SendLog("完成mark点识别");
+        GUI_SPI_NotifyLog("MARK_DONE");
         g_state = HOST_P4_VERIFY;
         ESP_SendLog("开始第二次对准吸嘴");
+        GUI_SPI_NotifyLog("NOZZLE_ALIGN");
         int ret_p4v = safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
         if (ret_p4v != 0) {
             PrintDebug("[HOST] P4 verify move FAILED (ret=%d), abort to ERROR\r\n", ret_p4v);
@@ -1642,8 +1964,14 @@ static void p4_baseline_step(void)
     case VISION_GOT_POS: {
         int32_t dx_s = (int32_t)(r->dy);
         int32_t dy_s = -(int32_t)(r->dx);
+        MachineCoord_t p4c = Coord_Get();
+        PrintDebug("[HOST] P4 baseline pos: cam=(%ld,%ld) move=(%ld,%ld) at=(%ld,%ld)\r\n",
+                   (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s,
+                   (long)p4c.x, (long)p4c.y);
         if (dx_s != 0 || dy_s != 0) {
-            int ret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
+            int ret = safe_move_to(p4c.x + dx_s, p4c.y + dy_s, PNP_SPEED_FINE, PNP_ACC_FINE);
+            PrintDebug("[HOST] P4 baseline compensate ret=%d at=(%ld,%ld)\r\n",
+                       ret, (long)Coord_Get().x, (long)Coord_Get().y);
             if (ret != 0) {
                 LowerCam_Light_Off();
                 PrintDebug("[HOST] P4 baseline compensate FAILED (ret=%d)\r\n", ret);
@@ -1695,8 +2023,14 @@ static void p4_verify_step(void)
     case VISION_GOT_POS: {
         int32_t dx_s = (int32_t)(r->dy);
         int32_t dy_s = -(int32_t)(r->dx);
+        MachineCoord_t p4c = Coord_Get();
+        PrintDebug("[HOST] P4 verify pos: cam=(%ld,%ld) move=(%ld,%ld) at=(%ld,%ld)\r\n",
+                   (long)r->dx, (long)r->dy, (long)dx_s, (long)dy_s,
+                   (long)p4c.x, (long)p4c.y);
         if (dx_s != 0 || dy_s != 0) {
-            int ret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED, PNP_ACC);
+            int ret = safe_move_to(p4c.x + dx_s, p4c.y + dy_s, PNP_SPEED_FINE, PNP_ACC_FINE);
+            PrintDebug("[HOST] P4 verify compensate ret=%d at=(%ld,%ld)\r\n",
+                       ret, (long)Coord_Get().x, (long)Coord_Get().y);
             if (ret != 0) {
                 LowerCam_Light_Off();
                 PrintDebug("[HOST] P4 verify compensate FAILED (ret=%d)\r\n", ret);
@@ -1872,6 +2206,10 @@ static void p1_start_pick_from_queue(Component_t *c) {
     PrintDebug("[HOST] P1 queue %d/%d -> pick(%ld,%ld) class=%ld\r\n",
                g_p1_queue_idx + 1, g_p1_queue_count,
                (long)q->x_steps, (long)q->y_steps, (long)q->class_id);
+    g_last_pick_x_steps = Coord_Get().x;
+    g_last_pick_y_steps = Coord_Get().y;
+    g_last_pick_valid = true;
+    g_pick_completed = false;
     g_state = HOST_PICK;
 }
 
@@ -1919,6 +2257,10 @@ static void p1_align_finish(Component_t *c) {
     if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
         safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps, Coord_Get().y - g_calib.cam_to_nozzle_dy_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
     }
+    g_last_pick_x_steps = Coord_Get().x;
+    g_last_pick_y_steps = Coord_Get().y;
+    g_last_pick_valid = true;
+    g_pick_completed = false;
     g_state = HOST_PICK;
 }
 
@@ -2115,7 +2457,8 @@ static void find_comp_step(void) {
         g_p1_subpos_start_tick = osKernelGetTickCount(); g_find_sub = FIND_IDLE;
         g_consecutive_failures++;
         if (g_consecutive_failures >= 3) { p1_queue_clear(); host_send("REFILL_NEEDED"); g_state = HOST_WAIT_REFILL; }
-        else { g_comp_index++; if (g_comp_index >= g_comp_count) { g_state = HOST_DONE; }
+        else { g_comp_index++; GUI_SPI_NotifySMTProgress((uint16_t)g_comp_index, (uint16_t)g_comp_count);
+               if (g_comp_index >= g_comp_count) { g_state = HOST_DONE; }
                else { int cl = component_cell(&g_components[g_comp_index]); g_p1_scan_pos = g_scan_start_pos[cl]; g_p1_wrapped = false; } }
         break;
     }
@@ -2123,10 +2466,10 @@ static void find_comp_step(void) {
     }
 }
 static void offset_check_step(void) {
-    static int phase = 0;
+    /* phase moved to file-scope g_offset_check_phase */
 
     /* ---- Phase 1: 等待 R 轴旋转完成 ---- */
-    if (phase == 1) {
+    if (g_offset_check_phase == 1) {
         R_State_t rs = r_axis_state();
         if (rs == R_DONE) {
             osDelay(10);
@@ -2135,13 +2478,13 @@ static void offset_check_step(void) {
             GUI_SPI_NotifySMTProgress((uint16_t)(g_comp_index + 1), (uint16_t)g_comp_count);
             PrintDebug("[HOST] Offset check done, moving to PCB...\r\n");
             ESP_SendLog("元件偏差修正完成");
-            phase = 0;
+            g_offset_check_phase = 0;
             g_state = HOST_MOVE_TO_PCB;
             return;
         } else if (rs == R_STALL || rs == R_STUCK || rs == R_TIMEOUT) {
             PrintDebug("[HOST] P3: R correction FAILED (state=%d)\r\n", (int)rs);
             Vision_SendEnd();
-            phase = 0;
+            g_offset_check_phase = 0;
             g_state = HOST_ERROR;
             return;
         }
@@ -2178,7 +2521,7 @@ static void offset_check_step(void) {
             LowerCam_Light_Off();
             g_p3_nozzle_retry = 0;
             PrintDebug("[HOST] P3 align %d iters no ok, force finish\r\n", g_p3_align_iter);
-            if (host_start_r_correction(r, "P3")) { phase = 1; return; }
+            if (host_start_r_correction(r, "P3")) { g_offset_check_phase = 1; return; }
             osDelay(10);
             r_axis_set_zero();
             Vision_SendEnd();
@@ -2201,7 +2544,7 @@ static void offset_check_step(void) {
         g_p3_nozzle_retry = 0;
         LowerCam_Light_Off();
         if (host_start_r_correction(r, "P3")) {
-            phase = 1;
+            g_offset_check_phase = 1;
             return;   /* 等待 r_axis_poll 完成旋转 */
         }
         /* 无需矫正，直接过渡 */
@@ -2222,23 +2565,24 @@ static void offset_check_step(void) {
         /* err3_8: 吸嘴空取 — 回退重新吸取，不降级贴装 */
         if (strcmp(err, "err3_8") == 0) {
             ESP_SendLog("元件吸取失败");
+            GUI_SPI_NotifyLog("PICK_FAIL");
             g_p3_nozzle_retry++;
-            if (g_p3_nozzle_retry >= 3) {
-                LowerCam_Light_Off();
-                PrintDebug("[HOST] P3 nozzle empty x3, check feeder!\r\n");
+            LowerCam_Light_Off();
+            Vision_SendEnd();
+            Vision_ForceIdle();
+            if (g_p3_nozzle_retry == 1) {
+                PrintDebug("[HOST] P3 nozzle empty, repick (%d/%d)\r\n",
+                           g_p3_nozzle_retry, P3_NOZZLE_RETRY_MAX);
+                g_state = HOST_REPICK;
+            } else if (g_p3_nozzle_retry >= P3_NOZZLE_RETRY_MAX) {
+                PrintDebug("[HOST] P3 nozzle empty x%d, check feeder!\r\n", P3_NOZZLE_RETRY_MAX);
                 g_state = HOST_ERROR;
             } else {
-                LowerCam_Light_Off();
-                PrintDebug("[HOST] P3 nozzle empty, retry pickup (%d/3)\r\n", g_p3_nozzle_retry);
-                /* 回退散料区重新 P1 找取同一元件 */
+                PrintDebug("[HOST] P3 nozzle empty again, force P1 re-recognition (%d/%d)\r\n",
+                           g_p3_nozzle_retry, P3_NOZZLE_RETRY_MAX);
                 cl = component_cell(c);
-                int pos = g_p1_found_pos >= 0 ? g_p1_found_pos : 0;
-                g_p1_found_pos = -1;  /* 清空，重试 VISION_GOT_STOP 会重新设置 */
-                g_p1_scan_pos = pos;
-                g_p1_subpos_start_tick = osKernelGetTickCount();
-                safe_move_to(g_scatter_subpos[cl][pos][0] + g_calib.cam_to_nozzle_dx_steps, g_scatter_subpos[cl][pos][1] + g_calib.cam_to_nozzle_dy_steps,
-                             PNP_SPEED, PNP_ACC);
-                g_find_sub = FIND_IDLE;
+                g_p1_scan_pos = g_scan_start_pos[cl];
+                prepare_p1_scan_restart();
                 g_state = HOST_FIND_COMP;
             }
         } else if (strcmp(err, "err3_6") == 0 || strcmp(err, "err3_7") == 0) {
@@ -2247,6 +2591,7 @@ static void offset_check_step(void) {
             Vision_SendEnd();
             PrintDebug("[HOST] P3 %s (align fail/timeout), tolerant place\r\n", err);
             ESP_SendLog("偏差修正失败");
+            GUI_SPI_NotifyLog("ALIGN_FAIL");
             Coord_Invalidate();
             g_state = HOST_MOVE_TO_PCB;
         } else {
@@ -2272,23 +2617,65 @@ static void offset_check_step(void) {
  *  PnP step 函数
  * ================================================================ */
 
+static void repick_step(void) {
+    if (g_comp_index >= g_comp_count) {
+        g_state = HOST_ERROR;
+        return;
+    }
+    if (!g_last_pick_valid) {
+        PrintDebug("[HOST] REPICK: no saved pick coord, use scatter cell\r\n");
+        Component_t *c = &g_components[g_comp_index];
+        int cl = component_cell(c);
+        int pos = g_p1_found_pos >= 0 ? g_p1_found_pos : 0;
+        g_last_pick_x_steps = g_scatter_subpos[cl][pos][0];
+        g_last_pick_y_steps = g_scatter_subpos[cl][pos][1];
+        g_last_pick_valid = true;
+    }
+
+    PrintDebug("[HOST] REPICK comp %u -> pick(%ld,%ld)\r\n",
+               (unsigned)g_components[g_comp_index].id,
+               (long)g_last_pick_x_steps, (long)g_last_pick_y_steps);
+    int mret = safe_move_to(g_last_pick_x_steps, g_last_pick_y_steps, PNP_SPEED, PNP_ACC);
+    if (mret == -3) return;
+    if (mret != 0) {
+        g_state = HOST_ERROR;
+        return;
+    }
+    g_pick_step_phase = 0;
+    g_pick_completed = false;
+    if (!pick_component()) {
+        PrintDebug("[HOST] REPICK pick FAILED, force P1 re-recognition\r\n");
+        Component_t *c = &g_components[g_comp_index];
+        int cl = component_cell(c);
+        g_p1_scan_pos = g_scan_start_pos[cl];
+        prepare_p1_scan_restart();
+        g_state = HOST_FIND_COMP;
+        return;
+    }
+    g_pick_completed = true;
+    host_start_r_correction_angle(g_last_pick_angle_x100,
+                                  g_last_pick_angle_valid, "REPICK");
+    r_axis_set_zero();
+    g_state = HOST_MOVE_TO_BOTTOM_CAM;
+}
+
 static void pick_step(void) {
-    static int phase = 0;
+    /* phase moved to file-scope g_pick_step_phase */
 
     Component_t *c = &g_components[g_comp_index];
 
     /* ---- Phase 1: 等待 R 轴旋转完成 ---- */
-    if (phase == 1) {
+    if (g_pick_step_phase == 1) {
         R_State_t rs = r_axis_state();
         if (rs == R_DONE) {
             osDelay(10);  /* 机械停稳 */
             r_axis_set_zero();
-            phase = 0;
+            g_pick_step_phase = 0;
             g_state = HOST_MOVE_TO_BOTTOM_CAM;
             return;
         } else if (rs == R_STALL || rs == R_STUCK || rs == R_TIMEOUT) {
             PrintDebug("[HOST] PICK: R correction FAILED (state=%d)\r\n", (int)rs);
-            phase = 0;
+            g_pick_step_phase = 0;
             g_state = HOST_ERROR;
             return;
         }
@@ -2297,6 +2684,10 @@ static void pick_step(void) {
     }
 
     /* ---- Phase 0: 吸取元件 ---- */
+    g_pick_completed = false;
+    g_last_pick_x_steps = Coord_Get().x;
+    g_last_pick_y_steps = Coord_Get().y;
+    g_last_pick_valid = true;
     PrintDebug("[HOST] PICK comp %u\r\n", c->id);
     if (!pick_component()) {
         PrintDebug("[HOST] Pick FAILED, retrying at found pos\r\n");
@@ -2312,20 +2703,25 @@ static void pick_step(void) {
     }
 
     /* R轴矫正: P1识别完成，吸取后旋转。无矫正则直接过渡 */
+    g_pick_completed = true;
     int32_t angle_x100 = 0;
     bool    angle_valid = false;
     if (p1_queue_has_next()) {
         const P1QueuedComponent_t *q = p1_queue_current();
         angle_x100  = q->angle_x100;
         angle_valid = true;
+        g_last_pick_angle_x100 = q->angle_x100;
+        g_last_pick_angle_valid = true;
         p1_queue_consume_current();
     } else {
         const VisionResult_t *vr = Vision_GetResult();
-        angle_x100  = vr->angle_x100;
-        angle_valid = vr->angle_valid;
+        angle_x100  = vr ? vr->angle_x100 : 0;
+        angle_valid = vr ? vr->angle_valid : false;
+        g_last_pick_angle_x100 = angle_x100;
+        g_last_pick_angle_valid = angle_valid;
     }
     if (host_start_r_correction_angle(angle_x100, angle_valid, "P1")) {
-        phase = 1;
+        g_pick_step_phase = 1;
         return;   /* 等待 r_axis_poll 完成旋转 */
     }
     /* 无需矫正，直接过渡 */
@@ -2336,7 +2732,13 @@ static void pick_step(void) {
 static void move_to_bottom_step(void) {
     g_p3_align_iter = 0;   /* 新 P3 会话：复位迭代对齐计数 */
     g_p3_offset_x = 0; g_p3_offset_y = 0;
-    safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
+    g_offset_check_phase = 0;
+    int mret = safe_move_to(g_calib.bottom_cam_x_steps, g_calib.bottom_cam_y_steps, PNP_SPEED, PNP_ACC);
+    if (mret == -3) return;
+    if (mret != 0) {
+        g_state = HOST_ERROR;
+        return;
+    }
     LowerCam_Light_On();
     ESP_SendLog("开始修正元件偏差");
     Vision_Start(VCMD_P3, 0);
@@ -2344,23 +2746,28 @@ static void move_to_bottom_step(void) {
 }
 
 static void move_to_pcb_step(void) {
-    static int     phase = 0;
-    static int32_t saved_mx, saved_my;
+    /* phase moved to file-scope g_move_to_pcb_phase */
 
     /* ---- Phase 1: 等待 R 轴旋转完成，然后 XY 移动 ---- */
-    if (phase == 1) {
+    if (g_move_to_pcb_phase == 1) {
         R_State_t rs = r_axis_state();
         if (rs == R_DONE) {
             PrintDebug("[HOST] MOVE_TO_PCB: current=(%ld,%ld) target=(%ld,%ld)\r\n",
                        (long)Coord_Get().x, (long)Coord_Get().y,
-                       (long)saved_mx, (long)saved_my);
-            safe_move_to(saved_mx, saved_my, PNP_SPEED_FAST, PNP_ACC);
-            phase = 0;
+                       (long)g_move_to_pcb_saved_mx, (long)g_move_to_pcb_saved_my);
+            int mret = safe_move_to(g_move_to_pcb_saved_mx, g_move_to_pcb_saved_my, PNP_SPEED_FAST, PNP_ACC);
+            if (mret == -3) return;
+            if (mret != 0) {
+                g_move_to_pcb_phase = 0;
+                g_state = HOST_ERROR;
+                return;
+            }
+            g_move_to_pcb_phase = 0;
             g_state = HOST_PLACE;
             return;
         } else if (rs == R_STALL || rs == R_STUCK || rs == R_TIMEOUT) {
             PrintDebug("[HOST] MOVE_TO_PCB: R rotation FAILED (state=%d)\r\n", (int)rs);
-            phase = 0;
+            g_move_to_pcb_phase = 0;
             g_state = HOST_ERROR;
             return;
         }
@@ -2388,19 +2795,22 @@ static void move_to_pcb_step(void) {
     PrintDebug("[HOST] MOVE_TO_PCB comp %u -> machine(%ld,%ld)\r\n", c->id, (long)machine_x, (long)machine_y);
 
     /* 保存目标坐标，Phase 1 使用 */
-    saved_mx = machine_x;
-    saved_my = machine_y;
+    g_move_to_pcb_saved_mx = machine_x;
+    g_move_to_pcb_saved_my = machine_y;
 
     /* 启动 R 轴旋转到贴装角度 */
     r_axis_start(c->target_angle, R_SPEED_RPM);
-    phase = 1;
+    g_move_to_pcb_phase = 1;
 }
 
 static void place_step(void) {
     Component_t *c = &g_components[g_comp_index];
     ESP_SendLog("开始贴装");
+    GUI_SPI_NotifyLog("PLACE_START");
     place_component(); c->placed = true; g_comp_index++;
+    GUI_SPI_NotifySMTProgress((uint16_t)g_comp_index, (uint16_t)g_comp_count);
     ESP_SendLog("贴装完成");
+    GUI_SPI_NotifyLog("PLACE_DONE");
     if (g_comp_index >= g_comp_count) { g_state = HOST_DONE; }
     else {
         int cl = component_cell(&g_components[g_comp_index]);
@@ -2474,13 +2884,24 @@ static void error_step(void) {
         PrintDebug("[HOST] ERROR timeout, auto-returning to DEBUG.\r\n");
         g_comp_count = 0; g_mark_count = 0; g_comp_index = 0;
         g_p3_nozzle_retry = 0;
+        g_last_pick_valid = false;
+        g_last_pick_angle_valid = false;
         g_error_entered = false;
         g_state = HOST_DEBUG;
     }
 }
 
 void Host_UartRecvCallback(uint8_t *data, int len) {
-    (void)data; (void)len;
+    if (data != NULL && len >= 7 && !g_system_halted) {
+        for (int i = 0; i <= len - 7; i++) {
+            if (memcmp(&data[i], "PNPSTOP", 7) == 0) {
+                g_system_halted = true;
+                s_cmd_interrupted = true;
+                motorEmergencyHold();
+                break;
+            }
+        }
+    }
     /* 命令解析已移至 Host_Task 主循环（UART_PeekData），
      * 避免 ISR 中 FPU 浮点运算及 g_parser 竞态。 */
 }
@@ -2557,6 +2978,10 @@ static void gui_handle_wifi_connect(const char *raw, uint16_t raw_len)
 static void gui_process_cmd(const HostParsed_t *p)
 {
     if (p == NULL) return;
+    if (g_system_halted) {
+        PrintDebug("[HOST] GUI command ignored while halted\r\n");
+        return;
+    }
 
     switch (p->cmd) {
     case HCMD_IMPORT_ENTER:
@@ -2586,6 +3011,11 @@ static void gui_process_cmd(const HostParsed_t *p)
 }
 
 static void host_handle_esp_web_cmd(ESP_Cmd_t cmd) {
+    if (g_system_halted) {
+        PrintDebug("[HOST] ESP command ignored while halted\r\n");
+        return;
+    }
+
     switch (cmd) {
     case ESP_CMD_HEAT_START:
         PrintDebug("[HOST] ESP HEAT_START\r\n");
@@ -2743,6 +3173,7 @@ void Host_Task(void *argument) {
                             && !(parsed.raw_len == 10 && memcmp(parsed.raw, "DEBUG_MODE", 10) == 0)
                             && !(parsed.raw_len == 14 && memcmp(parsed.raw, "DOWNLOAD_READY", 14) == 0)
                             && !(parsed.raw_len == 15 && memcmp(parsed.raw, "EXIT_DEBUG_MODE", 15) == 0)) {
+                            begin_new_download();
                             g_state = HOST_DOWNLOADING;
                             g_comp_count = 0;
                             g_mark_count = 0;
@@ -2767,7 +3198,7 @@ void Host_Task(void *argument) {
                     }
                 }
             }
-            UART_ClearData(UART_CH1);
+            UART_ClearAppData(UART_CH1);
         }
 
         /* ---- 2.5 GUI SPI 命令处理 ---- */
@@ -2778,6 +3209,9 @@ void Host_Task(void *argument) {
                 gui_process_cmd(&gcmd);
             }
         }
+
+        /* ---- 2.6 GUI log flush ---- */
+        GUI_SPI_LogProcess();
 
         /* ESP CSV import is parsed only in Host_Task context. */
         {
@@ -2825,7 +3259,12 @@ void Host_Task(void *argument) {
             continue;
         }
 
-        /* ---- 5. 状态机 ---- */
+        /* PNPSTOP freeze: only PCONTINUE can restart the state machine */
+        if (g_system_halted) {
+            osDelay(20);
+            continue;
+        }
+
         switch (g_state) {
 
         case HOST_HOME:
@@ -2839,6 +3278,7 @@ void Host_Task(void *argument) {
                 g_gui_smt_start_req = 0;
                 /* GUI 请求开始贴片：发送下载就绪，进入下载模式 */
                 UART_SendString(UART_CH1, "DOWNLOAD_READY\n");
+                begin_new_download();
                 g_comp_count = 0;
                 g_mark_count = 0;
                 g_header_parsed = false;
@@ -2900,6 +3340,7 @@ void Host_Task(void *argument) {
             break;
 
         case HOST_PICK:              pick_step();            break;
+        case HOST_REPICK:            repick_step();          break;
         case HOST_MOVE_TO_BOTTOM_CAM: move_to_bottom_step(); break;
         case HOST_OFFSET_CHECK:      offset_check_step();    break;
         case HOST_MOVE_TO_PCB:       move_to_pcb_step();     break;

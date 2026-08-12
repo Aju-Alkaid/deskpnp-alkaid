@@ -24,6 +24,7 @@ extern TIM_HandleTypeDef htim5;
 //事件组
 osEventFlagsId_t evtAxesDone = NULL;   // 用于三轴到位同步
 volatile bool g_motor_error = false;
+volatile bool g_system_halted = false;
 volatile MotorError_t g_motor_error_detail = MOTOR_OK;
 volatile bool s_cmd_interrupted = false;
 volatile uint32_t g_axes_done_bits = 0;
@@ -104,13 +105,46 @@ int motion_read_encoder(uint8_t id, int32_t *out, uint32_t timeout_ms)
     return -1;
 }
 
+int coord_sync_from_encoders(MachineCoord_t *out)
+{
+    if (out == NULL) return -1;
+
+    int32_t e1 = 0, e2 = 0, e3 = 0;
+    if (motion_read_encoder(1, &e1, 250) != 0) {
+        osDelay(20);
+        if (motion_read_encoder(1, &e1, 250) != 0) return -1;
+    }
+    if (motion_read_encoder(2, &e2, 250) != 0) {
+        osDelay(20);
+        if (motion_read_encoder(2, &e2, 250) != 0) return -1;
+    }
+    if (motion_read_encoder(3, &e3, 250) != 0) {
+        osDelay(20);
+        if (motion_read_encoder(3, &e3, 250) != 0) return -1;
+    }
+
+    int32_t x = (e1 + e2) / 2;
+    int32_t y = MOTOR_Y_ENC_SIGN * e3;
+    Coord_UpdateXY(x, y);
+    *out = Coord_Get();
+    return 0;
+}
+
 static int motion_wait_done(uint32_t need, uint32_t poll_ms, bool *out_timeout)
 {
+    if (g_system_halted) {
+        *out_timeout = false;
+        return -3;
+    }
     uint32_t waited = 0;
     uint32_t ping_tick = 0;
     while (waited < poll_ms) {
         osDelay(10);
         waited += 10;
+        if (g_system_halted) {
+            *out_timeout = false;
+            return -3;
+        }
         if (g_axes_error) {
             *out_timeout = false;
             return -2;
@@ -322,6 +356,10 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         axis_stop(X1_ADDR);
         axis_stop(X2_ADDR);
         axis_stop(Y_ADDR);
+        if (ret == -3) {
+            motorSyncTrigger(0);
+            return -3;
+        }
         motorSyncTrigger(0);  /* 超时/异常：确保缓存的 0xF7 真正执行 */
         motorSyncEnable(1);   /* 并恢复同步，避免三轴状态不一致 */
 
@@ -447,6 +485,10 @@ int move_xy_relative(int32_t dx, int32_t dy, uint16_t speed, uint8_t acc)
         int ret2 = motion_wait_done(corr_need, 1500, &timeout);
         if (ret2 != 0) {
             axis_stop(X1_ADDR); axis_stop(X2_ADDR); axis_stop(Y_ADDR);
+            if (ret2 == -3) {
+                motorSyncTrigger(0);
+                return -3;
+            }
             motorSyncTrigger(0); motorSyncEnable(1);
             Coord_Invalidate();
             return ret2;
@@ -546,6 +588,9 @@ static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
         axis_stop(X2_ADDR);
         axis_stop(Y_ADDR);
         motorSyncTrigger(0); motorSyncEnable(1);
+        if (ret == -3) {
+            return -3;
+        }
         Coord_Invalidate();
         return ret;
     }
@@ -594,6 +639,44 @@ static int move_to(int32_t x_abs, int32_t y_abs, uint16_t speed, uint8_t acc)
 
     return 0;
 }
+
+int motor_move_absolute(int32_t x, int32_t y, uint16_t speed, uint8_t acc)
+{
+    if (g_system_halted) {
+        motorEmergencyHold();
+        return -3;
+    }
+
+    MachineCoord_t c0 = Coord_Get();
+    if (c0.x == x && c0.y == y) {
+        Coord_UpdateXY(x, y);
+        return 0;
+    }
+
+    int ret = move_to(x, y, speed, acc);
+    if (ret == 0) {
+        if (g_system_halted) {
+            motorEmergencyHold();
+            return -3;
+        }
+        Coord_UpdateXY(x, y);
+    }
+    return ret;
+}
+
+void motion_flush_after_halt(void)
+{
+    motion_drain_queue();
+    motion_clear_done_bits();
+    g_axes_error = false;
+    motorSyncEnable(1);
+    osDelay(100);
+    motion_drain_queue();
+    motion_clear_done_bits();
+    g_axes_error = false;
+    motorSyncEnable(1);
+}
+
 void nozzle_on(void) {
     DRV8803_SetOutput(&Port_12VO1, true);
 }
@@ -734,10 +817,21 @@ int jog_stop_update_coord(const char *dir_name,
 /* ---------- 组合的吸取 / 放置流程 ---------- */
 
 bool pick_component(void) {
+    if (g_system_halted) return false;
     z_pick();
     servo_delay_ms(300);   // Z轴完全稳定后再开泵
+    if (g_system_halted) {
+        nozzle_off();
+        z_safe();
+        return false;
+    }
     nozzle_on();
     servo_delay_ms(500);   // 真空建立
+    if (g_system_halted) {
+        nozzle_off();
+        z_safe();
+        return false;
+    }
     if (!vacuum_ok()) {
         nozzle_off();
         z_safe();
@@ -773,8 +867,7 @@ float r_axis_calibrate(void) {
 
 /* ---- 非阻塞 API 兼容层 (内部阻塞执行) ---- */
 void r_axis_start(float angle, float speed_rpm) {
-    (void)speed_rpm;
-    r_axis_rotate(angle, R_SPEED_RPM);
+    r_axis_rotate(angle, speed_rpm);
 }
 
 void r_axis_poll(void) {
@@ -791,6 +884,7 @@ int r_axis_rotate(float angle, float speed_rpm) {
         Coord_UpdateR(angle);
         return 0;
     }
+    if (g_system_halted) return -3;
 
     int32_t max_spd = (int32_t)(speed_rpm * R_STEPS_PER_REV / 60.0f);
     if (max_spd > R_MAX_SPEED) max_spd = R_MAX_SPEED;
@@ -812,6 +906,11 @@ int r_axis_rotate(float angle, float speed_rpm) {
 
     while (1) {
         vTaskDelay(pdMS_TO_TICKS(R_POLL_INTERVAL_MS));
+        if (g_system_halted) {
+            TMC_SetSpeedDirect(0);
+            TMC_SetEnable(true);
+            return -3;
+        }
 
         /* ---- 积分: 上一周期速度 × 实际耗时 ---- */
         uint32_t t_now  = HAL_GetTick();

@@ -48,6 +48,7 @@ osMessageQueueId_t esp_log_queue;
 osMessageQueueId_t esp_web_cmd_queue;
 osMessageQueueId_t esp_wifi_cfg_queue;
 osMessageQueueId_t esp_csv_import_queue;
+extern osMessageQueueId_t gui_log_queue;
 osMutexId_t esp_spi_mutex;
 osMutexId_t w25q64_mutex;
 osMessageQueueId_t host_pkt_queue;
@@ -218,6 +219,7 @@ void MX_FREERTOS_Init(void) {
 	motor_event_queue = osMessageQueueNew(32, sizeof(CAN_Rx_Packet_t), NULL);
 	motion_cmd_queue = osMessageQueueNew(20, sizeof(MotionCmd_t), NULL);
 	gui_cmd_queue = osMessageQueueNew(16, sizeof(HostParsed_t), NULL);
+	gui_log_queue = osMessageQueueNew(32, sizeof(GUI_LogMsg_t), NULL);
 	gui_spi_mutex = osMutexNew(NULL);
 	host_pkt_queue = osMessageQueueNew(64, sizeof(HostMsg_t), NULL);
 	esp_cmd_queue = osMessageQueueNew(8, sizeof(ESP_Cmd_t), NULL);

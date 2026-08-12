@@ -75,6 +75,12 @@ UART_Status_t UART_SendString(Uart_Id_t id, const char *str);
 UART_Status_t UART_Write_DMA(Uart_Id_t id, const uint8_t *data, uint16_t size);
 
 /**
+ * @brief 复位指定通道 TX 状态并继续发送环形缓冲中的剩余日志
+ * @param id UART 通道 ID
+ */
+void UART_TX_Reset(Uart_Id_t id);
+
+/**
  * @brief 驱动数据处理函数
  * @note **必须在主循环或高优先级 FreeRTOS 任务中高频调用**。
  *       负责将 DMA 缓冲区的数据拷贝到应用缓冲区，并重启 DMA 接收。
@@ -158,6 +164,12 @@ bool UART_PeekData(Uart_Id_t id, const uint8_t **data, uint16_t *len);
  * @note 调用后该通道的数据将被视为已处理，下次 DMA 接收会覆盖缓冲区
  */
 void UART_ClearData(Uart_Id_t id);
+
+/**
+ * @brief 仅清除已拷贝到应用缓冲区的旧数据，不触碰 ISR data_ready
+ * @param id UART 通道 ID
+ */
+void UART_ClearAppData(Uart_Id_t id);
 
 void TMC_UART_Transmit(uint8_t *data, uint16_t size) ;
 uint8_t TMC_UART_Receive(void) ;

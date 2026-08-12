@@ -7,8 +7,8 @@
 /* Mark point count (for app_host.c) */
 #define P2_MARK_COUNT  3
 
-/* P1 batch result cap: cam max_det is 10, one frame reports all targets */
-#define P1_MAX_TARGETS 10
+/* P1 batch result cap: keep in sync with camera max_det; 32 covers dense feeder views */
+#define P1_MAX_TARGETS 32
 
 /*
  * Vision module external states (MaixCAM 2026 v2 protocol)

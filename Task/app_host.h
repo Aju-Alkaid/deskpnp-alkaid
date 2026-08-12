@@ -14,8 +14,8 @@
 #define MAX_MARKS       8     /* Mark 点最大数量（规范为 5） */
 
 /* PnP 运动速度/加速度常量 */
-#define PNP_SPEED        300   /* 通用速度 (RPM) */
-#define PNP_ACC          25    /* 通用加速度 */
+#define PNP_SPEED        400   /* 通用速度 (RPM) */
+#define PNP_ACC          40    /* 通用加速度 */
 #define PNP_SPEED_FINE   100   /* 视觉迭代微调 */
 #define P1_SCAN_SPEED     100   /* P1 扫描移动速度 (RPM) */
 #define PNP_ACC_FINE     10    /* 微调加速度 */
@@ -71,6 +71,7 @@ typedef enum {
     HOST_P4_VERIFY,      /* P4: 建系后下相机漂移校验 */
     HOST_FIND_COMP,      /* P1: 散料区找元件 */
     HOST_PICK,              /* 吸取元件 (Z轴+气泵) */
+    HOST_REPICK,            /* P3 空吸嘴: 返回取料点重新吸取 */
     HOST_MOVE_TO_BOTTOM_CAM,/* 移动到下相机 */
     HOST_OFFSET_CHECK,      /* P3: 下相机偏移检测 */
     HOST_MOVE_TO_PCB,       /* 计算目标坐标 + 移动到贴装位 */
@@ -93,10 +94,41 @@ typedef struct {
     HostParsed_t  host_cmd;
 } HostMsg_t;
 
+/* ---- PNPSTOP/PCONTINUE 断点恢复上下文 ---- */
+#define RESUME_COORD_TOL_STEPS 250
+
+typedef enum {
+    RESUME_STEP_NONE = 0,
+    RESUME_STEP_MARK_ALIGN,
+    RESUME_STEP_P4_BASELINE,
+    RESUME_STEP_P4_VERIFY,
+    RESUME_STEP_FIND_COMP,
+    RESUME_STEP_PICK,
+    RESUME_STEP_MOVE_BOTTOM_CAM,
+    RESUME_STEP_OFFSET_CHECK,
+    RESUME_STEP_MOVE_TO_PCB,
+    RESUME_STEP_PLACE,
+} ResumeStepId_t;
+
+typedef struct {
+    uint16_t task_id;
+    ResumeStepId_t step_id;
+    int32_t  coord_x_steps;
+    int32_t  coord_y_steps;
+    float    coord_r_deg;
+    float    coord_z_deg;
+    uint16_t comp_index;
+    uint16_t comp_count;
+    bool     placed_flag;
+    bool     coord_synced;
+    uint32_t saved_tick;
+} ResumeContext_t;
+
 /* 外部接口 */
 extern osMessageQueueId_t host_pkt_queue;
 
 extern PCBFrame_t g_pcb_frame;
+extern ResumeContext_t g_resume_ctx;
 
 /* 散料区子扫描位: [cell][subpos][x/y] */
 extern int32_t g_scatter_subpos[4][5][2];

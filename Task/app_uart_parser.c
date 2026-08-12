@@ -156,6 +156,12 @@ static HostCmd_t parse_cmd(const char *line, uint16_t len, float *param, float *
     if (MATCH("CONTINUE")) {
         return HCMD_CONTINUE;
     }
+    if (MATCH("PNPSTOP")) {
+        return HCMD_PNPSTOP;
+    }
+    if (MATCH("PCONTINUE")) {
+        return HCMD_PCONTINUE;
+    }
     if (MATCH("ABORT")) {
         return HCMD_ABORT;
     }

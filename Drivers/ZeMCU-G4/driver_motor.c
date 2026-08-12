@@ -381,6 +381,23 @@ void motorEnable(uint8_t slaveAddr, uint8_t enable) {
     CAN_Transmit_Data(&hfdcan1, slaveAddr, tx, 2);
 }
 
+/* ISR-safe emergency halt: immediate stop, then keep motors enabled/holding. */
+void motorEmergencyHold(void) {
+    uint8_t stop[8] = {0};
+    uint8_t hold[8] = {0};
+
+    stop[0] = 0xF7;       // immediate stop
+    hold[0] = 0xF3;       // motor enable
+    hold[1] = 0x01;       // enabled
+
+    CAN_Transmit_Data(&hfdcan1, MOTOR_X1_ID, stop, 1);
+    CAN_Transmit_Data(&hfdcan1, MOTOR_X2_ID, stop, 1);
+    CAN_Transmit_Data(&hfdcan1, MOTOR_Y_ID,  stop, 1);
+    CAN_Transmit_Data(&hfdcan1, MOTOR_X1_ID, hold, 2);
+    CAN_Transmit_Data(&hfdcan1, MOTOR_X2_ID, hold, 2);
+    CAN_Transmit_Data(&hfdcan1, MOTOR_Y_ID,  hold, 2);
+}
+
 /* 设置位置到达阈值 (0x95) 50步，兼顾到位检测灵敏度与稳定性 */
 void motorSetArrivalThreshold(uint8_t slaveAddr) {
     uint8_t tx[8] = {0};

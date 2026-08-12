@@ -51,6 +51,8 @@ typedef enum {
     HCMD_RESTORE_CALIB,       // 恢复标定值（调试用）
     HCMD_RESUME,              // 从暂停/WAIT_REFILL/ERROR 恢复
     HCMD_CONTINUE,            // continue after refill
+    HCMD_PNPSTOP,             // PNPSTOP - 紧急停止并保持使能
+    HCMD_PCONTINUE,           // PCONTINUE - 解除紧急停止
     HCMD_ABORT,               // 中止当前流程 -> HOST_IDLE
     HCMD_AUTO_HEAT,           // AUTO_HEAT ON/OFF — 自动回流焊开关
 

@@ -165,7 +165,7 @@
 | 串口3 (USART3) | PB9(TX) / PB11(RX), 115200, DMA, 连接 TMC2209(R轴) |
 | LPUART1 | PC1(TX) / PC0(RX), 115200, 半双工, 预留 |
 | CAN (FDCAN1) | PA12(TX) / PA11(RX), 500kbps, 连接 3 台 MKS SERVO42D 总线伺服电机 (ID=0x01 X1, ID=0x02 X2, ID=0x03 Y) |
-| SPI2 | PB13(SCK) / PB14(MISO) / PB15(MOSI), CS=PD10, DATA_RDY=PD8, REQ_TX=PD9, IRQ=PB12, 10.625 Mbps, 连接 G0B1 GUI 独立板（G0B1 使用其 SPI1） |
+| SPI2 | PB13(SCK) / PB14(MISO) / PB15(MOSI), CS=PD10, DATA_RDY=PD8, REQ_TX=PD9, IRQ=PB12, 5.3125 Mbps（32 分频；v1.7 上限 ≤8MHz，建议 ≈5MHz）, 连接 G0B1 GUI 独立板（G0B1 使用其 SPI1） |
 | SPI3 | PC10(SCK) / PC11(MISO) / PC12(MOSI), CS=PA15, 连接 W25Q64 Flash |
 | SPI4 | PE2(SCK) / PE5(MISO) / PE6(MOSI), CS=PE3, IRQ=PC13（ESP32 GPIO13，无 RST）, 连接 ESP32 通信模块 |
 | TIM2 | CH1(PA0) 12V_C1 PWM / CH3(PB10) Z轴舵机 PWM (50Hz) / 32位时间戳基准 |
@@ -261,6 +261,8 @@ pnp_1/
   - CALIB_ENC — P2 编码器比例标定（位置模式移动10000步，测量 encoder delta，输出精确 P2_ENC_RATIO）
   - RESUME — 从 WAIT_REFILL / ERROR 恢复
   - CONTINUE — 补料完成后继续当前进度（从 WAIT_REFILL 恢复，默认上料完成）
+  - `PNPSTOP` — 紧急冻结：立即保持 X1/X2/Y 与 R 轴，保存 `g_resume_ctx`，关闭气泵/补光灯/加热台，置 `g_system_halted=1`；停止期间除 `PCONTINUE`/`ABORT` 外忽略运动命令
+  - `PCONTINUE` — 从 PNPSTOP 断点恢复：校验任务 ID、恢复上下文与坐标容差后按保存 step 继续；`placed_flag==1` 时跳过该元件，防止重复贴装
   - ABORT — 中止当前 PnP 流程，回 HOST_DEBUG
   - WIFI_ON / WIFI_OFF — 打开/关闭 ESP32 WiFi（仅发开关命令，不携带 SSID/密码）
   - **标定命令：** SET_SCATTER_AREA / SET_SCATTER_SIZE <mm> / SET_PCB_AREA_MIN / SET_PCB_AREA_MAX / SET_BOTTOM_CAM / SET_Z_SAFE / SET_Z_PICK / SET_Z_PLACE / SET_R_ZERO / SAVE_CALIB / RESTORE_CALIB
@@ -274,6 +276,41 @@ pnp_1/
   7. 详细规范见上位机文档《单片机端 CSV 数据处理规范》
 - **无校验：** 纯文本协议，依赖 UART 硬件可靠性
 - **Jog 位置感知（2026-07-27 新增）：** Jog 停止后通过 MKS 31H 编码器读取实际位移 delta，增量更新机器坐标。X1+X2 龙门偏差 >125 步时自动低速 F4 微调修正（与 `move_xy_relative` 到位策略一致）。实现函数 `jog_stop_update_coord()` in `app_motion.c`，`motion_read_encoder()` 已去 static。不改变 Jog 运动方向（仍用 `positionMode3Run`）
+
+### 4.1.1 PNPSTOP/PCONTINUE 紧急断点恢复（2026-08-12）
+
+**命令关系：**
+
+| 命令 | 用途 | 与 PNPSTOP 的关系 |
+|------|------|------|
+| `RESUME` | 从 WAIT_REFILL / ERROR 恢复 | 不解除 `g_system_halted` |
+| `CONTINUE` | 补料完成后继续当前进度 | 不解除 `g_system_halted` |
+| `PCONTINUE` | 解除 PNPSTOP 冻结并断点续跑 | 仅本命令按恢复上下文继续 PnP |
+| `ABORT` | 中止 PnP 回 DEBUG | PNPSTOP 冻结期间允许用于安全退出 |
+
+**PNPSTOP 冻结：**
+
+- UART1 ISR 回调发现 `PNPSTOP` 后立即置 `g_system_halted=1`，并调用 `motorEmergencyHold()` 对 X1/X2/Y 发 `0xF7` 急停 + `0xF3` 保持使能；任务上下文再停止 TMC R 轴。
+- `pnp_halt()` 读取 31H 编码器同步机器坐标，并保存 `g_resume_ctx`：`task_id`、`step_id`、`coord_x/y_steps`、`coord_r/z`、`comp_index/count`、`placed_flag`、时间戳。
+- 编码器同步失败时仍保存逻辑坐标并置 `coord_synced=false`，不阻断上下文快照；`PCONTINUE` 会重试编码器同步。
+- 直接关闭气泵、补光灯、电磁阀、加热台并终止当前视觉会话；恢复时按当前步骤实际需求重新开启。
+- 支持快照阶段：P2 Mark 对位、P4 基线/校验、P1 找元件、PICK/REPICK、下相机 P3、MOVE_TO_PCB、PLACE。
+
+**PCONTINUE 恢复：**
+
+- 校验 `g_system_halted==1`、`task_id` 匹配、`comp_count` 匹配、`step_id` 有效、`comp_index < comp_count`；任一不满足则回 `PCONTINUE_IGNORED` 并保持冻结。
+- 坐标偏差超过 `RESUME_COORD_TOL_STEPS`（250 步）或坐标失效时回 `PCONTINUE_FAIL` 并进入 `HOST_ERROR`。
+- `PCONTINUE` 先重试编码器同步；重试成功则以实际编码器坐标校验，重试仍失败时使用逻辑坐标继续并打印告警。
+- 恢复运动前调用 `motion_flush_after_halt()` 排空 CAN 残留帧并清零到位标志，避免旧 0x02 导致假到位或新运动命令未真正执行。
+- 偏差在容差内时恢复到保存坐标；`placed_flag==1` 时标记当前元件已贴装并直接进入下一元件。
+- P2/P4 恢复会重新启动对应视觉流程；P1 恢复会清空批量队列强制重新识别；P3 恢复会重新移动到下相机并重启 P3。
+- R 轴为 TMC2209 开环定位，恢复时只恢复逻辑角度并保持使能，不做盲目重转。
+
+**UART 注意事项（2026-08-12）：**
+
+- `Host_UartRecvCallback` 只做 PNPSTOP 紧急识别，命令解析仍全部在 `Host_Task` 中执行。
+- `Host_Task` 处理完当前 UART 批次后使用 `UART_ClearAppData()` 只清旧应用缓冲，不再无条件清 ISR `data_ready`，避免 `PNPSTOP` 长处理期间到达的 `PCONTINUE` 被吞掉。
+- 命令 `PCONITINUE` 作为 `PCONTINUE` 的兼容别名保留；正式协议请使用 `PCONTINUE`。
 
 
 ### 4.2 G4 ↔ MaixCAM2 摄像头 (USART2, PD5/PD6)
@@ -317,7 +354,8 @@ pnp_1/
   | 8 | Host→Cam | `go` | 确认进入 Phase1 |
   | 9 | Cam→Host | `pos` + 数据 + `end` | 一次上报视野内全部目标 |
 
-  - 类别映射：`LED*`→cled(1), `C0*`/`R0*`→ccap(0), 其他→ccap(fallback)
+  - 类别映射：`LED*`→cled(1), `R0*`→cres(2), `C0*`→ccap(0), 其他→ccap(fallback)
+  - 散料格映射：`C0*`→cell 0, `R0*`→cell 1, `LED*`→cell 3（与视觉 class_id 独立）
   - **批量上报格式：**
     ```
     pos
@@ -328,8 +366,9 @@ pnp_1/
     N:<class_id>
     end
     ```
-  - dx/dy 已是电机步数；主控保存 `P1_MAX_TARGETS=10` 个目标，按离视野中心由近到远排序
+  - dx/dy 已是电机步数；主控保存 `P1_MAX_TARGETS=32` 个目标，按离视野中心由近到远排序；相机端 `max_det` 需同步调大，否则最多只会上报 10 个目标
   - 主控把全部目标换算成吸嘴取料坐标存入队列，批内逐个取料；队列耗尽或类别变化后才重新识别
+  - 批量解析约束（2026-08-12）：目标帧必须带目标序号 `N1:`~`Nn:`；最后的类别号只能是不带序号的 `N:<class_id>`，`N7:dx` 不会被当作类别号
   - 移动中可回复类别，但必须等电机停稳后发 `go`，cam 才开始 Phase0
   - `mv`：cam 连续 50 帧未检测到目标时发 `mv` 并阻塞等待；主控移动/切换视野，电机到位后发 `go` 继续；中止 P1 时发 `end`
   - 靠近图像边缘 10 像素内的目标由 cam 端过滤，不参与锁定/上报
@@ -383,7 +422,8 @@ pnp_1/
   | — | Cam→Host | `err3_7` | cam 端 7 次复测仍未对准 |
   | — | Cam→Host | `err3_6` | 等主控 `go` 超时 30s |
   - **关键参数：** 像素→步数换算由 **cam 端**完成（理论当量 X≈0.0230 / Y≈0.0229mm/px，见硬件文档 §十三）；`avg_frames = 5`（2026-08-02 新固件），`p3_nozzle_check_frames = 6`
-  - **错误码：** `err3_1`（下相机初始化失败）、`err3_5`（未检测到矩形）、`err3_6`（等 go 超时 30s）、`err3_7`（7 次复测仍未对准，主控容错贴装）、`err3_8`（**吸嘴空取**—不可降级贴装，主控回退重新吸取）
+  - **错误码：** `err3_1`（下相机初始化失败）、`err3_5`（未检测到矩形）、`err3_6`（等 go 超时 30s）、`err3_7`（7 次复测仍未对准，主控容错贴装）、`err3_8`（**吸嘴空取**—不可降级贴装，主控先同点重吸，再次失败后强制 P1 重识别）
+  - **err3_8 重吸取策略（2026-08-12 更新）：** 第一次 `err3_8` → 返回 `g_last_pick_x/y_steps` 保存的取料点 → `pick_component()` 重吸 → `HOST_MOVE_TO_BOTTOM_CAM` 再次 P3；第二次 `err3_8` → 清空 P1 批量队列并强制重新 P1 识别；第三次 `err3_8` → `HOST_ERROR`。每次重吸后必须重新经过下相机验证，禁止直接按记忆状态或上次识别结果贴装。
   - **检测方法：** P1/P2 上相机使用 YOLO11-OBB（3 类：ccap/cled/cres）；P3 下相机使用 Canny + 多边形逼近检测矩形（非 YOLO）。具体模型/参数见硬件文档《通讯接口(cam与主控).md》。
 
 - **pos 格式汇总：**
@@ -429,6 +469,8 @@ pnp_1/
 **轴映射：** P4 使用与 P3 相同的下相机，偏移补偿沿用 P3 约定：
 - `machine_x += +r->dy`（cam Y → X1+X2，不取反）
 - `machine_y += -r->dx`（cam X → Y 电机，取反）
+
+**补偿速度：** `p4_baseline_step()` / `p4_verify_step()` 的短距补偿使用 `PNP_SPEED_FINE=100 RPM`、`PNP_ACC_FINE=10`，与 P1/P3 视觉微调一致；调试日志含 `[HOST] P4 baseline/verify pos ...` 与 `compensate ret=...`。
 
 **基线更新站位：** P4 基线（建系前）对准完成后，`p4_baseline_step()` 在记录 `g_p4_base_x/y` 的同时将当前坐标写入 `g_calib.bottom_cam_x_steps/y_steps`，用于吸收每次机械回原点（孔位）的坐标系误差；verify 移动与 P3 站位读取同一字段，自动使用更新后的站位（仅 RAM 生效，不落盘）。
 
@@ -513,7 +555,7 @@ FIND_IDLE       → FIND_MOVING      → FIND_WAITING
 - `VISION_GOT_STOP` → `Vision_Go()` 进入 Phase1
 - `VISION_GOT_POS`（批量）→ `p1_queue_fill()` 将全部目标换算为吸嘴取料坐标 → 消费队列首项 → `HOST_PICK`
 
-**批量队列：** 一次 P1 最多保存 `P1_MAX_TARGETS=10` 个目标，批内取料不再重新识别；队列耗尽或类别变化后才重新启动 P1。
+**批量队列：** 一次 P1 最多保存 `P1_MAX_TARGETS=32` 个目标，批内取料不再重新识别；队列耗尽或类别变化后才重新启动 P1。
 
 **补料错误态：** 若所有子位都已扫过且为空，进入 `enter_p1_refill_error()`：发 `end`、停运动、回机械原点、发 `ERROR`/`REFILL_NEEDED`、保存当前元件进度，等待上位机 `CONTINUE` 后从当前元件继续。
 
@@ -541,7 +583,12 @@ VISION_DONE 时 `g_scan_start_pos[cl] = g_p1_found_pos`。下一同 cell 元件�
 
 | 常量 | 值 | 文件 |
 |------|-----|------|
+| `PNP_SPEED` | 400（通用速度 RPM） | `app_host.h:17` |
+| `PNP_ACC` | 40（通用加速度） | `app_host.h:18` |
+| `PNP_SPEED_FINE` | 100（视觉迭代微调） | `app_host.h:19` |
+| `PNP_ACC_FINE` | 10（微调加速度） | `app_host.h:21` |
 | `P1_SCAN_SPEED` | 100（扫描移动 RPM） | `app_host.h:20` |
+| `P1_MAX_TARGETS` | 32 | `app_vision.h:11` |
 
 ### 4.3 G4 ? MKS SERVO42D 电机 (CAN, FDCAN1)
 
@@ -666,15 +713,16 @@ ping，保证 0x02 在 ~360ms 内被接收。
 - **初始化顺序约束：** `Heater_Init()` 必须在 `CAN_Init()` 之前调用。`CAN_Init()` 中 `HAL_FDCAN_Start()` 使总线激活后 CAN ISR 即可触发，若 `heater_rx_queue` 尚未创建（NULL），加热台状态帧将被静默丢弃。
 - **CAN 滤波器隐患：** `FilterID2 = 0x1FFC0000` 超出 HAL 11-bit 范围（max 0x7FF），当前因 CubeMX 设 `StdFiltersNbr = 0` 恰好全通。重新生成 CubeMX 时若 `StdFiltersNbr` ≥ 1，滤波器将仅通过 ID 低 8 位为 0 的帧，所有 CAN 通信中断。详见 HISTORY.md §33.2。
 
-### 4.5 G4 ↔ G0B1 GUI（SPI2 文本协议 v1.6，2026-08-06 更新）
+### 4.5 G4 ↔ G0B1 GUI（SPI2 文本协议 v1.7，2026-08-12 更新）
 
-- **物理层：** G0B1 SPI1 ↔ G4 SPI2，G4 为主机；PB13(SCK)/PB14(MISO)/PB15(MOSI)，CS=PD10，DATA_RDY=PD8（主控→GUI，低有效），REQ_TX=PD9（GUI→主控，低有效），IRQ=PB12（当前恒高，禁止业务响应）。SPI2 Mode0、8-bit MSB、10.625 Mbps（分频 16，G0B1 最高 32 Mbps，留余量）。阻塞收发，`gui_spi_mutex` 保护 Host_Task/ESP_Task/GUI_SPI_Task 三方访问。
-- **帧格式：** 固定 128 字节/事务；有效内容为以 `\n` 结尾的 ASCII 字符串，`\n` 之后用 `0x00` 填充；接收方以 `\n` 为结束，忽略其后内容。单条命令独立一次 CS 事务；CS 拉低后 ≥1µs 再打时钟，相邻事务间隔 ≥100µs。文档协议版本 v1.6；代码宏 `GUI_PROTO_VERSION 1` 暂保留。
+- **物理层：** G0B1 SPI1 ↔ G4 SPI2，G4 为主机；PB13(SCK)/PB14(MISO)/PB15(MOSI)，CS=PD10，DATA_RDY=PD8（主控→GUI，低有效），REQ_TX=PD9（GUI→主控，低有效），IRQ=PB12（当前恒高，禁止业务响应）。SPI2 Mode0、8-bit MSB、5.3125 Mbps（32 分频；v1.7 实测 10.625MHz 丢字节，上限 ≤8MHz，建议 ≈5MHz）。阻塞收发，`gui_spi_mutex` 保护 Host_Task/ESP_Task/GUI_SPI_Task 三方访问。
+- **帧格式：** 固定 128 字节/事务；有效内容为以 `\n` 结尾的 ASCII 字符串，`\n` 之后用 `0x00` 填充；接收方以 `\n` 为结束，忽略其后内容。单条命令独立一次 CS 事务；CS 拉低后 ≥1µs 再打时钟，相邻事务间隔 ≥100µs。文档协议版本 v1.7；代码宏 `GUI_PROTO_VERSION 1` 暂保留。
 - **G0B1 → G4（用户操作触发）：** `MOVE_UP/DOWN/LEFT/RIGHT <step>`、`MOVE_*_START <speed>`、`MOVE_STOP`、`SET_ORIGIN`、`HOME`、`SET_BOTTOM_CAM`、`SET_CAM_OFFSET`、`SET_HEATER_PLATFORM_MIN/MAX`、`SAVE_CALIB`、`RESTORE_CALIB`、`HEAT_ON/OFF`、`PUMP_ON/OFF`、`LIGHT_ON/OFF`、`VALVE_ON/OFF`、`WIFI_CONNECT:<ssid>,<password>`、`WIFI_DISCONNECT`、`IMPORT_ENTER`、`IMPORT_EXIT`、`HANDSHAKE_REQ`。
 - **G4 → G0B1（主控主动推送）：** `TEMP_HEAT:<float>`、`TEMP_PCB:<float>`（约每秒一次）、`SMT_PROGRESS:<current>,<total>`、`LOG:<message>`（≤63 字符）、`WIFI_STATUS:<state>`、`IMPORT_DATA:<content>`（≤63 字符）、`IMPORT_TOTAL:<number>`、`HANDSHAKE_ACK`。
 - **时序与握手：** 主控上电延时 ≥2s 后以 ≤10ms 周期轮询 REQ_TX；发现低电平后拉低 CS 并产生 128 字节时钟读 MISO；REQ_TX 仍为低则继续读，变高表示队列已空。GUI 发 `HANDSHAKE_REQ\n`（1s 重试，最多 10 次），主控解析后立即回 `HANDSHAKE_ACK\n`，重复回 ACK 无害。发送时 DATA_RDY 拉低必须覆盖整个 SPI 事务。
 - **命令解析：** 按首个空格或冒号切分命令名；未识别命令静默忽略。`WIFI_CONNECT` 校验 SSID 1~32 字节、密码 8~63 字节，仅拒绝控制字符、逗号、CR/LF，然后通过 `ESP_SendWifiConnect()` 下发 `0x20/0x03 SSID\0PASSWORD`。
-- **实现要点：** 公共接口 `GUI_Send()` / `GUI_Poll()`；`GUI_SPI_Task`（栈 4096）调用 `GUI_Poll()`，`HAL_SPI_TransmitReceive` 读固定 128 字节，解析后入 `gui_cmd_queue`（16×HostParsed_t，满时计数）→ Host_Task 消费；LOG 限速 ≤20 条/秒；温度仍约 1s 一次。
+- **实现要点：** 公共接口 `GUI_Send()` / `GUI_Poll()`；`GUI_SPI_Task`（栈 4096）调用 `GUI_Poll()`，`HAL_SPI_TransmitReceive` 读固定 128 字节，解析后入 `gui_cmd_queue`（16×HostParsed_t，满时计数）→ Host_Task 消费。LOG 限速 ≤20 条/秒；温度仍约 1s 一次。
+- **日志与进度（2026-08-12）：** 新增 `gui_log_queue`（32×GUI_LogMsg_t）；`GUI_SPI_NotifyLog()` 仅入队，`GUI_SPI_LogProcess()` 由 Host_Task 周期发送，避免 GUI 未就绪时事件日志直接丢失；收到 `HANDSHAKE_REQ` 并回 ACK 时置 `g_gui_handshake_done=1` 用于链路诊断。`SMT_PROGRESS` 在 P3 校正完成、每个元件贴装完成、P1 异常跳过、PCONTINUE 恢复时均会补发，保证 `1/N → 2/N → ... → N/N`。
 
 ### 4.6 G4 ↔ ESP32-C3（SPI4，v3.1，2026-08-06 更新）
 
@@ -729,6 +777,7 @@ ping，保证 0x02 在 ~360ms 内被接收。
 - `host_pkt_queue` (64深) — 已弃用，Host_Task 改用 UART_PeekData 直接读取
 - `evtAxesDone` 事件组 — 已弃用（保留对象但不再使用），改为 `g_axes_done_bits`/`g_axes_error` volatile 全局变量
 - `gui_cmd_queue` (16×HostParsed_t) — GUI_SPI_Task → Host_Task 命令队列
+- `gui_log_queue` (32×GUI_LogMsg_t) — Host_Task 生成 GUI LOG，GUI_SPI_LogProcess 周期发送
 - `gui_spi_mutex` (互斥锁) — 保护 SPI2 收发（Host/ESP/GUI 三方共用）
 - `semX1Done/semX2Done/semYDone` 信号量 — 已废弃，统一使用 evtAxesDone 事件组（见 §9.6-5）
 - `heater_rx_queue` (10深度) — CAN ISR → Heater_ProcessStatus()，加热台状态帧专用队列
@@ -828,6 +877,7 @@ ping，保证 0x02 在 ~360ms 内被接收。
 6. **LPUART1 未配置 DMA 接收：** `hdmarx = NULL`，仅用作 TMC2209 半双工阻塞通信。如果该通道用于其他用途需重新配置。
 7. **CAN 滤波器配置隐患：** `FilterID2 = 0x1FFC0000` 超出 HAL 11-bit 范围，当前因 `StdFiltersNbr = 0` 恰好全通。CubeMX 重新生成时若 `StdFiltersNbr` ≥ 1，滤波器将仅通过 ID 低 8 位为 0 的帧，所有 CAN 通信中断。修复：将 `FilterID2` 改为 `0x000`，确保 `StdFiltersNbr` ≥ 1。
 8. **P1 扫描停机坐标恢复漏乘符号（已修复，2026-08-03，见 HISTORY §52）：** `p1_restore_coord()` 的 `delta_y` 漏乘 `MOTOR_Y_ENC_SIGN(-1)`，导致 P1 扫描停车后 `g_coord.y` 污染（2×|dy| 误差），P3 去下相机 / HOME 回原点整体偏右 ~6.2cm。已修复（`MOTOR_Y_ENC_SIGN` 迁入 `app_motion.h`，`app_host.c` delta_y 补符号）。
+9. **P1 批量类别号误解析（已修复，2026-08-12，见 HISTORY §58）：** 目标数 >6 时 `N7:dx` 曾被误当成类别号，导致第 7 个及之后目标不入队并重复开摄像头；修复为只接受不带目标序号的 `N:<class_id>` 作为类别号。
 ### 9.4 代码质量
 1. **`driver_motor.c runFail/runOK` 死循环：** 两个函数都是 `while(1){}` 空循环，无实际错误处理逻辑。
 2. **未使用的全局变量：** `CAN1_0x1fe_Tx_Data` 等 7 个 8 字节数组（共 56 字节）、`CAN_RxDone`、`realTimeLocation` 等，部分来自早期代码残留。注意：`CAN_ID` 在 `canCRC_ATM()` 中有实际使用（CRC 计算），`can_rx_queue` 已删除。
@@ -899,7 +949,11 @@ ping，保证 0x02 在 ~360ms 内被接收。
 
 **2. 命令解析从 ISR 移至任务上下文（UART_PeekData 架构）：** 原架构 `HAL_UARTEx_RxEventCallback(ISR)` → `Host_UartRecvCallback(ISR)` → `LineParser_Feed`(含 `strtof` 浮点) → `host_pkt_queue` → `Host_Task`。Cortex-M4F 在 ISR 中使用 FPU 浮点运算可能导致静默失败，且 `g_parser` 被 ISR 和任务同时使用存在竞态。修复：`Host_UartRecvCallback` 改为空函数（仅保留 `(void)data; (void)len;`），`Host_Task` 主循环改用 `UART_PeekData` + `LineParser_Feed`（全部在任务上下文执行），`host_pkt_queue` 弃用。
 
+> 2026-08-12 补充：命令解析仍全部在 `Host_Task`；`Host_UartRecvCallback` 不再为空，但只做 `PNPSTOP` 紧急识别并调用 `motorEmergencyHold()`，不解析命令、不调用 FPU。
+
 **3. move_xy_relative 进入等待循环前加 UART_ClearData：** `UART_PeekData` 只读不清 `data_ready` 标志。外层主循环读完后标志仍置位，导致 `move_xy_relative` 内部等待循环中的 `UART_PeekData` 检测到残留数据，立即返回 -3（误判为中断命令）。修复：等待循环前调用 `UART_ClearData(UART_CH1)` 刷新标志。此 bug 导致 `MOVE_TO`/`SET_ORIGIN` 等阻塞式运动无效。
+
+> 2026-08-12 更新：`Host_Task` 处理完当前 UART 批次后改调 `UART_ClearAppData()`，只清旧应用缓冲，不再无条件清 ISR `data_ready`，避免 PNPSTOP 长处理期间 PCONTINUE 被吞；本条描述的旧 `UART_ClearData` 方案作为历史记录保留。
 
 **4. HAL_TIM_PWM_Start CCER 不生效（改用 CMSIS API）：** 对 TIM2 调用 `HAL_TIM_PWM_Start(&htim2, TIM_CHANNEL_3)` 返回 HAL_OK 但 CCER 寄存器维持 0x00，CH3 输出未使能。根因未明确定位（疑似 HAL 库版本或编译优化问题）。修复：使用 CMSIS 级 `TIM_CCxChannelCmd(htim->Instance, TIM_CHANNEL_3, TIM_CCx_ENABLE)` + `__HAL_TIM_ENABLE(htim)`，并正确维护 `htim->State`（设为 BUSY → 操作 → 恢复）。此方案同时兼容 TIM5 的多通道 HAL State 锁问题。`driver_servo.c` 中相关注释已更新。
 

@@ -47,6 +47,8 @@ void positionMode3Run(uint8_t slaveAddr,uint16_t speed,uint16_t acc,int32_t absA
 
 void motorEnable(uint8_t slaveAddr, uint8_t enable);
 
+void motorEmergencyHold(void);
+
 void motorSetArrivalThreshold(uint8_t slaveAddr);
 
 void motorSyncEnable(uint8_t enable);

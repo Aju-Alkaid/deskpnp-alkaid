@@ -23,7 +23,7 @@
  * 约束：
  *   单条命令总长 ≤ 128 字节（SPI 接收缓冲区限制）
  *   LOG/IMPORT_DATA 内容最长 63 字符
- *   G4 SPI2 速率 10.625 Mbps（G0B1 最高 32 Mbps，留有余量）
+ *   G4 SPI2 速率 5.3125 Mbps（32 分频；v1.7 上限 ≤8MHz，建议 ≈5MHz）
  *   从机未使用的接收字节必须填充 0x00，主控在首个 0x00 停止解析
  */
 
@@ -34,7 +34,7 @@ void GUI_SPI_Init(void);
 
 /* ======================== G4 → G0B1 数据推送 API ======================== */
 
-/* v1.6 标准发送接口：单条命令，自动 \n 结尾 + 0x00 填充到 128 字节 */
+/* v1.7 标准发送接口：单条命令，自动 \n 结尾 + 0x00 填充到 128 字节 */
 void GUI_Send(const char *cmd);
 
 /* 发送格式化命令字符串（自动追加 \n） */
@@ -63,7 +63,7 @@ void GUI_SPI_NotifyImportTotal(uint16_t total);
 
 /* ======================== G0B1 → G4 命令接收 API ======================== */
 
-/* v1.6 标准轮询接口：读取并解析一帧 GUI 命令；GUI_SPI_Task 按 ≤10ms 调用 */
+/* v1.7 标准轮询接口：读取并解析一帧 GUI 命令；GUI_SPI_Task 按 ≤10ms 调用 */
 void GUI_Poll(void);
 
 /* 轮询接收：非阻塞，返回 1 表示收到完整行（存入 buf），否则 0 */
@@ -80,7 +80,7 @@ void GUI_SPI_Task(void *argument);
  * 若改用其他引脚组，CubeMX 会自动生成正确的 hspi2 初始化。
  */
 
-/* SPI v1.6: CS=PD10, REQ_TX=PD9, DATA_RDY=PD8, IRQ=PB12 */
+/* SPI v1.7: CS=PD10, REQ_TX=PD9, DATA_RDY=PD8, IRQ=PB12 */
 #define GUI_SPI_CS_PORT      GPIOD
 #define GUI_SPI_CS_PIN       GPIO_PIN_10
 
@@ -99,6 +99,18 @@ void GUI_SPI_Task(void *argument);
 
 /* 预留协议版本号：后续用于 G4/G0B1 握手与功能开关 */
 #define GUI_PROTO_VERSION  1
+
+/* GUI log queue: Host_Task enqueues, GUI_SPI_LogProcess sends */
+typedef struct {
+    uint8_t  len;
+    uint8_t  text[64];
+} GUI_LogMsg_t;
+
+extern osMessageQueueId_t gui_log_queue;
+extern volatile uint8_t   g_gui_handshake_done;
+
+/* Send buffered LOG frames to GUI (called periodically by Host_Task) */
+void GUI_SPI_LogProcess(void);
 
 /* ======================== 共享状态变量（原 TouchGFX Data_Transfer 全局） ======================== */
 

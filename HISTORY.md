@@ -1688,6 +1688,8 @@ if ((len >= 12 && memcmp(line, "\"Designator\"", 12) == 0) ||
 
 ## 二十六、2026-06-20 会话 — P3 吸嘴空取检测 (err3_8)
 
+> 历史说明：本节描述旧版 `err3_8` 回散料区 → P1 重识别流程；2026-08-12 起主控改为第一次同点重吸 → P3，第二次才强制 P1 重识别，第三次进 `HOST_ERROR`。当前行为以 HISTORY §60 / AGENTS.md §4.2 P3 为准。
+
 ### 26.1 背景
 
 上位机（MaixCAM）对 P3 进程新增 Phase0 吸嘴圆检测。P3 启动后 Cam 先检测是否有吸嘴圆（10帧 HoughCircles，阈值≥7帧判为空取），而非直接进入元件对准。若检测到吸嘴圆（即吸嘴上无元件），Cam 发送 `err3_8` 并结束 P3，不再进入 Phase1/Phase2。
@@ -4141,3 +4143,136 @@ X 轴 `delta_x = (d1+d2)/2` 与 `jog_stop_update_coord()` 一致，无需符号�
 
 - `AGENTS.md`：§4.5 WIFI_CONNECT 校验描述更新；§4.6 补充 CSV 超时、Finished、WiFi 启用状态、场景 A 分发、已知限制；参考文档改为 `(2).md`。
 - `HISTORY.md`：追加本节；§55 为首次实现记录，复核与修复以 §57 为准。
+
+## 五十八、2026-08-12 会话 — P1 批量目标 >6 丢失修复 + P4 补偿速度与轴映射核对
+
+### 58.1 背景与现象
+
+- 用户将 `P1_MAX_TARGETS` 从 10 改为 32 后，P1 批量识别仍只在视野内目标数 ≤6 时不重复开摄像头；目标数多于 6 时，放完队列后仍会重新 `Vision_Start(P1)`。
+- 现象不是“第 11 个之后丢失”，而是 **第 7 个目标开始丢失**，因此队列始终只剩 6 个。
+
+### 58.2 根因
+
+- `Task/app_vision.c` `process_p1_frame()` 在收到第 N 个目标的 `ao` 后立即将 `g_p1_class_done=true`，等待最后类别号。
+- 相机发送顺序是 `N1:dx N1:dy N1:ao ... N7:dx N7:dy N7:ao N:<class_id>`。
+- 当目标数 >6 时，第 7 个目标的 `N7:dx` 被旧逻辑当成 `N:<class_id>`，`class_id` 被错误覆盖；第 7 个目标及后续目标不再解析。
+- `p1_queue_fill()` 只能入队已解析的 6 个目标，放完队列后 `find_comp_step()` 重新开摄像头识别。
+
+### 58.3 修复
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_vision.c` | `g_p1_class_done` 分支增加帧格式校验：只接受 `N:<class_id>`（`str[0]=='N' && str[1]==':'`）；`N7:dx` 等带序号目标帧不再误作类别号 |
+| `Task/app_vision.h` | 注释从 64 改回 32；`P1_MAX_TARGETS=32` |
+
+- 行为结果：目标数 7~32 都能进入同一批次队列，队列耗尽或类别变化后才重新识别。
+- 相机端 `MODEL_CONFIG["max_det"]` 当前参考配置仍是 10，需同步调大才能真正接收超过 10 个目标。
+
+### 58.4 P4 排查与工作区改动
+
+- 排查 P4 吸嘴不移动：P4 基线/校验的短距补偿原使用通用 `PNP_SPEED/PNP_ACC`（当前 400/40），与 P1/P3 视觉微调不一致。
+- 工作区已把两处补偿改为 `PNP_SPEED_FINE/PNP_ACC_FINE`（100/10），并加入诊断日志：
+  - `[HOST] P4 baseline/verify pos: cam=(...) move=(...) at=(...)`
+  - `[HOST] P4 baseline/verify compensate ret=...`
+- 轴映射核对：`dx_s=+r->dy`（cam Y → X1+X2）、`dy_s=-r->dx`（cam X → Y 电机取反），与 P3 及 AGENTS §4.2.4 一致。
+- 状态：**待真机验证**，未确认“吸嘴不动”问题已彻底解决。
+
+### 58.5 其他当前工作区/暂存区变更记录
+
+- `app_host.h`：`PNP_SPEED 300→400`，`PNP_ACC 25→40`。
+- `app_host.c`：`footprint_to_class_id()` 增加 `R0*→cres(2)`；`component_cell()` 独立映射 `C0*→0/R0*→1/LED*→3`；`Host_FinishCsvImport()` 直接调用 `download_done()`。
+- `app_esp_task.c`：CSV `ok` 仅在发送失败时才进入重试待发状态。
+- 编译验证：Keil UV4 `0 Error(s), 1 Warning(s)`，warning 为 `driver_tmc2209.c` 空循环体，与本次改动无关。
+
+### 58.6 文档同步
+
+- `AGENTS.md`：P1 批量上限统一为 32；补充类别号帧格式约束；P1/P4 关键常量与补偿速度同步。
+- `HISTORY.md`：追加本节；§54.3 中 `P1_MAX_TARGETS=10` 为历史值，当前以本节/AGENTS.md 的 32 为准。
+
+## 五十九、2026-08-12 会话 — GUI v1.7 日志/进度联调准备
+
+### 59.1 背景
+
+- 屏幕 GUI 的 Log 功能不打印日志，且贴片进度是否可持续推进（如 `1/28 → 2/28`）需要确认。
+- 本仓库没有 G0B1 GUI 源码，GUI 固件由另一位负责；本次只能完成主控侧协议实现与诊断准备。
+- 接口文档更新为 v1.7：SPI2 时钟上限收紧到 ≤8MHz，建议约 5MHz；实测 10.625MHz 下 GUI 中断收发会偶发丢字节。GUI 从机 SPI1 中断使能修复为从机内部修复，主控无需修改。
+
+### 59.2 主控修改
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_gui_spi.h/c` | 新增 `GUI_LogMsg_t`、`gui_log_queue`、`g_gui_handshake_done`、`GUI_SPI_LogProcess()`；`GUI_SPI_NotifyLog()` 改为入队，Host_Task 周期发送 |
+| `Core/Src/app_freertos.c` | 创建 `gui_log_queue`（32×GUI_LogMsg_t） |
+| `Task/app_host.c` | 主循环调用 `GUI_SPI_LogProcess()`；关键 PnP 节点同步 `LOG:`；`place_step()`、P1 异常跳过、PCONTINUE 恢复时补发 `SMT_PROGRESS` |
+
+- GUI LOG 同步消息：`PNP_START`、`MARK_SCAN`、`COMP_SCAN`、`MARK_DONE`、`NOZZLE_ALIGN`、`PICK_FAIL`、`ALIGN_FAIL`、`PLACE_START`、`PLACE_DONE`。
+- 进度更新路径：下载完成 `0/N`；P3 校正完成 `(i+1)/N`；每个元件贴装完成后 `(i+1)/N`；全部完成 `N/N`。
+- 握手状态仅用于链路诊断，不再作为 LOG 发送门控；主控始终尝试发送 `LOG:` 与 `SMT_PROGRESS:`。
+
+### 59.3 当前速率与代码状态
+
+- `Core/Src/spi.c` 与 `pnp_1.ioc` 当前为 `SPI_BAUDRATEPRESCALER_32`，170MHz/32 ≈ 5.3125MHz，符合 v1.7 建议。
+- `app_gui_spi.h/c` 中残留的 `v1.6`/10.625MHz 注释已同步为 v1.7/5.3125MHz。
+
+### 59.4 验证
+
+- [x] ARMCLANG `-fsyntax-only` 通过：`app_gui_spi.c`、`app_freertos.c`、`app_host.c`。
+- [ ] GUI Log 页面显示与 `SMT_PROGRESS` 推进待 G0B1 真机联调确认。
+
+### 59.5 待 GUI 端确认
+
+- GUI SPI1 从机是否解析 `LOG:<message>` 并写入 Log 页面。
+- GUI 是否解析 `SMT_PROGRESS:<current>,<total>` 并刷新进度条/文本。
+- GUI 固件是否已刷入 v1.7 对应版本（SPI1 中断使能修复）。
+- 若 MOSI 有完整 128 字节 `LOG:` 帧但页面不显示，问题在 GUI 固件接收/页面刷新，不在主控。
+
+### 59.6 文档同步
+
+- `AGENTS.md`：§4.5 更新为 v1.7；硬件表 SPI2 速率同步；补充日志队列、进度更新与 GUI 端待确认项。
+- `HISTORY.md`：追加本章节；§56 保留为 v1.6 历史记录。
+
+## 六十、2026-08-12 会话 — PNPSTOP/PCONTINUE 断点恢复 + P3 空吸嘴重吸取
+
+### 60.1 背景
+
+- 新增 `PNPSTOP` / `PCONTINUE` 断点恢复。用户实测 `PNPSTOP` 能停止电机，但发送 `PCONTINUE` 后没有反应，不能按暂停状态继续。
+- 排查方向：命令解析、UART 接收/清空、恢复上下文、坐标恢复、状态机恢复入口。
+
+### 60.2 根因
+
+- `Host_Task` 旧逻辑处理完当前 UART 批次后无条件调用 `UART_ClearData()`。`PNPSTOP` 处理耗时较长，期间到达的 `PCONTINUE` 其 ISR `data_ready` 会被一起清掉，固件根本没进入恢复流程。
+- `g_resume_ctx` 原只覆盖 `HOST_FIND_COMP` ~ `HOST_PLACE`，P2 Mark 对位、P4 基线/校验阶段触发 `PNPSTOP` 时 `step_id=RESUME_STEP_NONE`，`PCONTINUE` 被当作上下文不匹配忽略。
+- 恢复时保存坐标与当前逻辑坐标通常相等，但旧实现仍调用绝对位置移动；零位移命令可能因 CAN 到位响应不确定而超时，表现为恢复卡住/无响应。
+- 真机日志 `ctx_step=0 task=0/2` 进一步定位：`pnp_halt()` 在 31H 编码器同步失败时旧实现直接返回，`g_resume_ctx` 完全未保存，导致 `PCONTINUE` 必然报 `task/ctx mismatch`。
+
+### 60.3 修改
+
+| 文件 | 改动 |
+|------|------|
+| `Task/app_uart_parser.c/h` | 新增 `HCMD_PNPSTOP`、`HCMD_PCONTINUE`；`PCONITINUE` 作为兼容别名 |
+| `Drivers/ZeMCU-G4/driver_motor.c/h` | 新增 `motorEmergencyHold()`：X1/X2/Y 发 `0xF7` 急停 + `0xF3` 保持使能，ISR 可调用 |
+| `Drivers/ZeMCU-G4/driver_uart.c/h` | 新增 `UART_ClearAppData()`：只清已拷贝的旧应用缓冲，不清 ISR `data_ready` |
+| `Task/app_motion.c/h` | 新增 `g_system_halted`、`coord_sync_from_encoders()`、`motor_move_absolute()`；`motion_wait_done()` 急停返回 `-3` 且不失效坐标；零位移恢复直接成功；编码器同步超时 100→250ms；TMC R 轴与 `pick_component()` 增加急停检查 |
+| `Task/app_host.c/h` | 新增 `ResumeContext_t`、`HOST_REPICK`、`pnp_halt()`、`pnp_continue()`；UART 回调扫描 `PNPSTOP` 并立即保持电机；补齐 P2/P4/P1/PICK/P3/MOVE_TO_PCB/PLACE 恢复；P3 `err3_8` 改为同点重吸流程；局部 phase 改为文件级便于恢复复位 |
+
+- `g_resume_ctx` 新增 `coord_synced`：PNPSTOP 编码器同步失败也保存逻辑坐标，PCONTINUE 先重试编码器同步；重试仍失败时按逻辑坐标继续并告警。
+- 新增 `motion_flush_after_halt()`：PCONTINUE 恢复运动前排空 CAN 残留帧、清零 `g_axes_done_bits/g_axes_error` 并重新开启同步，避免旧 0x02 假到位导致“日志显示运动完成但实际未运动”。
+
+### 60.4 P3 err3_8 当前行为
+
+- 第一次 `err3_8`：返回保存的取料点 `g_last_pick_x/y_steps`，重新 `pick_component()`，再移动到下相机并重启 P3。
+- 第二次 `err3_8`：清空 P1 批量队列，强制重新打开上位相机 P1 识别，禁止依赖上次记忆结果直接贴装。
+- 第三次 `err3_8`：进入 `HOST_ERROR`。
+- 每次重吸后都必须重新经过下相机验证。
+
+### 60.5 验证
+
+- [x] ARM GCC 14.3.1 `-fsyntax-only` 通过：`app_uart_parser.c`、`driver_motor.c`、`driver_uart.c`、`app_motion.c`、`app_host.c`。
+- [x] `git -c core.whitespace=cr-at-eol diff --check` 通过。
+- [ ] Keil UV4 完整编译待用户环境验证。
+- [ ] PNPSTOP → PCONTINUE 真机断点恢复待联调确认。
+
+### 60.6 文档同步
+
+- `AGENTS.md`：§4.1 命令列表新增 `PNPSTOP`/`PCONTINUE`；新增 §4.1.1 断点恢复；§4.2 P3 更新 `err3_8` 重吸取策略；§9.8 补充 UART 回调与 `UART_ClearAppData` 当前说明。
+- `HISTORY.md`：追加本章节；§26 保留为历史行为记录，当前 P3 空吸嘴策略以本章节和 AGENTS.md 为准。

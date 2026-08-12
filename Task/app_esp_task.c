@@ -121,7 +121,7 @@ static void _handle_compound_response(const char *payload, uint8_t len);
 
 static void _csv_handle_frame(const uint8_t *rx);
 static void _csv_reset_session(void);
-static void _csv_send_result(const char *result);
+static uint8_t _csv_send_result(const char *result);
 static uint8_t _csv_send_next(uint16_t next_frame);
 static void _csv_send_cancel_ack(void);
 static uint8_t _seq_register(uint8_t cmd, uint8_t sub);
@@ -401,7 +401,7 @@ static uint8_t _csv_spi_send(uint8_t *tx)
     return _spi_send_scene_a(tx, 1);
 }
 
-static void _csv_send_result(const char *result)
+static uint8_t _csv_send_result(const char *result)
 {
     uint8_t tx[128];
     uint8_t ok;
@@ -409,6 +409,7 @@ static void _csv_send_result(const char *result)
     ok = _csv_spi_send(tx);
     PrintDebug("[ESP] CSV RESULT=%s %s\r\n",
                result, ok ? "OK" : "FAIL");
+    return ok;
 }
 
 static uint8_t _csv_send_next(uint16_t next_frame)
@@ -482,10 +483,12 @@ static void _csv_handle_frame(const uint8_t *rx)
         s_csv_state = ESP_CSV_STATE_RECEIVING;
         s_csv_total_len = total_len;
         s_csv_total_frames = frames;
-        _csv_send_result("ok");
-        s_csv_result_pending = 1;
-        s_csv_result_retries = 0;
-        s_csv_result_retry_tick = osKernelGetTickCount();
+        s_csv_result_pending = 0;
+        if (!_csv_send_result("ok")) {
+            s_csv_result_pending = 1;
+            s_csv_result_retries = 0;
+            s_csv_result_retry_tick = osKernelGetTickCount();
+        }
         return;
     }
 
