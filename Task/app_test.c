@@ -1010,6 +1010,7 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
     int32_t  align_busy_cycles = 0;  /* P2 aligning 阶段 VISION_BUSY 超时次数 */
     uint32_t busy_enter_tick = 0;
     bool     in_busy = false;
+    bool     p2_rdy_gated = false;   /* wait for rdy before any scan move */
 
     /* 计算网格扫描参数 (同 Host_Task P2 初始化) */
     int32_t scan_step = (int32_t)(P2_TEST_SCAN_STEP_MM * STEPS_PER_MM);
@@ -1035,7 +1036,6 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
     }
 
     Vision_Start(VCMD_P2, 0);
-    Vision_Go();
     PrintDebug("[CAM_TEST] Starting Mark alignment (P2, %lu marks)...\r\n", (unsigned long)mark_count);
 
     VisionState_t prev = Vision_GetState();
@@ -1048,6 +1048,7 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
 
         if (state == VISION_RDY) {
             in_busy = false;
+            p2_rdy_gated = true;
             Vision_Go();
             prev = state;
             vTaskDelay(pdMS_TO_TICKS(20));
@@ -1056,6 +1057,12 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
 
         /* VISION_BUSY: 按时间超时而非计数，适配阻塞轮询 */
         if (state == VISION_BUSY) {
+            if (!p2_rdy_gated) {
+                busy_enter_tick = osKernelGetTickCount();
+                in_busy = false;
+                vTaskDelay(pdMS_TO_TICKS(20));
+                continue;
+            }
             if (!in_busy) {
                 in_busy = true;
                 busy_enter_tick = osKernelGetTickCount();
@@ -1234,6 +1241,7 @@ static bool cam_p2_full_test_run(const Component_t marks[], uint32_t mark_count,
                 PrintDebug("[CAM_TEST] Mark alignment ERROR: %s\r\n", Vision_GetError());
                 if (scan_cur < scan_cols * scan_rows - 1) {
                     mark_scanning = true;
+                    p2_rdy_gated = true;
                     Vision_BackToSearch();
                     PrintDebug("[CAM_TEST] P2 error, resuming scan from cell %ld\r\n", (long)scan_cur);
                 } else {

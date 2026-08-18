@@ -591,7 +591,7 @@ static void start_p2_mark_align(void)
         g_scan_cur = 0;
         g_in_busy = false;
         g_mark_scanning = true;
-        g_p2_scanning = true;
+        g_p2_scanning = false;  /* only enable after rdy+go */
         g_p2_col = 0;
         g_p2_last_pos_update = 0;
         safe_move_to(g_calib.heat_platform_x_min + g_calib.cam_to_nozzle_dx_steps,
@@ -721,11 +721,25 @@ static void pnp_halt(void) {
     Valve_Off();
     LowerCam_Light_Off();
     Heater_SendStop();
-    DRV8803_EnableChip(1, false);
-    DRV8803_EnableChip(2, false);
     g_light_on = false;
     Vision_SendEnd();
     Vision_ForceIdle();
+
+    /* 临时解除冻结并回机械原点；回到原点后再恢复 halted，保证断点坐标仍可恢复 */
+    g_system_halted = false;
+    s_cmd_interrupted = false;
+    motion_flush_after_halt();
+    int home_ret = safe_move_to(0, 0, PNP_SPEED_FAST, PNP_ACC);
+    if (home_ret != 0) {
+        PrintDebug("[HOST] PNPSTOP home move FAILED ret=%d\r\n", home_ret);
+    } else {
+        PrintDebug("[HOST] PNPSTOP home done, waiting PCONTINUE\r\n");
+    }
+    g_resume_ctx.home_done = (home_ret == 0);
+    g_system_halted = true;
+    s_cmd_interrupted = true;
+    DRV8803_EnableChip(1, false);
+    DRV8803_EnableChip(2, false);
 
     host_send("PNPSTOP_OK");
     ESP_SendLog("紧急暂停");
@@ -739,6 +753,7 @@ static void pnp_halt(void) {
 static void pnp_continue(void) {
     MachineCoord_t c;
 
+    UART_TX_Reset(UART_CH1);
     PrintDebug("[HOST] PCONTINUE received: halted=%d ctx_step=%d task=%u/%u comp=%u/%u\r\n",
                g_system_halted ? 1 : 0, (int)g_resume_ctx.step_id,
                (unsigned)g_resume_ctx.task_id, (unsigned)g_task_id,
@@ -757,45 +772,61 @@ static void pnp_continue(void) {
         return;
     }
 
-    bool sync_ok = g_resume_ctx.coord_synced;
-    MachineCoord_t synced;
-    if (coord_sync_from_encoders(&synced) == 0) {
-        c = synced;
-        sync_ok = true;
-    } else {
+    if (g_resume_ctx.home_done) {
         c = Coord_Get();
-        if (!sync_ok) {
-            PrintDebug("[HOST] PCONTINUE encoder sync retry failed, using logical coord\r\n");
+        if (!c.valid || abs(c.x) > RESUME_COORD_TOL_STEPS ||
+            abs(c.y) > RESUME_COORD_TOL_STEPS) {
+            PrintDebug("[HOST] PCONTINUE origin check FAILED: cur=(%ld,%ld)\r\n",
+                       (long)c.x, (long)c.y);
+            g_system_halted = false;
+            s_cmd_interrupted = false;
+            g_state = HOST_ERROR;
+            host_send("PCONTINUE_FAIL");
+            return;
         }
-    }
-    if (!c.valid ||
-        abs(c.x - g_resume_ctx.coord_x_steps) > RESUME_COORD_TOL_STEPS ||
-        abs(c.y - g_resume_ctx.coord_y_steps) > RESUME_COORD_TOL_STEPS) {
-        PrintDebug("[HOST] PCONTINUE coord mismatch: cur=(%ld,%ld) saved=(%ld,%ld)\r\n",
-                   (long)c.x, (long)c.y,
-                   (long)g_resume_ctx.coord_x_steps, (long)g_resume_ctx.coord_y_steps);
-        g_system_halted = false;
-        s_cmd_interrupted = false;
-        g_state = HOST_ERROR;
-        host_send("PCONTINUE_FAIL");
-        return;
+        PrintDebug("[HOST] PCONTINUE home_done, restoring saved coord from origin\r\n");
+    } else {
+        bool sync_ok = g_resume_ctx.coord_synced;
+        MachineCoord_t synced;
+        if (coord_sync_from_encoders(&synced) == 0) {
+            c = synced;
+            sync_ok = true;
+        } else {
+            c = Coord_Get();
+            if (!sync_ok) {
+                PrintDebug("[HOST] PCONTINUE encoder sync retry failed, using logical coord\r\n");
+            }
+        }
+        if (!c.valid ||
+            abs(c.x - g_resume_ctx.coord_x_steps) > RESUME_COORD_TOL_STEPS ||
+            abs(c.y - g_resume_ctx.coord_y_steps) > RESUME_COORD_TOL_STEPS) {
+            PrintDebug("[HOST] PCONTINUE coord mismatch: cur=(%ld,%ld) saved=(%ld,%ld)\r\n",
+                       (long)c.x, (long)c.y,
+                       (long)g_resume_ctx.coord_x_steps, (long)g_resume_ctx.coord_y_steps);
+            g_system_halted = false;
+            s_cmd_interrupted = false;
+            g_state = HOST_ERROR;
+            host_send("PCONTINUE_FAIL");
+            return;
+        }
     }
 
     g_system_halted = false;
     s_cmd_interrupted = false;
     motion_flush_after_halt();
+    DRV8803_EnableChip(1, true);
+    DRV8803_EnableChip(2, true);
+    DRV8803_SetOutput(&Port_12VO4, true);
+    TMC_SetEnable(true);
     z_safe();
-    int mret = motor_move_absolute(g_resume_ctx.coord_x_steps,
-                                   g_resume_ctx.coord_y_steps,
-                                   PNP_SPEED_FINE, PNP_ACC_FINE);
+    int mret = safe_move_to(g_resume_ctx.coord_x_steps,
+                            g_resume_ctx.coord_y_steps,
+                            PNP_SPEED_FAST, PNP_ACC);
     if (mret != 0) {
-        if (mret == -3 || g_system_halted) {
-            PrintDebug("[HOST] PCONTINUE halted again ret=%d\r\n", mret);
-            g_state = HOST_ERROR;
-            host_send("PCONTINUE_FAIL");
-            return;
-        }
-        PrintDebug("[HOST] PCONTINUE restore move FAILED ret=%d, continue within tolerance\r\n", mret);
+        PrintDebug("[HOST] PCONTINUE restore move FAILED ret=%d\r\n", mret);
+        g_state = HOST_ERROR;
+        host_send("PCONTINUE_FAIL");
+        return;
     }
 
     g_comp_index = g_resume_ctx.comp_index;
@@ -1496,6 +1527,7 @@ static void mark_align_step(void) {
         g_in_busy = false;
         g_p2_pos_iter = 0;
         Vision_Go();
+        g_p2_scanning = g_mark_scanning;  /* start scanning only after cam received go */
         break;
 
     /* ---- 连续扫描 / 跳转搜索状态机 ---- */
@@ -2202,12 +2234,17 @@ static void p1_start_pick_from_queue(Component_t *c) {
 
     g_p1_found_pos = q->source_subpos;
     z_safe();
-    safe_move_to(q->x_steps, q->y_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
+    int mret = safe_move_to(q->x_steps, q->y_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
+    if (mret != 0) {
+        if (mret == -3 || g_system_halted) return;
+        g_state = HOST_ERROR;
+        return;
+    }
     PrintDebug("[HOST] P1 queue %d/%d -> pick(%ld,%ld) class=%ld\r\n",
                g_p1_queue_idx + 1, g_p1_queue_count,
                (long)q->x_steps, (long)q->y_steps, (long)q->class_id);
-    g_last_pick_x_steps = Coord_Get().x;
-    g_last_pick_y_steps = Coord_Get().y;
+    g_last_pick_x_steps = q->x_steps;
+    g_last_pick_y_steps = q->y_steps;
     g_last_pick_valid = true;
     g_pick_completed = false;
     g_state = HOST_PICK;
@@ -2254,11 +2291,20 @@ static void p1_align_finish(Component_t *c) {
     g_p1_cls_sent = false;
     Vision_SendEnd();   /* P1 会话收尾：覆盖 ok 完成与迭代超限强制结束两条路径 */
     ESP_SendLog("元件识别完成");
+    int32_t pick_x = Coord_Get().x;
+    int32_t pick_y = Coord_Get().y;
     if (g_calib.cam_to_nozzle_dx_steps != 0 || g_calib.cam_to_nozzle_dy_steps != 0) {
-        safe_move_to(Coord_Get().x - g_calib.cam_to_nozzle_dx_steps, Coord_Get().y - g_calib.cam_to_nozzle_dy_steps, PNP_SPEED_FINE, PNP_ACC_FINE);
+        pick_x -= g_calib.cam_to_nozzle_dx_steps;
+        pick_y -= g_calib.cam_to_nozzle_dy_steps;
+        int mret = safe_move_to(pick_x, pick_y, PNP_SPEED_FINE, PNP_ACC_FINE);
+        if (mret != 0) {
+            if (mret == -3 || g_system_halted) return;
+            g_state = HOST_ERROR;
+            return;
+        }
     }
-    g_last_pick_x_steps = Coord_Get().x;
-    g_last_pick_y_steps = Coord_Get().y;
+    g_last_pick_x_steps = pick_x;
+    g_last_pick_y_steps = pick_y;
     g_last_pick_valid = true;
     g_pick_completed = false;
     g_state = HOST_PICK;
@@ -2423,7 +2469,14 @@ static void find_comp_step(void) {
         /* P1 迭代对齐：修正偏移后 go 复测；8 包 pos 兜底(1 init + cam 7 轮)，正常终止由 ok/err1_6 决定 */
         int32_t dx_s = -(int32_t)(r->dy), dy_s = -(int32_t)(r->dx);
         g_p1_align_iter++;
-        if (dx_s != 0 || dy_s != 0) { safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED_FINE, PNP_ACC_FINE); }
+        if (dx_s != 0 || dy_s != 0) {
+            int mret = safe_move_to(Coord_Get().x + dx_s, Coord_Get().y + dy_s, PNP_SPEED_FINE, PNP_ACC_FINE);
+            if (mret != 0) {
+                if (mret == -3 || g_system_halted) return;
+                g_state = HOST_ERROR;
+                return;
+            }
+        }
         if (g_p1_align_iter >= P1_ALIGN_MAX_ITER) {
             PrintDebug("[HOST] P1 align %d iters no ok, force finish\r\n", g_p1_align_iter);
             p1_align_finish(c);

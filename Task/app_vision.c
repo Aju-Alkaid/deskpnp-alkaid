@@ -966,6 +966,7 @@ void Vision_BackToSearch(void) {
         g_p2_sub = P2_SEARCHING;
         g_state = VISION_BUSY;
         g_collecting = false;
-        PrintDebug("[VISION] Back to search mode (no p2 sent)\r\n");
+        send_frame("go");   /* cam is waiting for go after p2 error recovery */
+        PrintDebug("[VISION] Back to search mode (go sent)\r\n");
     }
 }

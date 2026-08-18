@@ -121,6 +121,7 @@ typedef struct {
     uint16_t comp_count;
     bool     placed_flag;
     bool     coord_synced;
+    bool     home_done;
     uint32_t saved_tick;
 } ResumeContext_t;
 

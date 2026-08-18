@@ -293,14 +293,18 @@ pnp_1/
 - UART1 ISR 回调发现 `PNPSTOP` 后立即置 `g_system_halted=1`，并调用 `motorEmergencyHold()` 对 X1/X2/Y 发 `0xF7` 急停 + `0xF3` 保持使能；任务上下文再停止 TMC R 轴。
 - `pnp_halt()` 读取 31H 编码器同步机器坐标，并保存 `g_resume_ctx`：`task_id`、`step_id`、`coord_x/y_steps`、`coord_r/z`、`comp_index/count`、`placed_flag`、时间戳。
 - 编码器同步失败时仍保存逻辑坐标并置 `coord_synced=false`，不阻断上下文快照；`PCONTINUE` 会重试编码器同步。
-- 直接关闭气泵、补光灯、电磁阀、加热台并终止当前视觉会话；恢复时按当前步骤实际需求重新开启。
+- PNPSTOP 保存断点后会临时解除冻结并回机械原点（`safe_move_to(0,0)`），回原点成功后才置 `g_resume_ctx.home_done=true`；回原点失败时不标记，避免 PCONTINUE 从未知位置直接恢复。
+- 直接关闭气泵、补光灯、电磁阀、加热台，关闭 DRV8803 两片芯片输出与 TMC R 轴使能，并终止当前视觉会话；XY 电机保持使能锁定位置。恢复时按当前步骤实际需求重新开启模块。
 - 支持快照阶段：P2 Mark 对位、P4 基线/校验、P1 找元件、PICK/REPICK、下相机 P3、MOVE_TO_PCB、PLACE。
 
 **PCONTINUE 恢复：**
 
 - 校验 `g_system_halted==1`、`task_id` 匹配、`comp_count` 匹配、`step_id` 有效、`comp_index < comp_count`；任一不满足则回 `PCONTINUE_IGNORED` 并保持冻结。
-- 坐标偏差超过 `RESUME_COORD_TOL_STEPS`（250 步）或坐标失效时回 `PCONTINUE_FAIL` 并进入 `HOST_ERROR`。
-- `PCONTINUE` 先重试编码器同步；重试成功则以实际编码器坐标校验，重试仍失败时使用逻辑坐标继续并打印告警。
+- 非 `home_done` 路径：坐标偏差超过 `RESUME_COORD_TOL_STEPS`（250 步）或坐标失效时回 `PCONTINUE_FAIL` 并进入 `HOST_ERROR`。
+- `home_done=true` 时 PCONTINUE 不重读编码器，只校验逻辑原点在容差内，再用 `safe_move_to()` 从原点按相对坐标恢复到保存坐标；恢复使用 `0xF4` 相对运动，不走 `motor_move_absolute()` 的 `0xF5` 绝对坐标和固定 2s 超时。
+- PCONTINUE 的恢复运动失败时不再“容错继续”，返回 `PCONTINUE_FAIL` 并进入 `HOST_ERROR`，避免未恢复到断点位置就继续后续步骤导致过冲/堵转。
+- `p1_start_pick_from_queue()` / `p1_align_finish()` 必须检查去散料区移动的返回值；PNPSTOP 打断该移动时保持 `HOST_FIND_COMP`，不得把被打断时的当前坐标（常在 PCB 附近）写入 `g_last_pick_*` 或推进到 `HOST_PICK`。PCONTINUE 会清空 P1 队列并强制重新识别，回到散料区取料。
+- 非 `home_done` 路径先重试编码器同步；重试成功则以实际编码器坐标校验，重试仍失败时使用逻辑坐标继续并打印告警。
 - 恢复运动前调用 `motion_flush_after_halt()` 排空 CAN 残留帧并清零到位标志，避免旧 0x02 导致假到位或新运动命令未真正执行。
 - 偏差在容差内时恢复到保存坐标；`placed_flag==1` 时标记当前元件已贴装并直接进入下一元件。
 - P2/P4 恢复会重新启动对应视觉流程；P1 恢复会清空批量队列强制重新识别；P3 恢复会重新移动到下相机并重启 P3。
@@ -310,6 +314,7 @@ pnp_1/
 
 - `Host_UartRecvCallback` 只做 PNPSTOP 紧急识别，命令解析仍全部在 `Host_Task` 中执行。
 - `Host_Task` 处理完当前 UART 批次后使用 `UART_ClearAppData()` 只清旧应用缓冲，不再无条件清 ISR `data_ready`，避免 `PNPSTOP` 长处理期间到达的 `PCONTINUE` 被吞掉。
+- `PCONTINUE` 入口先调用 `UART_TX_Reset()` 复位卡住的 TX DMA/`tx_pending`，避免急停期间残留发送状态导致后续串口日志不再打印。
 - 命令 `PCONITINUE` 作为 `PCONTINUE` 的兼容别名保留；正式协议请使用 `PCONTINUE`。
 
 
@@ -377,7 +382,7 @@ pnp_1/
 
 - **P2 — Mark 多点寻标对位（上摄像头 320×320，2026-08-02 MaixCAM2 更新）：**
 
-  - **主控实际时序（2026-08-05 确认）：** `start_p2_mark_align()` 先移动到扫描起点，再 `Vision_Start(p2)`；cam `rdy` 仍正常接收并发送 `go`，但连续列扫描保持旧时序，不等待 `rdy` 门控。
+  - **主控实际时序（2026-08-12 更新）：** `start_p2_mark_align()` 先移动到扫描起点，再 `Vision_Start(p2)`；必须等 cam `rdy` 后发送 `go`，`rdy` 门控通过后才允许启动第一列连续扫描，避免 cam 尚未开始检测时机床已移动。
 
   | 步骤 | 方向 | 帧 | 说明 |
   |------|------|-----|------|

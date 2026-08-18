@@ -4255,8 +4255,11 @@ X 轴 `delta_x = (d1+d2)/2` 与 `jog_stop_update_coord()` 一致，无需符号�
 | `Task/app_motion.c/h` | 新增 `g_system_halted`、`coord_sync_from_encoders()`、`motor_move_absolute()`；`motion_wait_done()` 急停返回 `-3` 且不失效坐标；零位移恢复直接成功；编码器同步超时 100→250ms；TMC R 轴与 `pick_component()` 增加急停检查 |
 | `Task/app_host.c/h` | 新增 `ResumeContext_t`、`HOST_REPICK`、`pnp_halt()`、`pnp_continue()`；UART 回调扫描 `PNPSTOP` 并立即保持电机；补齐 P2/P4/P1/PICK/P3/MOVE_TO_PCB/PLACE 恢复；P3 `err3_8` 改为同点重吸流程；局部 phase 改为文件级便于恢复复位 |
 
-- `g_resume_ctx` 新增 `coord_synced`：PNPSTOP 编码器同步失败也保存逻辑坐标，PCONTINUE 先重试编码器同步；重试仍失败时按逻辑坐标继续并告警。
+- `g_resume_ctx` 新增 `coord_synced`：PNPSTOP 编码器同步失败也保存逻辑坐标，非 `home_done` 路径 PCONTINUE 先重试编码器同步；重试仍失败时按逻辑坐标继续并告警。
 - 新增 `motion_flush_after_halt()`：PCONTINUE 恢复运动前排空 CAN 残留帧、清零 `g_axes_done_bits/g_axes_error` 并重新开启同步，避免旧 0x02 假到位导致“日志显示运动完成但实际未运动”。
+- PNPSTOP 全模块关断：气泵、补光灯、电磁阀、加热台、DRV8803 两片芯片输出、TMC R 轴使能均关闭，XY 电机保持使能锁定位置；PCONTINUE 恢复时重新使能 DRV8803、舵机供电与 TMC，并按步骤继续。
+- 新增 `UART_TX_Reset()`：PCONTINUE 入口先复位 UART1 TX DMA/`tx_pending` 并继续发送环形缓冲，解决急停后串口日志不再打印的问题。
+- PNPSTOP 增加回原点步骤：保存断点后临时解除冻结，回 `(0,0)`，再恢复 halted 并关断模块；`g_resume_ctx.home_done=true`，PCONTINUE 从原点恢复到保存坐标，不再误判坐标偏差。
 
 ### 60.4 P3 err3_8 当前行为
 
@@ -4276,3 +4279,36 @@ X 轴 `delta_x = (d1+d2)/2` 与 `jog_stop_update_coord()` 一致，无需符号�
 
 - `AGENTS.md`：§4.1 命令列表新增 `PNPSTOP`/`PCONTINUE`；新增 §4.1.1 断点恢复；§4.2 P3 更新 `err3_8` 重吸取策略；§9.8 补充 UART 回调与 `UART_ClearAppData` 当前说明。
 - `HISTORY.md`：追加本章节；§26 保留为历史行为记录，当前 P3 空吸嘴策略以本章节和 AGENTS.md 为准。
+
+### 60.7 回原点后 PCONTINUE 过冲/堵转修复（2026-08-12 续）
+
+**现象：** PNPSTOP 回原点后发送 PCONTINUE，恢复运动日志为 `[POLL] timeout: bits=0x03 need=0x07 waited=2000ms`，随后仍返回 `PCONTINUE_OK` 并继续；吸嘴没有恢复到断点位置，下一步移动过冲并堵转。
+
+**根因：** `pnp_continue()` 使用 `motor_move_absolute()` 恢复保存坐标，内部走 MKS `0xF5` 绝对坐标，且 `move_to()` 固定等待 `ACK_TIMEOUT_MS=2000`。回原点后需要恢复约 9.5 万步，`PNP_SPEED_FINE=100RPM` 无法在 2s 内到位；旧实现收到 `ret=-1` 后仍“容错继续”，物理位置未恢复就进入 REPICK/后续步骤。
+
+**修复：**
+
+- `home_done=true` 时不再重读编码器，校验逻辑原点在容差内后，用 `safe_move_to()` 按 `0xF4` 相对坐标从 `(0,0)` 恢复到保存坐标；相对运动使用动态到位超时，与 PnP 自动流程一致。
+- 恢复运动失败不再容错继续，返回 `PCONTINUE_FAIL` 并进入 `HOST_ERROR`。
+- `g_resume_ctx.home_done` 仅在回原点 `safe_move_to(0,0)` 成功时置位，回原点失败时 PCONTINUE 走坐标校验/错误路径。
+
+**涉及文件：** `Task/app_host.c`。
+
+**验证：** ARM GCC 14.3.1 `-fsyntax-only` 通过 `Task/app_host.c`；真机断点恢复需用户确认。
+
+### 60.8 PCONTINUE 在 PCB 上重吸修复（2026-08-12 续）
+
+**现象：** PNPSTOP/PCONTINUE 恢复后，固件记录的“散料区取料点”实际是 PCB 贴装坐标；继续运行会在 PCB 上执行吸取，而不是回到散料区。
+
+**根因：** PNPSTOP 打断 `p1_start_pick_from_queue()` 中从当前位置移动至散料区取料点的 `safe_move_to()` 时，`safe_move_to()` 返回 `-3`，旧代码没有检查返回值，仍把 `Coord_Get()` 的当前坐标（常为 PCB 附近）写入 `g_last_pick_*`，并推进 `g_state=HOST_PICK`。`pnp_halt()` 随后保存 `RESUME_STEP_PICK`，PCONTINUE 便从保存坐标回到 PCB 附近的“重吸取点”。`p1_align_finish()` 存在同类问题。
+
+**修复：**
+
+- `p1_start_pick_from_queue()` 检查 `safe_move_to()` 返回值；被 PNPSTOP 打断时保持 `HOST_FIND_COMP` 并返回，不再写 `g_last_pick_*`、不再推进到 `HOST_PICK`。
+- 取料点改为直接保存 P1 队列坐标 `q->x_steps/q->y_steps`，不再依赖移动完成后的 `Coord_Get()` 快照。
+- `p1_align_finish()` 先计算取料点再移动，移动被打断时同样保持 `HOST_FIND_COMP`；成功后才保存取料点并进入 `HOST_PICK`。
+- P1 迭代修正移动也检查返回值，避免失败后继续强制完成识别。
+
+**涉及文件：** `Task/app_host.c`。
+
+**验证：** ARM GCC 14.3.1 `-fsyntax-only` 通过 `Task/app_host.c`；真机 PNPSTOP 打断 P1 去散料区移动后再 PCONTINUE 需用户确认。
